@@ -4110,6 +4110,23 @@ static gboolean keypress_event_handler(
 			return (TRUE);
 		}
 
+		/*
+		 * TomeTik: teclas del KEYPAD numérico -> dígitos de movimiento.
+		 * Crítico para noVNC: el navegador/Xvfb traduce las flechas a teclas
+		 * del keypad (KP_Up/KP_Left/...), no a las flechas dedicadas, así que
+		 * sin esto las flechas no mueven por noVNC (sí por VNC nativo). Se
+		 * cubren ambos estados de NumLock (KP_Up y KP_8) y las diagonales.
+		 */
+	case GDK_KP_Up:    case GDK_KP_8: { Term_keypress('8'); return (TRUE); }
+	case GDK_KP_Down:  case GDK_KP_2: { Term_keypress('2'); return (TRUE); }
+	case GDK_KP_Left:  case GDK_KP_4: { Term_keypress('4'); return (TRUE); }
+	case GDK_KP_Right: case GDK_KP_6: { Term_keypress('6'); return (TRUE); }
+	case GDK_KP_Home:      case GDK_KP_7: { Term_keypress('7'); return (TRUE); }
+	case GDK_KP_Page_Up:   case GDK_KP_9: { Term_keypress('9'); return (TRUE); }
+	case GDK_KP_End:       case GDK_KP_1: { Term_keypress('1'); return (TRUE); }
+	case GDK_KP_Page_Down: case GDK_KP_3: { Term_keypress('3'); return (TRUE); }
+	case GDK_KP_Begin:     case GDK_KP_5: { Term_keypress('5'); return (TRUE); }
+
 	case GDK_Shift_L:
 	case GDK_Shift_R:
 	case GDK_Control_L:
