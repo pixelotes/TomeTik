@@ -253,9 +253,35 @@ gdk_draw_pixmap( \
 static term_data data[MAX_TERM_DATA];
 
 /*
- * Number of active terms
+ * TomeTik: layout por defecto de las ventanas, pensado para la pantalla
+ * ~1280x800 del contenedor noVNC. Posición (x,y) en píxeles, tamaño en celdas
+ * (cols x rows) y fuente X. Ventana 0 = mapa principal (fuente grande 10x20
+ * para que los tiles 32x32 se vean grandes); 1 = Mirror (inventario), 2 =
+ * Recall (monstruo/objeto), 3 = Choice (mensajes). 4-7 quedan en cascada.
+ * Usado por term_data_init (tamaño), get_default_font (fuente) y
+ * init_gtk_window (posición).
  */
-static int num_term = 1;
+static const struct
+{
+	int x, y, cols, rows;
+	cptr font;
+} tometik_layout[MAX_TERM_DATA] =
+{
+	{   0,   0, 80, 24, "10x20" },  /* 0 mapa principal + tiles */
+	{ 806,   0, 56, 26, "8x13"  },  /* 1 Mirror = inventario     */
+	{ 806, 366, 56, 26, "8x13"  },  /* 2 Recall = recall mon/obj */
+	{   0, 512, 99, 10, "8x13"  },  /* 3 Choice = mensajes       */
+	{  60,  60, 80, 24, "8x13"  },  /* 4-7 extra (cascada)       */
+	{  90,  90, 80, 24, "8x13"  },
+	{ 120, 120, 80, 24, "8x13"  },
+	{ 150, 150, 80, 24, "8x13"  },
+};
+
+/*
+ * Number of active terms. TomeTik: 4 por defecto (mapa + Mirror/Recall/Choice)
+ * para que la UI multiventana esté lista al arrancar. Se puede cambiar con -n.
+ */
+static int num_term = 4;
 
 
 /*
@@ -309,8 +335,8 @@ static cptr get_default_font(int term)
 	/* Check environment for "base" font */
 	if (!font_name) font_name = getenv("ANGBAND_X11_FONT");
 
-	/* No environment variables, use default font */
-	if (!font_name) font_name = DEFAULT_X11_FONT_SCREEN;
+	/* No environment variables, use the per-window default layout font */
+	if (!font_name) font_name = tometik_layout[term].font;
 
 	return (font_name);
 }
@@ -3827,6 +3853,17 @@ static void change_wide_tile_mode_event_handler(
 	/* Resize the term */
 	Term_resize(td->cols, td->rows);
 
+	/*
+	 * TomeTik: recalcular el viewport del mapa para el nuevo estado de bigtile.
+	 * Sin esto, el panel del mapa (panel_col_max) se queda con el nº de casillas
+	 * viejo -> al desactivar wide tiles el mapa salía a medio ancho, y al
+	 * activarlo quedaban artefactos en el sidebar. resize_map() resetea el panel,
+	 * fuerza verify_panel()/panel_bounds() y marca PR_WIPE|PR_BASIC|PR_EXTRA|PR_MAP
+	 * (redibuja mapa + sidebar). Se llama con la ventana principal activa porque
+	 * lee el tamaño del término activo.
+	 */
+	resize_map();
+
 	/* Activate the old term */
 	Term_activate(old);
 
@@ -4461,8 +4498,9 @@ static errr term_data_init(term_data *td, int i)
 	term *t = &td->t;
 	char *p;
 
-	td->cols = 80;
-	td->rows = 24;
+	/* TomeTik: tamaño por ventana según el layout por defecto. */
+	td->cols = tometik_layout[i].cols;
+	td->rows = tometik_layout[i].rows;
 
 	/* Initialize the term */
 	term_init(t, td->cols, td->rows, 1024);
@@ -5094,6 +5132,10 @@ static void init_gtk_window(term_data *td, int i)
 	/* Set title */
 	gtk_window_set_title(GTK_WINDOW(td->window), td->name);
 
+	/* TomeTik: posición inicial según el layout por defecto (el WM la respeta
+	 * al mapear la ventana). Evita que las sub-ventanas salgan amontonadas. */
+	gtk_window_move(GTK_WINDOW(td->window), tometik_layout[i].x, tometik_layout[i].y);
+
 
 	/* Get default font for this term */
 	font = get_default_font(i);
@@ -5263,6 +5305,17 @@ errr init_gtk2(int argc, char **argv)
 
 	/* Initialize the environment */
 	gtk_init(&argc, &argv);
+
+	/*
+	 * TomeTik: bigtile ("wide tiles") ACTIVADO por defecto. Con la fuente del
+	 * mapa (10x20) esto hace que los tiles 32x32 de Gervais se rendericen
+	 * CUADRADOS (~20x20) en vez de estirados, muy parecido al look nativo del
+	 * build de Windows. Importante: se activa AQUÍ, de inicio, para que el
+	 * panel del mapa y el render queden consistentes. Los bugs conocidos de
+	 * bigtile (artefactos en el sidebar, mapa a medio ancho) solo aparecen al
+	 * TOGGLEARLO en caliente desde Options -> "wide tiles", no al arrancar.
+	 */
+	use_bigtile = arg_bigtile = TRUE;
 
 	/* Activate hooks - Use gtk/glib interface throughout */
 	ralloc_aux = hook_ralloc;

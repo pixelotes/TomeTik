@@ -48,8 +48,12 @@ tar -C "$OUT" -czf "$OUT/tometik-$V-linux-gtk2.tar.gz" "tometik-$V-linux-gtk2"
 rm -rf "$D"
 
 # --- Windows (GDI, 32-bit) ---
+# main-win.c lee tometik.ini del cwd: trae el look nativo (Graphics=3 gervais,
+# Bigtile=1, Zoom=2, layout de ventanas). Imprescindible incluirlo junto al .exe.
 D="$OUT/tometik-$V-windows"; rm -rf "$D"; mkdir -p "$D"
 cp "$OUT/tometik.exe" "$D/tometik.exe"
+cp "$ROOT/tometik.ini" "$D/tometik.ini"
+[ -f "$ROOT/tome.ini" ] && cp "$ROOT/tome.ini" "$D/tome.ini"
 stage_lib "$D"
 ( cd "$OUT" && zip -qr "tometik-$V-windows.zip" "tometik-$V-windows" )
 rm -rf "$D"

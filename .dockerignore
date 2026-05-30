@@ -1,0 +1,9 @@
+# Contexto mínimo para la imagen runtime (docker/Dockerfile.runtime solo COPIA
+# lib/, tome y docker/). Excluir lo pesado/innecesario acelera el build.
+.git
+dist
+src/*.o
+src/lua/*.o
+src/tolua
+*.bak
+.DS_Store

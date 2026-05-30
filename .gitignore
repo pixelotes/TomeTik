@@ -1,3 +1,24 @@
-tome
-tometik.exe
 CLAUDE.md
+
+# Artefactos de compilación
+tome
+tome.gtk2
+tometik.exe
+src/*.o
+src/lua/*.o
+src/tolua
+src/tome
+src/tometik.exe
+dist/
+docker/build.log
+
+# Datos de juego generados / partidas (se regeneran o crean al jugar)
+lib/data/*.raw
+lib/save/[0-9]*.*
+lib/apex/*.raw
+lib/bone/*
+lib/user/*.atm
+
+# Varios
+*.bak
+.DS_Store
