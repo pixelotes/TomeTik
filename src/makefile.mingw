@@ -1,0 +1,86 @@
+###################################################################
+#
+#  makefile.mingw - TomeTik (ToME 2.2.2 + tiles) para Windows 64-bit
+#  cross-compilado desde Linux con mingw-w64.
+#
+#  Frontend: main-win.c (GDI), el original de TomeTik. Equivalente moderno
+#  del antiguo makefile.bcc (Borland), usando x86_64-w64-mingw32-gcc.
+#
+#  IMPORTANTE - tolua: el generador ./tolua es un binario del HOST (Linux),
+#  no de Windows. Este makefile NO lo construye ni regenera los w_*.c; el
+#  script docker/in-container-build.sh los genera antes con el toolchain
+#  nativo (make -f makefile.std ./tolua + las reglas w_*.c). Aquí solo se
+#  cross-compilan los .c (incluidos los w_*.c ya generados) y se enlaza.
+#
+#  Target: Win32 (i686), igual que el TomeTik original (BCC win32). Es ILP32
+#  (int=long=ptr=32), así que el código de 2003 -lleno de punteros guardados en
+#  enteros de 32 bits- funciona como fue escrito, sin los bugs de truncamiento
+#  que daría un build de 64 bits (LLP64). Produce un .exe de 32 bits que corre
+#  en cualquier Windows.
+#
+#  IMPORTANTE - L64: en ILP32, s32b/u32b de h-type.h (= long) ya miden 32 bits
+#  SIN definir L64. NO definir L64 aquí (al revés que en Linux LP64).
+###################################################################
+
+CC      = i686-w64-mingw32-gcc
+WINDRES = i686-w64-mingw32-windres
+
+EXE = tometik.exe
+
+# 0x0501 = Windows XP: mínimo que aceptan winsock2/commctrl de mingw moderno.
+DEFINES = -DWINDOWS -D_WIN32_WINNT=0x0501 -DWINVER=0x0501 \
+	-DUSE_TRANSPARENCY -DUSE_EGO_GRAPHICS -DSUPPORT_GAMMA \
+	-DUSE_PRECISE_CMOVIE -DUSE_LUA -DUSE_WINSOCK \
+	-DIRC_SERVER=\"irc.worldirc.org\" -DIRC_PORT=\"6667\" -DIRC_CHANNEL=\"\#tome\"
+
+INCLUDES = -Ilua -I.
+
+# -std=gnu89 -fcommon: C de 2003 (igual que el build Linux). -w: silenciar.
+CFLAGS = -O1 -pipe -std=gnu89 -fcommon -fno-strict-aliasing -w $(INCLUDES) $(DEFINES) \
+	-DDEFAULT_PATH=\"./lib/\"
+
+# -mwindows: app GUI (sin consola). -static*: empotrar runtime de gcc para que
+# el .exe no dependa de DLLs de mingw (libgcc/libstdc++/winpthread).
+LDFLAGS = -mwindows -static-libgcc -static
+LIBS    = -lgdi32 -luser32 -lcomdlg32 -lwinmm -lwinspool -lws2_32 -lcomctl32
+
+# Objetos del juego (igual conjunto que makefile.bcc): núcleo + frontend Win
+# (main-win + readdib) + stubs Lua (w_*) + intérprete tolua/lua.
+COREOBJS = \
+	gods.o skills.o irc.o birth.o bldg.o cave.o \
+	cmd1.o cmd2.o cmd3.o cmd4.o cmd5.o cmd6.o cmd7.o \
+	cmovie.o dungeon.o files.o generate.o gen_maze.o gen_evol.o ghost.o \
+	help.o init1.o init2.o levels.o loadsave.o lua_bind.o \
+	main-win.o main.o melee1.o melee2.o modules.o \
+	monster1.o monster2.o monster3.o notes.o object1.o object2.o \
+	plots.o powers.o randart.o readdib.o script.o spells1.o spells2.o \
+	squeltch.o status.o store.o tables.o traps.o util.o variable.o \
+	wild.o wizard1.o wizard2.o xtra1.o xtra2.o \
+	z-form.o z-rand.o z-term.o z-util.o z-virt.o z-sock.o
+
+WOBJS = \
+	w_mnster.o w_obj.o w_play_c.o w_player.o w_quest.o \
+	w_spells.o w_util.o w_z_pack.o w_dun.o
+
+TOLUAOBJS = \
+	lua/lapi.o lua/lcode.o lua/ldebug.o lua/ldo.o lua/lfunc.o lua/lgc.o \
+	lua/llex.o lua/lmem.o lua/lobject.o lua/lparser.o lua/lstate.o lua/lstring.o \
+	lua/ltable.o lua/ltests.o lua/ltm.o lua/lundump.o lua/lvm.o lua/lzio.o \
+	lua/lauxlib.o lua/lbaselib.o lua/ldblib.o lua/liolib.o lua/lstrlib.o \
+	lua/tolua_lb.o lua/tolua_rg.o lua/tolua_tt.o lua/tolua_tm.o lua/tolua_gp.o \
+	lua/tolua_eh.o lua/tolua_bd.o
+
+OBJS = $(COREOBJS) $(WOBJS) $(TOLUAOBJS) angband_res.o
+
+$(EXE): $(OBJS)
+	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
+
+# Recurso Windows (menús, icono).
+angband_res.o: angband.rc
+	$(WINDRES) -i angband.rc -O coff -o angband_res.o
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+clean:
+	rm -f *.o lua/*.o angband_res.o $(EXE)

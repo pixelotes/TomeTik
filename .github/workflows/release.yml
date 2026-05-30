@@ -1,0 +1,111 @@
+name: Release
+
+# Se dispara al MERGEAR una PR cuya rama de origen sea release/vX.Y.Z.
+# También se puede lanzar a mano (workflow_dispatch) indicando la versión.
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versión (ej. 1.0.0)"
+        required: true
+
+permissions:
+  contents: write   # crear la Release y subir artefactos
+  packages: write   # publicar la imagen Docker en GHCR
+
+jobs:
+  release:
+    # Solo si: lanzamiento manual, O una PR de rama release/v* que se ha mergeado.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       startsWith(github.event.pull_request.head.ref, 'release/v'))
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determinar versión
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            # release/v1.2.3 -> 1.2.3
+            V="${{ github.event.pull_request.head.ref }}"
+            V="${V#release/v}"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Versión a publicar: $V"
+
+      - name: Construir imagen de toolchain
+        run: docker build -t tometik-build -f docker/Dockerfile docker
+
+      - name: Compilar X11 / GTK2 / Windows
+        run: |
+          set -e
+          mkdir -p dist
+          run_build() { docker run --rm -v "$PWD:/work" -w /work tometik-build \
+                          bash /work/docker/in-container-build.sh "$1"; }
+
+          run_build x11
+          cp tome dist/tome-x11
+
+          run_build gtk2
+          cp tome dist/tome-gtk2
+          cp tome tome.gtk2            # respaldo para la imagen runtime
+
+          run_build windows
+          cp tometik.exe dist/tometik.exe
+
+          # La imagen runtime necesita el binario gtk2 como ./tome en la raíz.
+          cp tome.gtk2 tome
+
+      - name: Empaquetar artefactos (Linux + Windows)
+        run: bash docker/package-release.sh "${{ steps.ver.outputs.version }}"
+
+      - name: Login en GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Construir y publicar imagen noVNC en GHCR
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          IMG="ghcr.io/${OWNER}/tometik"
+          docker build -f docker/Dockerfile.runtime -t "${IMG}:${V}" -t "${IMG}:latest" .
+          docker push "${IMG}:${V}"
+          docker push "${IMG}:latest"
+          echo "IMG=${IMG}" >> "$GITHUB_ENV"
+
+      - name: Crear Release con los artefactos
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: TomeTik v${{ steps.ver.outputs.version }}
+          generate_release_notes: true
+          files: |
+            dist/tometik-*-linux-x11.tar.gz
+            dist/tometik-*-linux-gtk2.tar.gz
+            dist/tometik-*-windows.zip
+          body: |
+            ## TomeTik v${{ steps.ver.outputs.version }}
+
+            ToME 2.2.2 + tiles David Gervais 32x32, portado a sistemas modernos.
+
+            ### Descargas
+            - **Windows** (GDI, 32-bit): `tometik-${{ steps.ver.outputs.version }}-windows.zip` — descomprime y ejecuta `tometik.exe`.
+            - **Linux GTK2** (multiventana + tiles): `tometik-${{ steps.ver.outputs.version }}-linux-gtk2.tar.gz` — `./play.sh`.
+            - **Linux X11/curses** (texto): `tometik-${{ steps.ver.outputs.version }}-linux-x11.tar.gz` — `./play.sh`.
+
+            ### Jugar en el navegador (sin instalar nada)
+            ```sh
+            docker run --rm -p 127.0.0.1:6080:6080 ${{ env.IMG }}:${{ steps.ver.outputs.version }}
+            ```
+            Luego abre http://localhost:6080/vnc.html (contraseña: `tometik`).
