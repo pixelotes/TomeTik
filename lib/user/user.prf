@@ -1,0 +1,22 @@
+# File: user.prf
+#
+# Pref de usuario que el juego carga al arrancar (ANGBAND_DIR_USER).
+# TomeTik: asigna CONTENIDO a las sub-ventanas (window flags). Sin esto,
+# window_flag[] queda a 0 y las ventanas Mirror/Recall/Choice salen vacías.
+# Formato: W:<ventana>:<bit de flag>:<0|1>  (ver tometik.prf para la lista).
+#
+#   bit 0 = inven/equip   bit 6 = mensajes      bit 8 = recall de monstruo
+#   bit 1 = equip/inven   bit 7 = vista cenital  bit 9 = recall de objeto
+#   bit 3 = personaje     bit 4 = monstruos vis. bit 5 = IRC
+
+# Ventana 1 'Mirror'  -> inventario / equipo
+W:1:0:1
+
+# Ventana 2 'Recall'  -> recall de monstruo + recall de objeto
+#   (esto es lo que se rellena al mirar/matar un enemigo)
+W:2:8:1
+W:2:9:1
+
+# Ventana 3 'Choice'  -> mensajes (y mensajes de IRC)
+W:3:6:1
+W:3:5:1

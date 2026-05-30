@@ -1,0 +1,12 @@
+T.o.M.E. 2.2.2 aka 'And Now For a Word' changes
+
+Misc changes:
+- Mac OS X Module support
+- Solaris compile workaround from Kevin W. Thomas
+- Valid XHTML in the HTML screenshots now -- neil
+
+Bug fixes:
+- Prevent forbidden staves from being generated
+- Really fix the God quest this time, we hope
+- Fix broken status in auto automatizer rules -- neil
+- HPUX support -- neil
