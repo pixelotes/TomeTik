@@ -252,6 +252,11 @@ gdk_draw_pixmap( \
  */
 static term_data data[MAX_TERM_DATA];
 
+/* --- TomeTik: modo isométrico (renderer nuevo, ver src/iso/iso_render.{h,c}) --- */
+#include "iso/iso_render.h"
+static bool iso_mode = FALSE;        /* activado con -i */
+static GdkPixbuf *iso_sheet = NULL;  /* dg_iso32.gif (14x15 tiles 54x49, cian transp.) */
+
 /*
  * TomeTik: layout por defecto de las ventanas, pensado para la pantalla
  * ~1280x800 del contenedor noVNC. Posición (x,y) en píxeles, tamaño en celdas
@@ -3095,6 +3100,46 @@ static void DrainEvents(void)
 /*
  * Handle a "special request"
  */
+/*
+ * TomeTik: callback de celda del núcleo iso. Milestone inicial: dibuja un tile
+ * de suelo por cada celda del cave (valida proyección + blit con transparencia).
+ * La selección real de tile (terreno/muro/objeto) llega en la Fase 3b.
+ */
+static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
+{
+	term_data *td = (term_data *)ctx;
+	int idx, col, row;
+
+	/* fuera de los límites del cave -> nada */
+	if (cx < 0 || cy < 0 || cx >= cur_wid || cy >= cur_hgt) return;
+
+	/* placeholder: damero hierba/agua para VER la rejilla diamante */
+	idx = ((cx + cy) & 1) ? 0 : 4;
+	col = idx % ISO_SHEET_COLS;
+	row = idx / ISO_SHEET_COLS;
+
+	gdk_draw_pixbuf(td->drawing_area->window, td->gc, iso_sheet,
+	                col * ISO_TILE_W, row * ISO_TILE_H,   /* origen en la lámina */
+	                sx, sy, ISO_TILE_W, ISO_TILE_H,
+	                GDK_RGB_DITHER_NONE, 0, 0);
+}
+
+/* Pinta la escena isométrica completa sobre la ventana principal. */
+static void iso_draw_scene(term_data *td)
+{
+	int win_w = td->cols * td->font_wid;
+	int win_h = td->rows * td->font_hgt;
+
+	if (!iso_sheet || !td->drawing_area->window) return;
+
+	/* fondo negro */
+	gdk_draw_rectangle(td->drawing_area->window,
+	                   td->drawing_area->style->black_gc, TRUE,
+	                   0, 0, win_w, win_h);
+
+	iso_render_scene(td, p_ptr->px, p_ptr->py, win_w, win_h, iso_cell_cb);
+}
+
 static errr Term_xtra_gtk(int n, int v)
 {
 	/* Handle a subset of the legal requests */
@@ -3113,6 +3158,14 @@ static errr Term_xtra_gtk(int n, int v)
 		/* Flush the output */
 	case TERM_XTRA_FRESH:
 		{
+			/* TomeTik: en modo iso, repinta la escena isométrica sobre la
+			 * ventana principal tras refrescar el term. */
+			if (iso_mode && iso_sheet && game_in_progress && character_generated
+			                && (Term == &data[0].t))
+			{
+				iso_draw_scene(&data[0]);
+			}
+
 			/* Flush pending X requests - almost always no-op */
 			gdk_flush();
 
@@ -5405,6 +5458,13 @@ errr init_gtk2(int argc, char **argv)
 			continue;
 		}
 
+		/* TomeTik: modo isométrico (renderer nuevo, tiles dg_iso32) */
+		if (streq(argv[i], "-i"))
+		{
+			iso_mode = TRUE;
+			continue;
+		}
+
 #endif /* USE_GRAPHICS */
 
 		/* None of the above */
@@ -5451,6 +5511,27 @@ errr init_gtk2(int argc, char **argv)
 
 		/* Init the window */
 		init_gtk_window(td, i);
+	}
+
+	/* TomeTik: cargar la lámina de tiles isométricos (modo iso). gdk-pixbuf
+	 * carga el GIF directo; convertimos cian #00FFFF -> alfa transparente. */
+	if (iso_mode)
+	{
+		char path[1024];
+		GdkPixbuf *raw;
+
+		path_build(path, 1024, ANGBAND_DIR_XTRA, "iso/dg_iso32.gif");
+		raw = gdk_pixbuf_new_from_file(path, NULL);
+		if (raw)
+		{
+			iso_sheet = gdk_pixbuf_add_alpha(raw, TRUE, 0x00, 0xFF, 0xFF);
+			g_object_unref(raw);
+		}
+		else
+		{
+			plog_fmt("iso: no pude cargar %s; modo iso desactivado", path);
+			iso_mode = FALSE;
+		}
 	}
 
 	/* Activate the "Angband" window screen */

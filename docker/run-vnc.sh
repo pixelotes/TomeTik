@@ -68,5 +68,9 @@ MODULE="${TOMETIK_MODULE:-gtk2}"
 # saltarse la creación de personaje. Vacío = arranque normal.
 SAVEARG=""
 [ -n "${TOMETIK_SAVE:-}" ] && SAVEARG="-u${TOMETIK_SAVE}"
+# TOMETIK_ISO=1 -> modo isométrico (solo gtk2). Los args del frontend van DESPUÉS
+# de "--" (main.c para de parsear ahí y pasa el resto a init_gtk2).
+ISOARG=""
+[ "${TOMETIK_ISO:-0}" = "1" ] && ISOARG="-- -i"
 cd /work
-./tome -m"${MODULE}" ${SAVEARG} 2>&1 | tee /tmp/tome-play.log
+./tome -m"${MODULE}" ${SAVEARG} ${ISOARG} 2>&1 | tee /tmp/tome-play.log
