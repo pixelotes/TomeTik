@@ -1,0 +1,38 @@
+# Imagen RUNTIME distribuible de TomeTik (GTK2 + tiles, jugable por noVNC).
+# Slim: solo dependencias de ejecución (sin toolchain). Espera que el binario
+# 'tome' (build gtk2) y 'lib/' estén en la raíz del contexto de build, cosa que
+# hace el workflow de release tras compilar. Construir con:
+#   docker build -f docker/Dockerfile.runtime -t tometik-runtime .
+FROM debian:12-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libx11-6 \
+        libxext6 \
+        libncurses6 \
+        libgtk2.0-0 \
+        xvfb \
+        x11vnc \
+        fluxbox \
+        novnc \
+        websockify \
+        xauth \
+        xfonts-base \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /game
+
+# Datos del juego + binario gtk2 + entrypoint.
+COPY lib /game/lib
+COPY tome /game/tome
+COPY docker/runtime-entrypoint.sh /game/entrypoint.sh
+RUN chmod +x /game/tome /game/entrypoint.sh
+
+# 6080 = noVNC (navegador), 5900 = VNC nativo.
+EXPOSE 6080 5900
+
+ENV TOMETIK_VNCPASS=tometik \
+    TOMETIK_MODULE=gtk2
+
+CMD ["/game/entrypoint.sh"]
