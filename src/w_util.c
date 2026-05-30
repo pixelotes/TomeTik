@@ -1,6 +1,6 @@
 /*
 ** Lua binding: util
-** Generated automatically by tolua 4.0a - angband on Sat May 30 20:47:35 2026.
+** Generated automatically by tolua 4.0a - angband on Sat May 30 21:19:38 2026.
 */
 
 #include "lua/tolua.h"

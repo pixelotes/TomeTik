@@ -39,6 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         fluxbox \
         novnc \
         websockify \
+        xdotool \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /work

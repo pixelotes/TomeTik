@@ -3101,27 +3101,272 @@ static void DrainEvents(void)
  * Handle a "special request"
  */
 /*
- * TomeTik: callback de celda del núcleo iso. Milestone inicial: dibuja un tile
- * de suelo por cada celda del cave (valida proyección + blit con transparencia).
- * La selección real de tile (terreno/muro/objeto) llega en la Fase 3b.
+ * TomeTik: mapeo feature -> tile de dg_iso32.gif (Fase 3b).
+ *
+ * Los índices de tile y el auto-tiling de muros están PORTADOS del sistema iso
+ * de OmnibandTk: índices de tk/config/dg32+iso.cfg y el cálculo de forma de
+ * muro de src/common/icon1.c (wall_shape). Tema fijo "light smooth".
+ */
+#define ISO_T_FLOOR   13   /* suelo */
+#define ISO_T_WALL    71   /* muro con forma: base + offset (0..10) */
+#define ISO_T_SINGLE  70   /* muro aislado / pilar */
+#define ISO_T_DOOR    93   /* abierta +0/+1, cerrada +2/+3, rota +4/+5 (ns/we) */
+#define ISO_T_STAIR   99   /* subir +0, bajar +1 */
+#define ISO_T_WOODDOOR 64  /* puerta de madera: ns +0, we +1 (entrada a tienda) */
+#define ISO_T_DARK   208   /* rombo oscuro: celda desconocida (feature 0 en cfg) */
+
+/* Formas de muro (orden propio); offset dentro del set de 11 tiles. */
+enum {
+	ISH_SINGLE, ISH_NS, ISH_WE, ISH_NW, ISH_NE, ISH_SW, ISH_SE,
+	ISH_TRI_N, ISH_TRI_S, ISH_TRI_W, ISH_TRI_E, ISH_QUAD, ISH_NOT
+};
+/* offset de tile por forma (de los "offsets" de dg32+iso.cfg). -1 = usar SINGLE. */
+static const int iso_wall_off[] = {
+	-1, /* SINGLE */  0, /* NS */  1, /* WE */
+	 5, /* NW */      2, /* NE */   4, /* SW */   3, /* SE */
+	 7, /* TRI_N */   9, /* TRI_S */ 6, /* TRI_W */ 8, /* TRI_E */
+	10, /* QUAD */   -1  /* NOT */
+};
+
+static bool iso_inb(int y, int x)
+{
+	return (y >= 0 && x >= 0 && y < cur_hgt && x < cur_wid);
+}
+
+static bool iso_is_wall_feat(int f)
+{
+	/* SOLO muros reales (vetas, granito, permanente, secreta, sand/ice/glass/lava).
+	 * Árboles y montañas NO son muros: son overlays (ver iso_overlay_tile). */
+	return (f == FEAT_SECRET) ||
+	       (f >= FEAT_MAGMA && f <= FEAT_PERM_SOLID) ||
+	       (f == FEAT_ICE_WALL) ||
+	       (f >= FEAT_SANDWALL && f <= FEAT_SANDWALL_K) ||
+	       (f == FEAT_GLASS_WALL) || (f == FEAT_ILLUS_WALL) ||
+	       (f == FEAT_LAVA_WALL);
+}
+
+/* Tile de SUELO (rombo completo) por feature. */
+static int iso_ground_tile(int f)
+{
+	switch (f)
+	{
+		case FEAT_GRASS: case FEAT_FLOWER:
+		case FEAT_TREES: case FEAT_SMALL_TREES: case FEAT_DEAD_TREE:
+			return 0;                                   /* hierba */
+		case FEAT_DIRT: case FEAT_SAND:    return 9;    /* tierra/arena */
+		case FEAT_MUD:                     return 22;
+		case FEAT_ICE:                     return 39;
+		case FEAT_ASH:                     return 14;
+		case FEAT_SHAL_WATER:              return 3;    /* agua poco profunda */
+		case FEAT_DEEP_WATER: case FEAT_EKKAIA:
+		case FEAT_TAINTED_WATER:           return 5;    /* agua profunda */
+		case FEAT_SHAL_LAVA:               return 17;
+		case FEAT_DEEP_LAVA:               return 18;
+		default:                           return 13;   /* piedra */
+	}
+}
+
+/* Overlay (sprite transparente) sobre el suelo, o -1 si ninguno. */
+static int iso_overlay_tile(int f)
+{
+	switch (f)
+	{
+		case FEAT_TREES:        return 47;
+		case FEAT_SMALL_TREES:  return 48;
+		case FEAT_DEAD_TREE:    return 46;
+		case FEAT_MOUNTAIN:     return 34;
+		case FEAT_RUBBLE:       return 58;
+		default:                return -1;
+	}
+}
+
+static bool iso_is_up_stair(int f)
+{
+	return f == FEAT_LESS || f == FEAT_WAY_LESS ||
+	       f == FEAT_SHAFT_UP || f == FEAT_QUEST_UP;
+}
+static bool iso_is_down_stair(int f)
+{
+	return f == FEAT_MORE || f == FEAT_WAY_MORE || f == FEAT_BETWEEN ||
+	       f == FEAT_SHAFT_DOWN || f == FEAT_QUEST_DOWN || f == FEAT_QUEST_ENTER;
+}
+
+static bool iso_is_door_feat(int f)
+{
+	return (f == FEAT_OPEN) || (f == FEAT_BROKEN) ||
+	       (f >= FEAT_DOOR_HEAD && f <= FEAT_DOOR_TAIL);
+}
+
+/* ¿celda conocida (memorizada)? */
+static bool iso_marked(int y, int x)
+{
+	if (!iso_inb(y, x)) return FALSE;
+	return (cave[y][x].info & CAVE_MARK) != 0;
+}
+
+/* ¿la celda cuenta como muro/puerta para el auto-tiling (y es conocida)? */
+static bool iso_walldoor(int y, int x)
+{
+	int f;
+	if (!iso_marked(y, x)) return FALSE;
+	f = cave[y][x].feat;
+	return iso_is_wall_feat(f) || iso_is_door_feat(f);
+}
+
+/* Forma de muro a partir de los 8 vecinos (port de wall_shape, icon1.c). */
+static int iso_wall_shape(int y, int x)
+{
+	bool wall[3][3];
+	int n = 0, nswe = 0, col0n = 0, col2n = 0, row0n = 0, row2n = 0;
+	int i, j, shape = ISH_NOT;
+
+	if (!iso_walldoor(y, x)) return ISH_NOT;
+
+	for (j = 0; j < 3; j++)
+	{
+		for (i = 0; i < 3; i++)
+		{
+			if (i == 1 && j == 1) { wall[j][i] = FALSE; continue; }
+			wall[j][i] = iso_walldoor(y - 1 + j, x - 1 + i);
+			if (wall[j][i])
+			{
+				++n;
+				if (!i) ++col0n; else if (i == 1) ++nswe; else ++col2n;
+				if (!j) ++row0n; else if (j == 1) ++nswe; else ++row2n;
+			}
+		}
+	}
+
+	if (n == 8) return ISH_SINGLE;
+	if (!n || !nswe) return ISH_SINGLE;   /* aislado / sin vecino ortogonal */
+
+	if (nswe == 4)
+	{
+		shape = ISH_QUAD;
+		if (n < 6) return shape;
+		if (n == 6)
+		{
+			if (row0n == 3) return ISH_TRI_S;
+			if (row2n == 3) return ISH_TRI_N;
+			if (col0n == 3) return ISH_TRI_E;
+			if (col2n == 3) return ISH_TRI_W;
+			return shape;
+		}
+		/* n == 7: una esquina falta */
+		if (!wall[0][0]) return ISH_SE;
+		if (!wall[2][0]) return ISH_NE;
+		if (!wall[0][2]) return ISH_SW;
+		return ISH_NW;
+	}
+
+	if (nswe == 3)
+	{
+		if (wall[0][1] && wall[2][1])   /* muros a N y S */
+		{
+			if (col0n == 3 || col2n == 3) return ISH_NS;
+			return wall[1][0] ? ISH_TRI_W : ISH_TRI_E;
+		}
+		else                            /* muros a W y E */
+		{
+			if (row0n == 3 || row2n == 3) return ISH_WE;
+			return wall[0][1] ? ISH_TRI_N : ISH_TRI_S;
+		}
+	}
+
+	if (nswe == 2)
+	{
+		if (wall[0][1] && wall[2][1]) shape = ISH_NS;
+		if (wall[1][0] && wall[1][2]) shape = ISH_WE;
+		if (wall[0][1] && wall[1][0]) shape = ISH_SE;
+		if (wall[0][1] && wall[1][2]) shape = ISH_SW;
+		if (wall[2][1] && wall[1][0]) shape = ISH_NE;
+		if (wall[2][1] && wall[1][2]) shape = ISH_NW;
+		return shape;
+	}
+
+	if (nswe == 1)
+		return (wall[0][1] || wall[2][1]) ? ISH_NS : ISH_WE;
+
+	return ISH_SINGLE;
+}
+
+/* Puerta horizontal (we) si hay muro/puerta al W y al E. */
+static bool iso_door_we(int y, int x)
+{
+	return iso_walldoor(y, x - 1) && iso_walldoor(y, x + 1);
+}
+
+/* Blit de un tile de la lámina por índice (col = idx%14, fila = idx/14). */
+static void iso_blit(term_data *td, int idx, int sx, int sy)
+{
+	int col, row;
+	if (idx < 0) return;
+	col = idx % ISO_SHEET_COLS;
+	row = idx / ISO_SHEET_COLS;
+	gdk_draw_pixbuf(td->drawing_area->window, td->gc, iso_sheet,
+	                col * ISO_TILE_W, row * ISO_TILE_H,
+	                sx, sy, ISO_TILE_W, ISO_TILE_H,
+	                GDK_RGB_DITHER_NONE, 0, 0);
+}
+
+/*
+ * Callback de celda del núcleo iso: elige y dibuja el/los tile(s) de la celda.
+ * Solo celdas conocidas (CAVE_MARK). Muros llevan suelo debajo (los tiles de
+ * muro son transparentes en la zona del rombo, igual que los "dynamic" del cfg).
  */
 static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 {
 	term_data *td = (term_data *)ctx;
-	int idx, col, row;
+	int f;
 
-	/* fuera de los límites del cave -> nada */
-	if (cx < 0 || cy < 0 || cx >= cur_wid || cy >= cur_hgt) return;
+	if (!iso_inb(cy, cx)) return;
 
-	/* placeholder: damero hierba/agua para VER la rejilla diamante */
-	idx = ((cx + cy) & 1) ? 0 : 4;
-	col = idx % ISO_SHEET_COLS;
-	row = idx / ISO_SHEET_COLS;
+	/* Celda desconocida: rombo oscuro (rellena los huecos del borde explorado
+	 * que asoman bajo la parte transparente de los muros). */
+	if (!(cave[cy][cx].info & CAVE_MARK))
+	{
+		iso_blit(td, ISO_T_DARK, sx, sy);
+		return;
+	}
 
-	gdk_draw_pixbuf(td->drawing_area->window, td->gc, iso_sheet,
-	                col * ISO_TILE_W, row * ISO_TILE_H,   /* origen en la lámina */
-	                sx, sy, ISO_TILE_W, ISO_TILE_H,
-	                GDK_RGB_DITHER_NONE, 0, 0);
+	f = cave[cy][cx].feat;
+
+	if (iso_is_wall_feat(f))
+	{
+		int off = iso_wall_off[iso_wall_shape(cy, cx)];
+		iso_blit(td, ISO_T_FLOOR, sx, sy);                       /* suelo debajo */
+		iso_blit(td, (off < 0) ? ISO_T_SINGLE : ISO_T_WALL + off, sx, sy);
+	}
+	else if (iso_is_door_feat(f))
+	{
+		int base = (f == FEAT_OPEN)   ? ISO_T_DOOR :
+		           (f == FEAT_BROKEN) ? ISO_T_DOOR + 4 : ISO_T_DOOR + 2;
+		iso_blit(td, ISO_T_FLOOR, sx, sy);                       /* suelo bajo la puerta */
+		iso_blit(td, base + (iso_door_we(cy, cx) ? 1 : 0), sx, sy);
+	}
+	else if (f == FEAT_SHOP)
+	{
+		/* entrada a tienda: puerta de madera (64 ns / 65 we) sobre suelo */
+		iso_blit(td, ISO_T_FLOOR, sx, sy);
+		iso_blit(td, ISO_T_WOODDOOR + (iso_door_we(cy, cx) ? 1 : 0), sx, sy);
+	}
+	else if (iso_is_up_stair(f))
+	{
+		iso_blit(td, iso_ground_tile(f), sx, sy);
+		iso_blit(td, ISO_T_STAIR, sx, sy);
+	}
+	else if (iso_is_down_stair(f))
+	{
+		iso_blit(td, iso_ground_tile(f), sx, sy);
+		iso_blit(td, ISO_T_STAIR + 1, sx, sy);
+	}
+	else
+	{
+		/* terreno general: suelo + posible overlay (árbol/montaña/escombros) */
+		int ov = iso_overlay_tile(f);
+		iso_blit(td, iso_ground_tile(f), sx, sy);
+		if (ov >= 0) iso_blit(td, ov, sx, sy);
+	}
 }
 
 /* Pinta la escena isométrica completa sobre la ventana principal. */
