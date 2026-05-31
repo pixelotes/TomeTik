@@ -4691,18 +4691,17 @@ static bool travel_walkable_hook(int y, int x, void *user)
 {
 	(void)user;
 
-	if (!(cave[y][x].info & (CAVE_MARK))) return (FALSE);
+	if (!(cave[y][x].info & (CAVE_MARK | CAVE_SEEN))) return (FALSE);
 	if (!cave_floor_bold(y, x)) return (FALSE);
 
 	return (TRUE);
 }
 
 /*
- * Stop auto-travelling and release the route. Safe to call when not travelling.
- * Called from disturb() so any disturbance (monster, damage, key press, ...)
- * cancels travel just like it cancels running.
+ * Silent teardown of the travel state. Used internally (arrival, restart) where
+ * we either say nothing or print our own, more specific, message.
  */
-void travel_cancel(void)
+static void travel_clear(void)
 {
 	if (travel_route)
 	{
@@ -4722,6 +4721,21 @@ void travel_cancel(void)
 }
 
 /*
+ * Stop auto-travelling. Called from disturb(), so it fires on ANY disturbance
+ * (a monster comes into view, damage, a key press, ...). When that interrupts
+ * an in-progress trip we report it, since otherwise the character would just
+ * halt mid-path for no visible reason. Safe to call when not travelling.
+ */
+void travel_cancel(void)
+{
+	bool interrupted = (travelling != 0);
+
+	travel_clear();
+
+	if (interrupted) msg_print("You stop travelling.");
+}
+
+/*
  * Begin auto-travelling to grid (gy, gx). Returns TRUE if a path was found and
  * travel started, FALSE otherwise (no path, goal not walkable, can't travel).
  */
@@ -4731,7 +4745,9 @@ bool travel_to(int gy, int gx)
 	int sy = p_ptr->py;
 	int sx = p_ptr->px;
 
-	/* Cancel running/resting/repeat/previous-travel first. */
+	/* Drop any previous route silently (re-clicking a new goal shouldn't say
+	 * "you stop travelling"), then cancel running/resting/repeat. */
+	travel_clear();
 	disturb(0, 0);
 
 	/* States where precise auto-walking makes no sense. */
@@ -4744,30 +4760,33 @@ bool travel_to(int gy, int gx)
 	/* Only travel to a tile we could actually reach (walkable, known). */
 	if (!travel_walkable_hook(gy, gx, NULL)) return (FALSE);
 
-	/* Path over cave[][] without copying it. */
+	/* Path over cave[][] without copying it. Allow diagonals to cut corners,
+	 * matching how the player can actually move (otherwise paths through
+	 * corridors come out as orthogonal staircases). */
 	route = astar_find_path_cb(cur_hgt, cur_wid,
 	                           travel_walkable_hook, NULL,
-	                           sy, sx, gy, gx, ASTAR_8DIR);
+	                           sy, sx, gy, gx, ASTAR_8DIR_CUT);
 
 	/* steps[0] is the player's own tile, so a real path has length >= 2. */
 	if (!route || (route->length < 2))
 	{
 		path_free(route);
+		msg_print("You can't find a path to there.");
 		return (FALSE);
 	}
 
 	travel_route = route;
-	travel_idx = 1;                 /* next tile to step onto */
-	travelling = route->length;     /* > 0 => active (also a step bound) */
+	travel_idx = 1;        /* next tile to step onto (steps[0] is us) */
+	travelling = 1;        /* active flag; progress is tracked by travel_idx */
 
 	return (TRUE);
 }
 
 /*
  * Take one travel step. Called from process_player()'s energy loop while
- * travelling, exactly where running calls run_step(). Stops (via travel_cancel)
- * on arrival or if the world changed under the route (door closed, monster in
- * the way, terrain altered).
+ * travelling, exactly where running calls run_step(). Stops on arrival or if
+ * the world changed under the route (monster in the way, terrain altered),
+ * reporting the reason.
  */
 void travel_step(void)
 {
@@ -4776,24 +4795,34 @@ void travel_step(void)
 	/* Nothing to do / route consumed. */
 	if (!travel_route || (travel_idx >= travel_route->length))
 	{
-		travel_cancel();
+		travel_clear();
 		return;
 	}
 
 	/* Confusion would scramble the chosen direction. */
 	if (p_ptr->confused)
 	{
-		travel_cancel();
+		msg_print("You are too confused to travel.");
+		travel_clear();
 		return;
 	}
 
 	ny = travel_route->steps[travel_idx].y;
 	nx = travel_route->steps[travel_idx].x;
 
-	/* The next tile must still be enterable and clear of monsters. */
-	if (!cave_floor_bold(ny, nx) || cave[ny][nx].m_idx)
+	/* A monster stepped into our path: stop short instead of bumping it. */
+	if (cave[ny][nx].m_idx)
 	{
-		travel_cancel();
+		msg_print("There is a monster in your way.");
+		travel_clear();
+		return;
+	}
+
+	/* The next tile is no longer enterable (e.g. a door closed on us). */
+	if (!cave_floor_bold(ny, nx))
+	{
+		msg_print("Your way is blocked.");
+		travel_clear();
 		return;
 	}
 
@@ -4810,7 +4839,7 @@ void travel_step(void)
 	}
 	if (!dir)
 	{
-		travel_cancel();
+		travel_clear();
 		return;
 	}
 
@@ -4818,14 +4847,16 @@ void travel_step(void)
 	energy_use = 100;
 	move_player_aux(dir, always_pickup, 1, TRUE);
 
-	/* Advance; finish on arrival. move_player_aux may have already cancelled
-	 * us via disturb() (e.g. a trap or a newly seen monster) -- respect that. */
+	/* move_player_aux may have already cancelled us via disturb() (a trap, a
+	 * newly seen monster, ...) and reported it -- respect that. */
 	if (!travelling) return;
 
+	/* Advance; announce arrival at the goal. */
 	travel_idx++;
-	if ((--travelling <= 0) || (travel_idx >= travel_route->length))
+	if (travel_idx >= travel_route->length)
 	{
-		travel_cancel();
+		travel_clear();
+		msg_print("You arrive.");
 	}
 }
 

@@ -153,7 +153,7 @@ static int heuristic(astar_ctx *c, int y, int x, int gy, int gx)
 	int dy = (y > gy) ? (y - gy) : (gy - y);
 	int dx = (x > gx) ? (x - gx) : (gx - x);
 
-	if (c->diagonals == ASTAR_8DIR)
+	if (c->diagonals != ASTAR_4DIR)
 	{
 		/* Octile distance. */
 		int lo = (dy < dx) ? dy : dx;
@@ -286,7 +286,7 @@ path_result *astar_find_path_cb(int height, int width,
 		cy = cur / width;
 		cx = cur % width;
 
-		dirs = (diagonals == ASTAR_8DIR) ? 8 : 4;
+		dirs = (diagonals != ASTAR_4DIR) ? 8 : 4;
 		for (d = 0; d < dirs; d++)
 		{
 			int ty = cy + ny[d];
@@ -298,8 +298,9 @@ path_result *astar_find_path_cb(int height, int width,
 			if (ty < 0 || ty >= height || tx < 0 || tx >= width) continue;
 			if (!walkable(&c, ty, tx)) continue;
 
-			/* Forbid diagonal moves that would cut a wall corner. */
-			if (d >= 4)
+			/* Forbid diagonal moves that would cut a wall corner, unless the
+			 * caller allows corner cutting (ASTAR_8DIR_CUT). */
+			if (d >= 4 && diagonals == ASTAR_8DIR)
 			{
 				if (!walkable(&c, cy, tx)) continue;
 				if (!walkable(&c, ty, cx)) continue;
