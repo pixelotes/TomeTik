@@ -255,7 +255,13 @@ static term_data data[MAX_TERM_DATA];
 /* --- TomeTik: modo isométrico (renderer nuevo, ver src/iso/iso_render.{h,c}) --- */
 #include "iso/iso_render.h"
 static bool iso_mode = FALSE;        /* activado con -i */
+extern bool iso_in_store;            /* store.c: TRUE en pantalla de tienda */
 static GdkPixbuf *iso_sheet = NULL;  /* dg_iso32.gif (14x15 tiles 54x49, cian transp.) */
+/* Fase 4: lámina Gervais 2D 32x32 (lib/xtra/graf/32x32.bmp) para actores
+ * (jugador/monstruos/objetos). map_info da (a,c); tile = fila a&0x7F, col c&0x7F.
+ * Fondo (24,24,24) -> transparente. */
+static GdkPixbuf *gerv_sheet = NULL;
+static int gerv_cols = 0, gerv_rows = 0;
 
 /*
  * TomeTik: layout por defecto de las ventanas, pensado para la pantalla
@@ -3133,16 +3139,25 @@ static bool iso_inb(int y, int x)
 	return (y >= 0 && x >= 0 && y < cur_hgt && x < cur_wid);
 }
 
+/* Declarados antes de iso_is_wall_feat porque éste los usa para excluir puertas
+ * y terreno de tipo overlay. */
+static int iso_overlay_tile(int f);
+static bool iso_is_door_feat(int f);
+
 static bool iso_is_wall_feat(int f)
 {
-	/* SOLO muros reales (vetas, granito, permanente, secreta, sand/ice/glass/lava).
-	 * Árboles y montañas NO son muros: son overlays (ver iso_overlay_tile). */
-	return (f == FEAT_SECRET) ||
-	       (f >= FEAT_MAGMA && f <= FEAT_PERM_SOLID) ||
-	       (f == FEAT_ICE_WALL) ||
-	       (f >= FEAT_SANDWALL && f <= FEAT_SANDWALL_K) ||
-	       (f == FEAT_GLASS_WALL) || (f == FEAT_ILLUS_WALL) ||
-	       (f == FEAT_LAVA_WALL);
+	/* Muro iso (cubo) = cualquier feature con el flag FF1_WALL, EXCEPTO:
+	 *  - puertas (se pintan como arco aparte; las cerradas también son WALL),
+	 *  - terreno tipo overlay (árbol/montaña/escombros/árbol-muerto: WALL en
+	 *    f_info pero los pintamos como sprite transparente sobre el suelo).
+	 * Usar el flag (vía f_info) en vez de listas de rangos cubre granito, vetas,
+	 * permanente, secreta, cristal, lava... y ADEMÁS los TEJADOS/ventanas/barril
+	 * de los edificios del pueblo (feats 190-198, todos WALL), que antes caían al
+	 * suelo y se veían como losas planas. */
+	if ((f < 0) || (f >= max_f_idx)) return FALSE;
+	if (iso_is_door_feat(f)) return FALSE;
+	if (iso_overlay_tile(f) >= 0) return FALSE;
+	return (f_info[f].flags1 & FF1_WALL) != 0;
 }
 
 /* Tile de SUELO (rombo completo) por feature. */
@@ -3333,9 +3348,24 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 
 	if (iso_is_wall_feat(f))
 	{
-		int off = iso_wall_off[iso_wall_shape(cy, cx)];
 		iso_blit(td, ISO_T_FLOOR, sx, sy);                       /* suelo debajo */
-		iso_blit(td, (off < 0) ? ISO_T_SINGLE : ISO_T_WALL + off, sx, sy);
+
+		if (dun_level == 0)
+		{
+			/* PUEBLO: edificios y muralla son rectángulos MACIZOS. El original
+			 * (dg32+iso.cfg, ChooseTheme con !$depth -> which=9 "white block")
+			 * NO hace auto-tiling aquí: pinta cada celda con el cubo entero
+			 * (tile 70), porque las piezas de pared fina (71+) sobre un bloque
+			 * relleno se ven como losas/vallas sueltas. Cubo uniforme = masa de
+			 * piedra sólida y limpia. */
+			iso_blit(td, ISO_T_SINGLE, sx, sy);
+		}
+		else
+		{
+			/* MAZMORRA: muros finos (corredores/salas) -> auto-tiling por forma. */
+			int off = iso_wall_off[iso_wall_shape(cy, cx)];
+			iso_blit(td, (off < 0) ? ISO_T_SINGLE : ISO_T_WALL + off, sx, sy);
+		}
 	}
 	else if (iso_is_door_feat(f))
 	{
@@ -3366,6 +3396,31 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 		int ov = iso_overlay_tile(f);
 		iso_blit(td, iso_ground_tile(f), sx, sy);
 		if (ov >= 0) iso_blit(td, ov, sx, sy);
+	}
+
+	/* Overlay de ACTOR (jugador/monstruo/objeto) con la lámina Gervais 32x32.
+	 * map_info da (a,c)=lo de encima y (ta,tc)=terreno; si difieren y es un tile
+	 * gráfico (bit alto), lo bliteamos centrado y apoyado en el rombo del suelo. */
+	if (gerv_sheet && gerv_cols && gerv_rows)
+	{
+		byte a, ta, ea;
+		char c, tc, ec;
+
+		map_info(cy, cx, &a, &c, &ta, &tc, &ea, &ec);
+
+		if ((a & 0x80) && ((a != ta) || (c != tc)))
+		{
+			int col = (c & 0x7F) % gerv_cols;
+			int row = (a & 0x7F) % gerv_rows;
+			/* 32 de ancho centrado en el tile (54); pies hacia el centro del
+			 * rombo (alto 49) para que el actor "se pose" en la celda. */
+			int dx = sx + (ISO_TILE_W - 32) / 2;
+			int dy = sy + ISO_TILE_H / 2 - 32 + 6;
+
+			gdk_draw_pixbuf(td->drawing_area->window, td->gc, gerv_sheet,
+			                col * 32, row * 32, dx, dy, 32, 32,
+			                GDK_RGB_DITHER_NONE, 0, 0);
+		}
 	}
 }
 
@@ -3404,9 +3459,10 @@ static errr Term_xtra_gtk(int n, int v)
 	case TERM_XTRA_FRESH:
 		{
 			/* TomeTik: en modo iso, repinta la escena isométrica sobre la
-			 * ventana principal tras refrescar el term. */
+			 * ventana principal tras refrescar el term. NO mientras se muestra
+			 * una tienda (iso_in_store) -> deja ver el texto de la tienda. */
 			if (iso_mode && iso_sheet && game_in_progress && character_generated
-			                && (Term == &data[0].t))
+			                && !iso_in_store && (Term == &data[0].t))
 			{
 				iso_draw_scene(&data[0]);
 			}
@@ -5776,6 +5832,29 @@ errr init_gtk2(int argc, char **argv)
 		{
 			plog_fmt("iso: no pude cargar %s; modo iso desactivado", path);
 			iso_mode = FALSE;
+		}
+
+		/* Lámina Gervais 2D para actores (jugador/monstruos/objetos). El mismo
+		 * fichero que usa el render 2D; (24,24,24) = color de fondo -> alfa. */
+		if (iso_mode)
+		{
+			GdkPixbuf *graw;
+			path_build(path, 1024, ANGBAND_DIR_XTRA_GRAF, "32x32.bmp");
+			graw = gdk_pixbuf_new_from_file(path, NULL);
+			if (graw)
+			{
+				/* La lámina Gervais usa NEGRO PURO (0,0,0) como fondo transparente
+			 * (= bg_pixel del render 2D, leído en (0, 6*32)); los detalles usan
+			 * (16,16,16)+ así que no se hacen huecos. */
+			gerv_sheet = gdk_pixbuf_add_alpha(graw, TRUE, 0, 0, 0);
+				gerv_cols = gdk_pixbuf_get_width(gerv_sheet) / 32;
+				gerv_rows = gdk_pixbuf_get_height(gerv_sheet) / 32;
+				g_object_unref(graw);
+			}
+			else
+			{
+				plog_fmt("iso: no pude cargar %s; sin actores", path);
+			}
 		}
 	}
 

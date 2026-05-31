@@ -327,6 +327,13 @@ static void purchase_analyze(s32b price, s32b value, s32b guess)
 static int cur_store_num = 7;
 
 /*
+ * TomeTik: TRUE mientras se muestra la pantalla de tienda. El frontend iso
+ * (main-gtk2.c) lo consulta para NO repintar la escena isométrica encima del
+ * texto de la tienda. Es específico de tienda, así que nunca afecta al town.
+ */
+bool iso_in_store = FALSE;
+
+/*
  * We store the current "store page" here so everyone can access it
  */
 static int store_top = 0;
@@ -3854,6 +3861,7 @@ void do_cmd_store(void)
 
 	/* Hack -- Character is in "icky" mode */
 	character_icky = TRUE;
+	iso_in_store = TRUE;
 
 
 	/* No command argument */
@@ -3944,6 +3952,7 @@ void do_cmd_store(void)
 
 		/* Hack -- Character is still in "icky" mode */
 		character_icky = TRUE;
+	iso_in_store = TRUE;
 
 		/* Notice stuff */
 		notice_stuff();
@@ -4046,6 +4055,7 @@ void do_cmd_store(void)
 
 	/* Hack -- Character is no longer in "icky" mode */
 	character_icky = FALSE;
+	iso_in_store = FALSE;
 
 
 	/* Hack -- Cancel automatic command */
@@ -4336,6 +4346,7 @@ void do_cmd_home_trump(void)
 
 	/* Hack -- Character is in "icky" mode */
 	character_icky = TRUE;
+	iso_in_store = TRUE;
 
 
 	/* No command argument */
@@ -4441,6 +4452,7 @@ void do_cmd_home_trump(void)
 
 		/* Hack -- Character is still in "icky" mode */
 		character_icky = TRUE;
+	iso_in_store = TRUE;
 
 		/* Notice stuff */
 		notice_stuff();
@@ -4531,6 +4543,7 @@ void do_cmd_home_trump(void)
 
 	/* Hack -- Character is no longer in "icky" mode */
 	character_icky = FALSE;
+	iso_in_store = FALSE;
 
 
 	/* Hack -- Cancel automatic command */
