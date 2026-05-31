@@ -4508,6 +4508,13 @@ static void process_command(void)
 			break;
 		}
 
+		/* Auto-explore (TomeTik) */
+	case KTRL('E'):
+		{
+			do_cmd_explore();
+			break;
+		}
+
 		/* Show previous message */
 	case KTRL('O'):
 		{
@@ -4788,7 +4795,7 @@ void process_player(void)
 	if (!avoid_abort)
 	{
 		/* Check for "player abort" (semi-efficiently for resting) */
-		if (running || travelling || command_rep || (resting && !(resting & 0x0F)))
+		if (running || travelling || exploring || command_rep || (resting && !(resting & 0x0F)))
 		{
 			/* Do not wait */
 			inkey_scan = TRUE;
@@ -4932,11 +4939,17 @@ void process_player(void)
 			/* p_ptr->did_nothing = TRUE; */
 		}
 
-		/* Auto-travelling (click-to-walk / auto-explore) */
+		/* Auto-travelling (click-to-walk / one leg of auto-explore) */
 		else if (travelling)
 		{
 			/* Take a step along the route */
 			travel_step();
+		}
+
+		/* Auto-exploring: pick the next leg (then the travel branch walks it) */
+		else if (exploring)
+		{
+			explore_step();
 		}
 
 		/* Repeated command */

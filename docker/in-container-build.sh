@@ -79,8 +79,17 @@ rm -f ./tolua tometik.exe w_*.c *.o lua/*.o 2>/dev/null || true
 echo "=== make -f ${MK} ./tolua (serie) ===" | tee -a "${LOG}"
 make -f "${MK}" ./tolua 2>&1 | tee -a "${LOG}"
 
+# Paso 2: generar los stubs w_*.c con ./tolua EN SERIE, antes del -j. Las reglas
+# que compilan w_*.o NO declaran dependencia del fichero w_*.c generado, así que
+# con -j el compilador puede arrancar sobre un w_*.c aún inexistente ("No such
+# file"). Generándolos antes evitamos esa carrera (mismo patrón que la ruta
+# windows de más arriba).
+echo "=== make -f ${MK} w_*.c (serie) ===" | tee -a "${LOG}"
+make -f "${MK}" w_mnster.c w_player.c w_play_c.c w_z_pack.c \
+     w_obj.c w_util.c w_spells.c w_quest.c w_dun.c 2>&1 | tee -a "${LOG}"
+
 echo "=== make -f ${MK} mini_install (jN) ===" | tee -a "${LOG}"
-# mini_install: genera w_*.c con ./tolua, compila 'tome' y lo copia a ..
+# mini_install: compila 'tome' (con los w_*.c ya generados) y lo copia a ..
 make -f "${MK}" -j"$(nproc)" -k mini_install 2>&1 | tee -a "${LOG}"
 BUILD_RC=${PIPESTATUS[0]}
 

@@ -5195,6 +5195,13 @@ void disturb(int stop_search, int unused_flag)
 	/* Cancel auto-travel (click-to-walk / auto-explore) */
 	if (travelling) travel_cancel();
 
+	/* Cancel auto-explore (between legs travelling may already be 0) */
+	if (exploring)
+	{
+		exploring = 0;
+		p_ptr->redraw |= (PR_STATE);
+	}
+
 	/* Cancel searching if requested */
 	if (stop_search && p_ptr->searching)
 	{
