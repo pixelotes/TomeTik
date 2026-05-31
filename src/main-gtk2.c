@@ -3713,6 +3713,62 @@ static void iso_audit_coverage(void)
 	         path, n_mon, n_obj, n_feat);
 }
 
+/* TomeTik: recompone una fila de texto plano del term por encima de la escena
+ * iso. El renderer iso pinta negro + tiles directamente sobre la ventana
+ * (saltándose el backing store), así que borra el texto que el term ya había
+ * dibujado en esa fila -- típicamente la línea de mensajes/prompt (fila 0),
+ * p.ej. "(Inven: c-c, ESC) Wear/Wield which item?". La releemos del backing
+ * store del term (scr) y la repintamos, igual que en 2D el prompt va siempre
+ * sobre el mapa. */
+static void iso_overlay_text_row(term_data *td, int row)
+{
+	term_win *scr = td->t.scr;
+	int x, first = -1, last = -1;
+
+	if (!scr || row < 0 || row >= td->rows) return;
+
+	/* Localiza el tramo con contenido (primer/último carácter no-blanco) */
+	for (x = 0; x < td->cols; x++)
+	{
+		if (scr->c[row][x] != ' ')
+		{
+			if (first < 0) first = x;
+			last = x;
+		}
+	}
+
+	/* Fila vacía: deja ver la escena iso (no pintamos banda negra) */
+	if (first < 0) return;
+
+	/* Fondo negro contiguo bajo el texto (como la barra de mensajes 2D),
+	 * cubriendo los espacios internos del prompt para que sea legible. */
+	gdk_draw_rectangle(td->drawing_area->window,
+	                   td->drawing_area->style->black_gc, TRUE,
+	                   first * td->font_wid, row * td->font_hgt,
+	                   (last - first + 1) * td->font_wid, td->font_hgt);
+
+	/* Redibuja el texto agrupando celdas contiguas del mismo color */
+	x = first;
+	while (x <= last)
+	{
+		byte a = scr->a[row][x];
+		char buf[256];
+		int start = x, len = 0;
+
+		while (x <= last && scr->a[row][x] == a && len < (int)sizeof(buf) - 1)
+		{
+			buf[len++] = scr->c[row][x];
+			x++;
+		}
+
+		term_data_set_fg(td, a);
+		gdk_draw_text(td->drawing_area->window, td->font, td->gc,
+		              start * td->font_wid,
+		              td->font->ascent + row * td->font_hgt,
+		              buf, len);
+	}
+}
+
 /* Pinta la escena isométrica completa sobre la ventana principal. */
 static void iso_draw_scene(term_data *td)
 {
@@ -3736,6 +3792,11 @@ static void iso_draw_scene(term_data *td)
 	                   0, 0, win_w, win_h);
 
 	iso_render_scene(td, p_ptr->px, p_ptr->py, win_w, win_h, iso_cell_cb);
+
+	/* Recompón la línea de mensajes/prompt (fila 0), que la escena iso acaba
+	 * de tapar. Sin esto, comandos como wield/quaff/eat/drop no muestran su
+	 * "... which item?" en modo iso. */
+	iso_overlay_text_row(td, 0);
 }
 
 static errr Term_xtra_gtk(int n, int v)
@@ -3757,10 +3818,15 @@ static errr Term_xtra_gtk(int n, int v)
 	case TERM_XTRA_FRESH:
 		{
 			/* TomeTik: en modo iso, repinta la escena isométrica sobre la
-			 * ventana principal tras refrescar el term. NO mientras se muestra
-			 * una tienda (iso_in_store) -> deja ver el texto de la tienda. */
+			 * ventana principal tras refrescar el term. NO mientras hay texto
+			 * plano de pantalla completa por encima: la tienda (iso_in_store)
+			 * o cualquier popup que pase por screen_save() -> character_icky
+			 * (inventario 'i', hoja 'C', menús de hechizos/skills, ayuda,
+			 * opciones, la lista de objetos con '*', prompts de askfor...).
+			 * En esos casos dejamos ver el render 2D del term. */
 			if (iso_mode && iso_sheet && game_in_progress && character_generated
-			                && !iso_in_store && (Term == &data[0].t))
+			                && !iso_in_store && !character_icky
+			                && (Term == &data[0].t))
 			{
 				iso_draw_scene(&data[0]);
 			}
@@ -5093,9 +5159,11 @@ static gboolean expose_event_handler(
 	 * store guarda el render 2D del term). Por eso cualquier expose -p.ej. al
 	 * arrastrarse el popup del tooltip por encima del mapa- debe repintar la
 	 * escena iso, no blitear el 2D del backing store. Mismas condiciones que el
-	 * repintado iso de TERM_XTRA_FRESH. */
+	 * repintado iso de TERM_XTRA_FRESH (incluido el gate por popups: con un
+	 * texto plano de pantalla completa arriba restauramos el backing store
+	 * 2D, no repintamos la escena iso). */
 	if (iso_mode && iso_sheet && game_in_progress && character_generated
-	                && !iso_in_store && (td == &data[0]))
+	                && !iso_in_store && !character_icky && (td == &data[0]))
 	{
 		iso_draw_scene(td);
 		return (TRUE);

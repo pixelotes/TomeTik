@@ -4543,6 +4543,56 @@ void show_equip_aux(bool mirror, bool everything);
 void show_inven_aux(bool mirror, bool everything);
 
 /*
+ * TomeTik: cabecera del comando activo que se pinta arriba de la sub-ventana
+ * de selección de objeto (inven/equip), p.ej. "== EAT ==". Cadena vacía =
+ * ningún comando en curso -> no se dibuja cabecera. La fija get_item_floor()
+ * a partir del prompt y la limpia al terminar.
+ */
+static char item_menu_header[80] = "";
+
+/*
+ * Deriva una cabecera corta en mayúsculas a partir del prompt de get_item,
+ * p.ej. "Wear/Wield which item? " -> "== WEAR/WIELD ==", "Quaff which potion? "
+ * -> "== QUAFF ==". Cadena vacía si no hay prompt utilizable.
+ */
+static void set_item_menu_header(cptr pmt)
+{
+	char label[64];
+	int i = 0;
+	cptr p = pmt;
+
+	if (!pmt)
+	{
+		item_menu_header[0] = '\0';
+		return;
+	}
+
+	/* Copia hasta " which" o '?' (lo que llegue antes) */
+	while (*p && i < (int)sizeof(label) - 1)
+	{
+		if (*p == '?') break;
+		if (!strncmp(p, " which", 6)) break;
+		label[i++] = *p++;
+	}
+
+	/* Recorta espacios finales */
+	while (i > 0 && label[i - 1] == ' ') i--;
+	label[i] = '\0';
+
+	if (i == 0)
+	{
+		item_menu_header[0] = '\0';
+		return;
+	}
+
+	/* A mayúsculas (sin depender de ctype) */
+	for (i = 0; label[i]; i++)
+		if (label[i] >= 'a' && label[i] <= 'z') label[i] -= 32;
+
+	sprintf(item_menu_header, "== %.60s ==", label);
+}
+
+/*
  * Choice window "shadow" of the "show_inven()" function
  */
 void display_inven(void)
@@ -4681,6 +4731,15 @@ void show_inven_aux(bool mirror, bool everything)
 	if (mirror) col = 0;
 	else col = (len > wid - 4) ? 0 : (wid - len - 1);
 	col -= col % (arg_zoom * (use_bigtile ? 2 : 1));
+
+	/* TomeTik: cabecera del comando activo arriba de la sub-ventana, y desplaza
+	 * los items una fila para dejarle sitio. */
+	if (mirror && item_menu_header[0])
+	{
+		Term_erase(0, 0, 255);
+		c_put_str(TERM_L_BLUE, item_menu_header, 0, 0);
+		row = 1;
+	}
 
 	/* Output each entry */
 	for (j = 0; j < k; j++)
@@ -4985,10 +5044,19 @@ void show_equip_aux(bool mirror, bool everything)
 
 	/* Hack -- Find a column to start in */
 	if (mirror) col = 0;
-	else 
+	else
 	{
 		col = (wid - len - 1) - (wid - len - COL_MAP) % (arg_zoom * (use_bigtile ? 2 : 1));
 		if (col < COL_MAP) col = 0;
+	}
+
+	/* TomeTik: cabecera del comando activo arriba de la sub-ventana (ver
+	 * show_inven_aux), desplazando los items una fila. */
+	if (mirror && item_menu_header[0])
+	{
+		Term_erase(0, 0, 255);
+		c_put_str(TERM_L_BLUE, item_menu_header, 0, 0);
+		row = 1;
 	}
 
 	/* Output each entry */
@@ -5726,6 +5794,9 @@ bool get_item_floor(int *cp, cptr pmt, cptr str, int mode)
 		screen_save();
 	}
 
+	/* TomeTik: cabecera "== EAT ==" para la sub-ventana de selección */
+	set_item_menu_header(pmt);
+
 	/* Repeat until done */
 	while (!done)
 	{
@@ -6266,6 +6337,10 @@ bool get_item_floor(int *cp, cptr pmt, cptr str, int mode)
 			object_track(&o_list[0 - *cp]);
 		}
 	}
+
+	/* TomeTik: comando terminado -> limpia la cabecera antes de que el
+	 * redibujado de las sub-ventanas vuelva a mostrar el inventario normal */
+	item_menu_header[0] = '\0';
 
 	/* Clean up */
 	if (show_choices)

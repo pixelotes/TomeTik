@@ -1,6 +1,6 @@
 /*
 ** Lua binding: z_pack
-** Generated automatically by tolua 4.0a - angband on Sun May 31 14:39:08 2026.
+** Generated automatically by tolua 4.0a - angband on Sun May 31 15:16:16 2026.
 */
 
 #include "lua/tolua.h"

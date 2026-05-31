@@ -57,6 +57,14 @@ typedef bool (*astar_walkable_hook)(int y, int x, void *user);
 /* Movement model: orthogonal only, or orthogonal + diagonals. */
 #define ASTAR_4DIR 0
 #define ASTAR_8DIR 1
+/*
+ * Like ASTAR_8DIR, but diagonal moves MAY "cut corners" (a diagonal step is
+ * allowed even if the two orthogonally adjacent tiles are blocked). This matches
+ * Angband/ToME player movement, where you can step diagonally between two wall
+ * corners. Use this for "travel"/click-to-walk so paths hug corridors the way a
+ * player actually walks; use plain ASTAR_8DIR for agents that must not squeeze.
+ */
+#define ASTAR_8DIR_CUT 2
 
 /*
  * Find the optimal path on a 'height' x 'width' grid described by 'walkable',
