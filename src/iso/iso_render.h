@@ -28,6 +28,14 @@
 #define ISO_STEP_X    (ISO_TILE_W / 2 - ISO_OVERLAPX)   /* 25 */
 #define ISO_STEP_Y    (ISO_FLOOR_H / 2 - ISO_OVERLAPY)  /* 12 */
 
+/*
+ * Centro vertical del rombo de SUELO dentro de la caja del tile (medido desde
+ * el borde superior). Es donde "se posan los pies" de un actor; coincide con
+ * la colocación del overlay Gervais en iso_cell_cb (sy + ISO_TILE_H/2 + 6).
+ * Lo usa iso_unproject() para mapear un píxel al suelo de una celda.
+ */
+#define ISO_FLOOR_CY  (ISO_TILE_H / 2 + 6)              /* 30 */
+
 /* Lámina dg_iso32.gif: rejilla de tiles. */
 #define ISO_SHEET_COLS 14
 #define ISO_SHEET_ROWS 15
@@ -40,6 +48,18 @@
  */
 void iso_project(int cx, int cy, int px, int py,
                  int win_w, int win_h, int *sx, int *sy);
+
+/*
+ * Inverso de iso_project(): dado un píxel (mx,my) de la ventana, calcula la
+ * celda del cave (*cx,*cy) cuyo rombo de SUELO queda bajo ese punto, con la
+ * vista centrada en el jugador (px,py). Es el mapeo necesario para el ratón
+ * (tooltips, clic-para-ir). Mapea al plano del suelo: un punto sobre la parte
+ * alta de un muro se resuelve a la celda del suelo de ese muro, no a la celda
+ * de detrás (aproximación suficiente para hover; sin el hit-test fino de capas
+ * de OmnibandTk).
+ */
+void iso_unproject(int mx, int my, int px, int py,
+                   int win_w, int win_h, int *cx, int *cy);
 
 /*
  * Callback por celda visible. El núcleo lo invoca en ORDEN DE PROFUNDIDAD

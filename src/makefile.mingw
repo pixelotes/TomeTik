@@ -53,7 +53,7 @@ COREOBJS = \
 	help.o init1.o init2.o levels.o loadsave.o lua_bind.o \
 	main-win.o main.o melee1.o melee2.o modules.o \
 	monster1.o monster2.o monster3.o notes.o object1.o object2.o \
-	plots.o powers.o randart.o readdib.o script.o spells1.o spells2.o \
+	pathfind.o plots.o powers.o randart.o readdib.o script.o spells1.o spells2.o \
 	squeltch.o status.o store.o tables.o traps.o util.o variable.o \
 	wild.o wizard1.o wizard2.o xtra1.o xtra2.o \
 	z-form.o z-rand.o z-term.o z-util.o z-virt.o z-sock.o

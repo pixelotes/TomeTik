@@ -8,7 +8,10 @@ Mejoras y objetivos futuros (ToME 2.2.2 + tiles, port moderno en Docker).
 - [ ] **Arreglar el cambio dinámico** isométrico ⇄ tiles 2D ⇄ ASCII.
 
 ## Ratón
-- [ ] **Tooltips de casilla** ("You are looking at a wall", etc.).
+- [x] **Tooltips de casilla** ("You are looking at a wall", etc.). Texto del motor
+  vía `describe_grid()` (xtra2.c, gemelo no interactivo de `target_set_aux`,
+  modelado en `angtk_examine` de OmnibandTk). GTK2: popup que sigue al ratón en
+  los 3 modos (iso/2D/ASCII) y single/double wide. GDI: tracking tooltip Win32.
 - [ ] **Ir a coordenadas al hacer clic.**
 - [ ] **Menú contextual con clic derecho.**
 

@@ -287,6 +287,7 @@
  */
 #include <mmsystem.h>
 #include <commdlg.h>
+#include <commctrl.h>   /* TomeTik: tooltip de casilla (tracking tooltip) */
 
 /*
  * Include the support for loading bitmaps
@@ -3809,6 +3810,102 @@ ofn.lStructSize = sizeof(OPENFILENAME);
 
 
 
+/*
+ * TomeTik: tooltip de casilla al pasar el ratón por el mapa (frontend GDI).
+ *
+ * El texto lo genera el motor con describe_grid() -- el mismo "qué hay aquí"
+ * del comando look -- y se muestra con un "tracking tooltip" nativo de Win32
+ * (comctl32) que sigue al cursor. Funciona con tiles 2D, ASCII y con bigtile o
+ * zoom (el inverso de panel_col_of()/panel_row_of()).
+ */
+static HWND hwndTooltip = NULL;       /* tracking tooltip (creado en caliente) */
+static int tip_cy = -1, tip_cx = -1;  /* última celda descrita */
+static bool tip_track_armed = FALSE;  /* TrackMouseEvent (WM_MOUSELEAVE) armado */
+
+/* Inverso de panel_col_of()/panel_row_of(): píxel cliente -> celda del cave.
+ * Devuelve FALSE si el píxel cae fuera del área de mapa (bordes / sidebar). */
+static bool win_map_pixel_to_cave(term_data *td, int px, int py, int *cy, int *cx)
+{
+	int term_col, term_row, col, row;
+
+	if (px < (int)td->size_ow1 || py < (int)td->size_oh1) return FALSE;
+
+	term_col = (px - td->size_ow1) / td->tile_wid;
+	term_row = (py - td->size_oh1) / td->tile_hgt;
+
+	col = term_col - COL_MAP;
+	row = term_row - ROW_MAP;
+	if (col < 0 || row < 0) return FALSE;
+
+	if (use_bigtile) col /= 2;
+	if (use_zoom) { col /= arg_zoom; row /= arg_zoom; }
+
+	*cx = col + panel_col_min;
+	*cy = row + panel_row_min;
+	return TRUE;
+}
+
+/* Crea el tooltip la primera vez, asociado a la ventana del mapa. */
+static void win_tooltip_ensure(HWND hwndParent)
+{
+	TOOLINFO ti;
+
+	if (hwndTooltip) return;
+
+	InitCommonControls();
+
+	hwndTooltip = CreateWindowEx(
+	        WS_EX_TOPMOST, TOOLTIPS_CLASS, NULL,
+	        WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,
+	        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+	        hwndParent, NULL, hInstance, NULL);
+	if (!hwndTooltip) return;
+
+	memset(&ti, 0, sizeof(ti));
+	ti.cbSize = sizeof(ti);
+	ti.uFlags = TTF_TRACK | TTF_ABSOLUTE;
+	ti.hwnd = hwndParent;
+	ti.uId = 1;
+	ti.lpszText = (LPSTR)"";
+	SendMessage(hwndTooltip, TTM_ADDTOOL, 0, (LPARAM)&ti);
+}
+
+/* Muestra/actualiza el tooltip con 'text' en la posición de pantalla (sx,sy). */
+static void win_tooltip_show(HWND hwndParent, cptr text, int sx, int sy)
+{
+	TOOLINFO ti;
+
+	win_tooltip_ensure(hwndParent);
+	if (!hwndTooltip) return;
+
+	memset(&ti, 0, sizeof(ti));
+	ti.cbSize = sizeof(ti);
+	ti.hwnd = hwndParent;
+	ti.uId = 1;
+	ti.lpszText = (LPSTR)text;
+	SendMessage(hwndTooltip, TTM_UPDATETIPTEXT, 0, (LPARAM)&ti);
+	SendMessage(hwndTooltip, TTM_TRACKPOSITION, 0,
+	            (LPARAM)MAKELONG(sx + 14, sy + 14));
+	SendMessage(hwndTooltip, TTM_TRACKACTIVATE, (WPARAM)TRUE, (LPARAM)&ti);
+}
+
+/* Oculta el tooltip y olvida la celda mostrada. */
+static void win_tooltip_hide(HWND hwndParent)
+{
+	TOOLINFO ti;
+
+	tip_cy = tip_cx = -1;
+	if (!hwndTooltip) return;
+
+	memset(&ti, 0, sizeof(ti));
+	ti.cbSize = sizeof(ti);
+	ti.hwnd = hwndParent;
+	ti.uId = 1;
+	SendMessage(hwndTooltip, TTM_TRACKACTIVATE, (WPARAM)FALSE, (LPARAM)&ti);
+}
+
+
+
 #ifdef __MWERKS__
 LRESULT FAR PASCAL AngbandWndProc(HWND hWnd, UINT uMsg,
                                   WPARAM wParam, LPARAM lParam);
@@ -4070,6 +4167,74 @@ LRESULT FAR PASCAL AngbandWndProc(HWND hWnd, UINT uMsg,
 			ReleaseDC(hWnd, hdc);
 
 			return 0;
+		}
+
+		/* TomeTik: tooltip de casilla al pasar el ratón por el mapa */
+	case WM_MOUSEMOVE:
+		{
+			int cx = 0, cy = 0;
+			char buf[160];
+			POINT pt;
+
+			/* Solo con una partida en curso */
+			if (!td || !character_generated)
+			{
+				win_tooltip_hide(hWnd);
+				break;
+			}
+
+			pt.x = (int)(short)LOWORD(lParam);
+			pt.y = (int)(short)HIWORD(lParam);
+
+			if (!win_map_pixel_to_cave(td, pt.x, pt.y, &cy, &cx))
+			{
+				win_tooltip_hide(hWnd);
+				break;
+			}
+
+			/* Pedir que nos avisen cuando el ratón salga de la ventana */
+			if (!tip_track_armed)
+			{
+				TRACKMOUSEEVENT tme;
+				tme.cbSize = sizeof(tme);
+				tme.dwFlags = TME_LEAVE;
+				tme.hwndTrack = hWnd;
+				tme.dwHoverTime = 0;
+				TrackMouseEvent(&tme);
+				tip_track_armed = TRUE;
+			}
+
+			/* Pasar a coordenadas de pantalla para el tooltip */
+			ClientToScreen(hWnd, &pt);
+
+			/* Misma celda: solo reposicionar */
+			if (cy == tip_cy && cx == tip_cx)
+			{
+				if (hwndTooltip)
+					SendMessage(hwndTooltip, TTM_TRACKPOSITION, 0,
+					            (LPARAM)MAKELONG(pt.x + 14, pt.y + 14));
+				break;
+			}
+
+			/* Texto del motor (vacío => nada que mostrar) */
+			describe_grid(cy, cx, buf);
+			if (buf[0] == '\0')
+			{
+				win_tooltip_hide(hWnd);
+				break;
+			}
+
+			tip_cy = cy;
+			tip_cx = cx;
+			win_tooltip_show(hWnd, buf, pt.x, pt.y);
+			break;
+		}
+
+	case WM_MOUSELEAVE:
+		{
+			tip_track_armed = FALSE;
+			win_tooltip_hide(hWnd);
+			break;
 		}
 
 	case WM_ACTIVATE:

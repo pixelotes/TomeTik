@@ -46,6 +46,7 @@
 #include "types.h"
 #include "externs.h"
 #include "plots.h"
+#include "pathfind.h"
 
 /***** Some copyright messages follow below *****/
 

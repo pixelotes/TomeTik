@@ -1645,6 +1645,7 @@ extern void verify_panel(void);
 extern void resize_map(void);
 extern void resize_window(void);
 extern cptr look_mon_desc(int m_idx);
+extern void describe_grid(int y, int x, char *out_val);
 extern void ang_sort_aux(vptr u, vptr v, int p, int q);
 extern void ang_sort(vptr u, vptr v, int n);
 extern bool target_able(int m_idx);

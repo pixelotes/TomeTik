@@ -24,6 +24,33 @@ void iso_project(int cx, int cy, int px, int py,
 	*sy = win_h / 2 - ISO_TILE_H / 2 + irow * ISO_STEP_Y;
 }
 
+void iso_unproject(int mx, int my, int px, int py,
+                   int win_w, int win_h, int *cx, int *cy)
+{
+	/*
+	 * iso_project es lineal: sx depende solo de icol, sy solo de irow, donde
+	 *   icol = (cx - cy) - (px - py),  irow = (cx + cy) - (px + py).
+	 * El centro del rombo de suelo del jugador (icol=irow=0) cae en pantalla en
+	 *   X0 = win_w/2,  Y0 = win_h/2 - ISO_TILE_H/2 + ISO_FLOOR_CY.
+	 * Invirtiendo (en reales) y despejando cx,cy:
+	 *   icol = (mx - X0) / ISO_STEP_X,  irow = (my - Y0) / ISO_STEP_Y
+	 *   cx = px + (icol + irow)/2,      cy = py + (irow - icol)/2
+	 * La división entre 2 garantiza enteros con la paridad correcta (icol e irow
+	 * siempre comparten paridad), así que redondeamos cx,cy directamente. */
+	double x0 = win_w / 2.0;
+	double y0 = win_h / 2.0 - ISO_TILE_H / 2.0 + ISO_FLOOR_CY;
+
+	double icol = (mx - x0) / ISO_STEP_X;
+	double irow = (my - y0) / ISO_STEP_Y;
+
+	double a = (icol + irow) / 2.0;
+	double b = (irow - icol) / 2.0;
+
+	/* Redondeo al entero más cercano (válido para negativos). */
+	*cx = px + (int)(a >= 0 ? a + 0.5 : a - 0.5);
+	*cy = py + (int)(b >= 0 ? b + 0.5 : b - 0.5);
+}
+
 void iso_render_scene(void *ctx, int px, int py,
                       int win_w, int win_h, iso_cell_fn cell)
 {
