@@ -263,6 +263,21 @@ static GdkPixbuf *iso_sheet = NULL;  /* dg_iso32.gif (14x15 tiles 54x49, cian tr
 static GdkPixbuf *gerv_sheet = NULL;
 static int gerv_cols = 0, gerv_rows = 0;
 
+/* TomeTik: tiles extra de Dungeon Odyssey (iso, 54x54, magenta #FF00FF transp.) para
+ * features sin equivalente en dg_iso32 (fuente, altares, fuego, pit, trampa, pools).
+ * Sheet ensamblada en lib/xtra/iso/do_extra.png (7 cols). Se blitean con offset -5
+ * en Y para alinear el rombo de suelo (DO 54px vs dg_iso32 49px). Ver iso_do_tile(). */
+static GdkPixbuf *do_sheet = NULL;
+#define DO_TILE_W   54
+#define DO_TILE_H   54
+#define DO_COLS      7
+#define DO_DY       (-5)        /* offset vertical para casar el rombo de suelo */
+enum {
+	DO_FOUNTAIN = 0, DO_PIT, DO_FIRE, DO_TRAP, DO_MONTRAP,
+	DO_ALTAR_BEING, DO_ALTAR_WINDS, DO_ALTAR_FORCE, DO_ALTAR_DARK, DO_ALTAR_NATURE,
+	DO_NETHER, DO_MIRKY, DO_WATER, DO_EMBERS
+};
+
 /*
  * TomeTik: layout por defecto de las ventanas, pensado para la pantalla
  * ~1280x800 del contenedor noVNC. Posición (x,y) en píxeles, tamaño en celdas
@@ -2442,6 +2457,20 @@ static bool iso_load_sheets(void)
 		plog_fmt("iso: no pude cargar %s; sin actores", path);
 	}
 
+	/* Tiles extra de Dungeon Odyssey (opcional; si falta, esas features caen a
+	 * suelo gris como antes). Magenta #FF00FF -> alfa. */
+	path_build(path, 1024, ANGBAND_DIR_XTRA, "iso/do_extra.png");
+	raw = gdk_pixbuf_new_from_file(path, NULL);
+	if (raw)
+	{
+		do_sheet = gdk_pixbuf_add_alpha(raw, TRUE, 0xFF, 0x00, 0xFF);
+		g_object_unref(raw);
+	}
+	else
+	{
+		plog_fmt("iso: no pude cargar %s; features extra como suelo gris", path);
+	}
+
 	return TRUE;
 }
 
@@ -3215,6 +3244,9 @@ static bool iso_is_wall_feat(int f)
 	 * de los edificios del pueblo (feats 190-198, todos WALL), que antes caían al
 	 * suelo y se veían como losas planas. */
 	if ((f < 0) || (f >= max_f_idx)) return FALSE;
+	/* Muro de ilusión: es FLOOR (atravesable) pero SE VE como muro -> en iso lo
+	 * pintamos como cubo para preservar la ilusión. */
+	if (f == FEAT_ILLUS_WALL) return TRUE;
 	if (iso_is_door_feat(f)) return FALSE;
 	if (iso_overlay_tile(f) >= 0) return FALSE;
 	return (f_info[f].flags1 & FF1_WALL) != 0;
@@ -3227,7 +3259,10 @@ static int iso_ground_tile(int f)
 	{
 		case FEAT_GRASS: case FEAT_FLOWER:
 		case FEAT_TREES: case FEAT_SMALL_TREES: case FEAT_DEAD_TREE:
-			return 0;                                   /* hierba */
+		case FEAT_DEAD_SMALL_TREE:         return 0;    /* hierba (árboles van de overlay) */
+		case 181:                          return 30;   /* field -> surcos de cultivo */
+		case 200: case 201:                return 15;   /* cobblestone road -> adoquín */
+		case 207:                          return 58;   /* rocky ground -> grava */
 		case FEAT_DIRT: case FEAT_SAND:    return 9;    /* tierra/arena */
 		case FEAT_MUD:                     return 22;
 		case FEAT_ICE:                     return 39;
@@ -3249,8 +3284,10 @@ static int iso_overlay_tile(int f)
 		case FEAT_TREES:        return 47;
 		case FEAT_SMALL_TREES:  return 48;
 		case FEAT_DEAD_TREE:    return 46;
+		case FEAT_DEAD_SMALL_TREE: return 46;   /* árbol seco pequeño -> árbol muerto */
 		case FEAT_MOUNTAIN:     return 34;
 		case FEAT_RUBBLE:       return 58;
+		case 16:                return 42;      /* web -> telaraña/red iso */
 		default:                return -1;
 	}
 }
@@ -3384,6 +3421,44 @@ static void iso_blit(term_data *td, int idx, int sx, int sy)
 	                GDK_RGB_DITHER_NONE, 0, 0);
 }
 
+/* Blit de un tile extra de Dungeon Odyssey (54x54) en (sx, sy+DO_DY) para alinear
+ * el rombo de suelo con los tiles dg_iso32 (49px). */
+static void do_blit(term_data *td, int idx, int sx, int sy)
+{
+	int col, row;
+	if (!do_sheet || idx < 0) return;
+	col = idx % DO_COLS;
+	row = idx / DO_COLS;
+	gdk_draw_pixbuf(td->drawing_area->window, td->gc, do_sheet,
+	                col * DO_TILE_W, row * DO_TILE_H,
+	                sx, sy + DO_DY, DO_TILE_W, DO_TILE_H,
+	                GDK_RGB_DITHER_NONE, 0, 0);
+}
+
+/* Mapea una feature a un tile extra de Dungeon Odyssey, o -1 si ninguno.
+ * Estas features no tienen equivalente en dg_iso32; se pintan sobre el suelo. */
+static int iso_do_tile(int f)
+{
+	switch (f)
+	{
+		case FEAT_FOUNTAIN:                return DO_FOUNTAIN;
+		case 15:                           return DO_FOUNTAIN;   /* fountain (2ª) */
+		case FEAT_DARK_PIT:                return DO_PIT;
+		case FEAT_GREAT_FIRE: case FEAT_FIRE: return DO_FIRE;    /* 178 / 205 */
+		case FEAT_TRAP:                    return DO_TRAP;
+		case FEAT_MON_TRAP:                return DO_MONTRAP;
+		case 161:                          return DO_ALTAR_BEING;
+		case 162:                          return DO_ALTAR_WINDS;
+		case 163:                          return DO_ALTAR_FORCE;
+		case 164:                          return DO_ALTAR_DARK;
+		case 165:                          return DO_ALTAR_NATURE;
+		case 102:                          return DO_NETHER;     /* nether mist */
+		case 208: case 210:                return DO_MIRKY;      /* vapour / dense mist */
+		case 209:                          return DO_WATER;      /* condensing water */
+		default:                           return -1;
+	}
+}
+
 /*
  * Callback de celda del núcleo iso: elige y dibuja el/los tile(s) de la celda.
  * Solo celdas conocidas (CAVE_MARK). Muros llevan suelo debajo (los tiles de
@@ -3440,6 +3515,13 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 		iso_blit(td, ISO_T_FLOOR, sx, sy);
 		iso_blit(td, ISO_T_WOODDOOR + (iso_door_we(cy, cx) ? 1 : 0), sx, sy);
 	}
+	else if ((f == FEAT_QUEST_EXIT) || (f == 12))    /* 12 = town exit */
+	{
+		/* Salida de quest / del pueblo: arco de piedra ABIERTO (93 ns / 94 we),
+		 * como una puerta/portón de salida. */
+		iso_blit(td, ISO_T_FLOOR, sx, sy);
+		iso_blit(td, ISO_T_DOOR + (iso_door_we(cy, cx) ? 1 : 0), sx, sy);
+	}
 	else if (iso_is_up_stair(f))
 	{
 		iso_blit(td, iso_ground_tile(f), sx, sy);
@@ -3449,6 +3531,13 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 	{
 		iso_blit(td, iso_ground_tile(f), sx, sy);
 		iso_blit(td, ISO_T_STAIR + 1, sx, sy);
+	}
+	else if (do_sheet && iso_do_tile(f) >= 0)
+	{
+		/* feature sin tile en dg_iso32 -> tile extra de Dungeon Odyssey sobre suelo
+		 * (fuente, altar, fuego, pit, trampa, pools de niebla/agua). */
+		iso_blit(td, ISO_T_FLOOR, sx, sy);
+		do_blit(td, iso_do_tile(f), sx, sy);
 	}
 	else
 	{
@@ -3484,6 +3573,88 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 	}
 }
 
+/*
+ * TomeTik: auditoría de cobertura de tiles en modo ISO. Escribe un informe en
+ * ANGBAND_DIR_USER/iso_coverage.txt con:
+ *  - MONSTRUOS y OBJETOS sin tile gráfico (x_attr sin el bit 0x80): en iso solo
+ *    dibujamos el sprite si map_info devuelve un tile gráfico, así que esas
+ *    entidades son INVISIBLES en iso (en 2D salen como letra ASCII).
+ *  - FEATURES que el render iso pinta como suelo gris genérico (tile 13) por no
+ *    tener tratamiento propio en iso_cell_cb (posibles huecos del mapeo de terreno).
+ * Se dispara solo si la variable de entorno TOMETIK_ISO_AUDIT está definida, al
+ * entrar en el modo iso. No afecta al juego normal.
+ */
+static void iso_audit_coverage(void)
+{
+	FILE *fp;
+	char path[1024];
+	int i, n_mon = 0, n_obj = 0, n_feat = 0;
+
+	path_build(path, sizeof(path), ANGBAND_DIR_USER, "iso_coverage.txt");
+	fp = my_fopen(path, "w");
+	if (!fp) { plog_fmt("iso-audit: no pude abrir %s", path); return; }
+
+	fprintf(fp, "# TomeTik - auditoria de cobertura de tiles en modo ISO\n");
+	fprintf(fp, "# Entidades sin tile grafico (x_attr sin bit 0x80) -> INVISIBLES en iso.\n");
+	fprintf(fp, "# (En modo 2D salen como caracter ASCII; en iso no se dibujan.)\n\n");
+
+	fprintf(fp, "== MONSTRUOS sin tile (invisibles en iso) ==\n");
+	for (i = 1; i < max_r_idx; i++)
+	{
+		monster_race *r = &r_info[i];
+		if (!r->name) continue;
+		if (!(r->x_attr & 0x80))
+		{
+			fprintf(fp, "  R:%-4d %s\n", i, r_name + r->name);
+			n_mon++;
+		}
+	}
+	fprintf(fp, "  --- total monstruos sin tile: %d ---\n\n", n_mon);
+
+	fprintf(fp, "== OBJETOS sin tile (invisibles en iso) ==\n");
+	for (i = 1; i < max_k_idx; i++)
+	{
+		object_kind *k = &k_info[i];
+		if (!k->name) continue;
+		if (!(k->x_attr & 0x80))
+		{
+			fprintf(fp, "  K:%-4d %s\n", i, k_name + k->name);
+			n_obj++;
+		}
+	}
+	fprintf(fp, "  --- total objetos sin tile: %d ---\n\n", n_obj);
+
+	fprintf(fp, "== FEATURES que el iso pinta como SUELO GRIS generico (tile 13) ==\n");
+	fprintf(fp, "# Sin tratamiento propio en iso_cell_cb; revisar si necesitan tile real\n");
+	fprintf(fp, "# (puerta entre mundos, trampa, altar, fuente... no deberian ser suelo).\n");
+	for (i = 1; i < max_f_idx; i++)
+	{
+		feature_type *f = &f_info[i];
+		if (!f->name) continue;
+		/* ¿el iso le da tratamiento propio? */
+		if (iso_is_wall_feat(i) || iso_is_door_feat(i) || (i == FEAT_SHOP) ||
+		                (i == FEAT_QUEST_EXIT) || (i == 12) /* town exit */ ||
+		                iso_is_up_stair(i) || iso_is_down_stair(i) ||
+		                (iso_overlay_tile(i) >= 0) ||
+		                (do_sheet && iso_do_tile(i) >= 0))
+			continue;
+		/* iso_ground_tile devuelve 13 SOLO en el caso por defecto (no reconocido). */
+		if (iso_ground_tile(i) == ISO_T_FLOOR)
+		{
+			fprintf(fp, "  F:%-4d %s\n", i, f_name + f->name);
+			n_feat++;
+		}
+	}
+	fprintf(fp, "  --- total features como suelo gris: %d ---\n\n", n_feat);
+
+	fprintf(fp, "RESUMEN: %d monstruos, %d objetos sin tile (invisibles en iso); "
+	            "%d features pintadas como suelo gris.\n", n_mon, n_obj, n_feat);
+
+	my_fclose(fp);
+	plog_fmt("iso-audit: informe escrito en %s (%d mon, %d obj, %d feat)",
+	         path, n_mon, n_obj, n_feat);
+}
+
 /* Pinta la escena isométrica completa sobre la ventana principal. */
 static void iso_draw_scene(term_data *td)
 {
@@ -3491,6 +3662,15 @@ static void iso_draw_scene(term_data *td)
 	int win_h = td->rows * td->font_hgt;
 
 	if (!iso_sheet || !td->drawing_area->window) return;
+
+	/* Auditoría de cobertura (una sola vez, bajo TOMETIK_ISO_AUDIT). Aquí los
+	 * x_attr/x_char ya están poblados por el prf de gráficos (estamos pintando
+	 * tiles), a diferencia de init_graphics que corre antes de cargarse. */
+	if (getenv("TOMETIK_ISO_AUDIT"))
+	{
+		static bool iso_audited = FALSE;
+		if (!iso_audited) { iso_audited = TRUE; iso_audit_coverage(); }
+	}
 
 	/* fondo negro */
 	gdk_draw_rectangle(td->drawing_area->window,

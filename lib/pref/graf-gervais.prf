@@ -6414,6 +6414,10 @@ R:1073:0x92/0xBA
 R:1074:0x92/0xBB
 R:1075:0x92/0xBC
 
+# TomeTik: Neil, the Sorceror (1076) no tenía tile -> invisible en modo iso.
+# Reutilizamos el tile del "Sorcerer" genérico (R:638 = 0xAB/0x98).
+R:1076:0xAB/0x98
+
 # & Spellbook~ of #
 K:757:0x91/0xA4
 
