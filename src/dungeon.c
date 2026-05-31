@@ -5222,6 +5222,13 @@ static void dungeon(void)
 	/* Disturb */
 	disturb(1, 0);
 
+	/* TomeTik: en SUPERFICIE (pueblo / exterior local) la visión es total: al
+	 * entrar al nivel lo iluminamos y memorizamos entero (como de día), en vez
+	 * de depender del pequeño radio de antorcha. En mazmorra se conserva el FOV
+	 * normal (radio de luz). No aplica al mapa-mundo (wild_mode), que ya tiene
+	 * su propia gestión de "conocido". */
+	if (!dun_level && !p_ptr->wild_mode) wiz_lite();
+
 	/* Track maximum player level */
 	if (p_ptr->max_plv < p_ptr->lev)
 	{

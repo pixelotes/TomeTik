@@ -76,6 +76,6 @@ typedef void (*iso_cell_fn)(void *ctx, int cx, int cy, int sx, int sy);
  * ventana se omiten). No dibuja nada por sí mismo.
  */
 void iso_render_scene(void *ctx, int px, int py,
-                      int win_w, int win_h, iso_cell_fn cell);
+                      int win_w, int win_h, int ox, int oy, iso_cell_fn cell);
 
 #endif /* ISO_RENDER_H */

@@ -3821,6 +3821,10 @@ ofn.lStructSize = sizeof(OPENFILENAME);
 static HWND hwndTooltip = NULL;       /* tracking tooltip (creado en caliente) */
 static int tip_cy = -1, tip_cx = -1;  /* última celda descrita */
 static bool tip_track_armed = FALSE;  /* TrackMouseEvent (WM_MOUSELEAVE) armado */
+static char tip_pending[256];         /* texto a mostrar cuando salte el timer */
+static int tip_px = 0, tip_py = 0;    /* posición (pantalla) donde mostrarlo */
+#define TIP_TIMER_ID  1001            /* id del SetTimer del retardo del tooltip */
+#define TIP_DELAY_MS  250             /* espera antes de mostrar el tooltip */
 
 /* Inverso de panel_col_of()/panel_row_of(): píxel cliente -> celda del cave.
  * Devuelve FALSE si el píxel cae fuera del área de mapa (bordes / sidebar). */
@@ -3868,33 +3872,69 @@ static void win_tooltip_ensure(HWND hwndParent)
 	ti.uId = 1;
 	ti.lpszText = (LPSTR)"";
 	SendMessage(hwndTooltip, TTM_ADDTOOL, 0, (LPARAM)&ti);
+
+	/* Un ancho máximo > 0 habilita el tooltip multilínea (respeta \r\n). */
+	SendMessage(hwndTooltip, TTM_SETMAXTIPWIDTH, 0, (LPARAM)400);
 }
 
-/* Muestra/actualiza el tooltip con 'text' en la posición de pantalla (sx,sy). */
+/* Muestra/actualiza el tooltip con 'text' en la posición de pantalla (sx,sy).
+ * describe_grid() usa '\n' como separador; Win32 quiere '\r\n'. */
 static void win_tooltip_show(HWND hwndParent, cptr text, int sx, int sy)
 {
 	TOOLINFO ti;
+	char ml[512];
+	int i = 0, j = 0;
 
 	win_tooltip_ensure(hwndParent);
 	if (!hwndTooltip) return;
+
+	/* Reescribir \n -> \r\n para los saltos de línea del tooltip nativo. */
+	while (text[i] && (j < (int)sizeof(ml) - 2))
+	{
+		if (text[i] == '\n') { ml[j++] = '\r'; ml[j++] = '\n'; }
+		else ml[j++] = text[i];
+		i++;
+	}
+	ml[j] = '\0';
 
 	memset(&ti, 0, sizeof(ti));
 	ti.cbSize = sizeof(ti);
 	ti.hwnd = hwndParent;
 	ti.uId = 1;
-	ti.lpszText = (LPSTR)text;
+	ti.lpszText = (LPSTR)ml;
 	SendMessage(hwndTooltip, TTM_UPDATETIPTEXT, 0, (LPARAM)&ti);
 	SendMessage(hwndTooltip, TTM_TRACKPOSITION, 0,
 	            (LPARAM)MAKELONG(sx + 14, sy + 14));
 	SendMessage(hwndTooltip, TTM_TRACKACTIVATE, (WPARAM)TRUE, (LPARAM)&ti);
 }
 
-/* Oculta el tooltip y olvida la celda mostrada. */
+/* Programa el tooltip para 'text' en (sx,sy) tras TIP_DELAY_MS (no instantáneo).
+ * Oculta el que pudiera estar visible: reaparecerá con el texto nuevo. */
+static void win_tooltip_arm(HWND hwndParent, cptr text, int sx, int sy)
+{
+	if (hwndTooltip)
+	{
+		TOOLINFO ti;
+		memset(&ti, 0, sizeof(ti));
+		ti.cbSize = sizeof(ti);
+		ti.hwnd = hwndParent;
+		ti.uId = 1;
+		SendMessage(hwndTooltip, TTM_TRACKACTIVATE, (WPARAM)FALSE, (LPARAM)&ti);
+	}
+
+	lstrcpyn(tip_pending, text, sizeof(tip_pending));
+	tip_px = sx;
+	tip_py = sy;
+	SetTimer(hwndParent, TIP_TIMER_ID, TIP_DELAY_MS, NULL);
+}
+
+/* Oculta el tooltip, cancela el retardo pendiente y olvida la celda mostrada. */
 static void win_tooltip_hide(HWND hwndParent)
 {
 	TOOLINFO ti;
 
 	tip_cy = tip_cx = -1;
+	KillTimer(hwndParent, TIP_TIMER_ID);
 	if (!hwndTooltip) return;
 
 	memset(&ti, 0, sizeof(ti));
@@ -4195,7 +4235,7 @@ LRESULT FAR PASCAL AngbandWndProc(HWND hWnd, UINT uMsg,
 	case WM_MOUSEMOVE:
 		{
 			int cx = 0, cy = 0;
-			char buf[160];
+			char buf[256];
 			POINT pt;
 
 			/* Solo con una partida en curso */
@@ -4248,11 +4288,22 @@ LRESULT FAR PASCAL AngbandWndProc(HWND hWnd, UINT uMsg,
 
 			tip_cy = cy;
 			tip_cx = cx;
-			win_tooltip_show(hWnd, buf, pt.x, pt.y);
+			win_tooltip_arm(hWnd, buf, pt.x, pt.y);
 			break;
 		}
 
-	case WM_MOUSELEAVE:
+	case WM_TIMER:
+		{
+			if (wParam == TIP_TIMER_ID)
+			{
+				KillTimer(hWnd, TIP_TIMER_ID);
+				win_tooltip_show(hWnd, tip_pending, tip_px, tip_py);
+				return 0;
+			}
+			break;
+		}
+
+		case WM_MOUSELEAVE:
 		{
 			tip_track_armed = FALSE;
 			win_tooltip_hide(hWnd);

@@ -262,6 +262,13 @@ static GtkWidget *tooltip_win = NULL;    /* popup borderless que sigue al ratón
 static GtkWidget *tooltip_label = NULL;
 static int tooltip_cy = -1;              /* última celda descrita (para no repetir) */
 static int tooltip_cx = -1;
+static guint tooltip_timer = 0;          /* g_timeout pendiente (0 = ninguno) */
+static char tooltip_pending[256];        /* texto a mostrar cuando salte el timer */
+static gint tooltip_px = 0, tooltip_py = 0;  /* posición (raíz) donde mostrarlo */
+#define TOOLTIP_DELAY_MS 250             /* espera antes de mostrar el tooltip */
+
+/* Celda del cave resaltada bajo el ratón en modo iso (-1 = ninguna). */
+static int iso_hover_y = -1, iso_hover_x = -1;
 static GdkPixbuf *iso_sheet = NULL;  /* dg_iso32.gif (14x15 tiles 54x49, cian transp.) */
 /* Fase 4: lámina Gervais 2D 32x32 (lib/xtra/graf/32x32.bmp) para actores
  * (jugador/monstruos/objetos). map_info da (a,c); tile = fila a&0x7F, col c&0x7F.
@@ -278,10 +285,19 @@ static GdkPixbuf *do_sheet = NULL;
  * más alto que el cubo 70 y con la tapa tintada. lib/xtra/iso/building_block.png.
  * Si falta, se cae al cubo de piedra normal (ISO_T_SINGLE). */
 static GdkPixbuf *bldg_block = NULL;
+/* TomeTik: tile custom de hierba con flores (FEAT_FLOWER), 54x49, cian transp.
+ * lib/xtra/iso/grass_flowers.png. Si falta, FEAT_FLOWER cae al suelo de hierba (0). */
+static GdkPixbuf *flower_tile = NULL;
+/* TomeTik: tile custom de escombros (FEAT_RUBBLE 49 y 206 "pile of rubble"),
+ * 54x54, magenta #FF00FF transp., overlay sobre el suelo. lib/xtra/iso/rubble.png. */
+static GdkPixbuf *rubble_tile = NULL;
 #define DO_TILE_W   54
 #define DO_TILE_H   54
 #define DO_COLS      7
 #define DO_DY       (-5)        /* offset vertical para casar el rombo de suelo */
+/* Cuánto bajar el sprite del actor (jugador/monstruo/objeto) respecto al centro
+ * del rombo, para que "toque el suelo" en vez de flotar. */
+#define ISO_ACTOR_DROP  12
 enum {
 	DO_FOUNTAIN = 0, DO_PIT, DO_FIRE, DO_TRAP, DO_MONTRAP,
 	DO_ALTAR_BEING, DO_ALTAR_WINDS, DO_ALTAR_FORCE, DO_ALTAR_DARK, DO_ALTAR_NATURE,
@@ -2489,6 +2505,32 @@ static bool iso_load_sheets(void)
 	if (!bldg_block)
 		plog_fmt("iso: no pude cargar %s; edificios como cubo 70", path);
 
+	/* Tile custom de hierba con flores (cian #00FFFF -> alfa; opcional). */
+	path_build(path, 1024, ANGBAND_DIR_XTRA, "iso/grass_flowers.png");
+	raw = gdk_pixbuf_new_from_file(path, NULL);
+	if (raw)
+	{
+		flower_tile = gdk_pixbuf_add_alpha(raw, TRUE, 0x00, 0xFF, 0xFF);
+		g_object_unref(raw);
+	}
+	else
+	{
+		plog_fmt("iso: no pude cargar %s; FEAT_FLOWER como hierba", path);
+	}
+
+	/* Tile custom de escombros (magenta #FF00FF -> alfa; opcional). */
+	path_build(path, 1024, ANGBAND_DIR_XTRA, "iso/rubble.png");
+	raw = gdk_pixbuf_new_from_file(path, NULL);
+	if (raw)
+	{
+		rubble_tile = gdk_pixbuf_add_alpha(raw, TRUE, 0xFF, 0x00, 0xFF);
+		g_object_unref(raw);
+	}
+	else
+	{
+		plog_fmt("iso: no pude cargar %s; escombros como overlay 58", path);
+	}
+
 	return TRUE;
 }
 
@@ -3420,10 +3462,28 @@ static int iso_wall_shape(int y, int x)
 	return ISH_SINGLE;
 }
 
-/* Puerta horizontal (we) si hay muro/puerta al W y al E. */
+/*
+ * Orientación de una puerta: TRUE = "we" (la puerta forma parte de una línea de
+ * muro horizontal W-E, se cruza N-S), FALSE = "ns" (línea de muro vertical, se
+ * cruza W-E). Se decide por el eje con más muros/puertas flanqueando la celda;
+ * así funciona también cuando solo hay muro a un lado o en juntas (antes exigía
+ * muro a AMBOS lados W y E y, si no, caía siempre a "ns" -> puertas torcidas). */
 static bool iso_door_we(int y, int x)
 {
-	return iso_walldoor(y, x - 1) && iso_walldoor(y, x + 1);
+	/* Suma muros/puertas a lo largo de cada eje mirando DOS celdas a cada lado:
+	 * una línea de muro real continúa más allá del vecino inmediato, así que
+	 * esto detecta la dirección de la pared mucho mejor que solo radio 1 (que
+	 * fallaba en cruces y extremos -> arcos torcidos). */
+	int we = (iso_walldoor(y, x - 1) ? 1 : 0) + (iso_walldoor(y, x + 1) ? 1 : 0) +
+	         (iso_walldoor(y, x - 2) ? 1 : 0) + (iso_walldoor(y, x + 2) ? 1 : 0);
+	int ns = (iso_walldoor(y - 1, x) ? 1 : 0) + (iso_walldoor(y + 1, x) ? 1 : 0) +
+	         (iso_walldoor(y - 2, x) ? 1 : 0) + (iso_walldoor(y + 2, x) ? 1 : 0);
+
+	/* Eje dominante de la línea de muro. */
+	if (we != ns) return (we > ns);
+
+	/* Empate (esquina real / aislada): usa los vecinos inmediatos como antes. */
+	return (iso_walldoor(y, x - 1) && iso_walldoor(y, x + 1));
 }
 
 /* Blit de un tile de la lámina por índice (col = idx%14, fila = idx/14). */
@@ -3490,6 +3550,33 @@ static int iso_do_tile(int f)
 	}
 }
 
+/* Dibuja el rombo de resaltado (hover) en la posición de pantalla (sx,sy) (ya
+ * proyectada y desplazada). Se llama UNA vez al final de la escena para que
+ * tenga prioridad sobre cualquier tile/sprite (si no, las celdas dibujadas
+ * después en orden de profundidad lo taparían). */
+static void iso_hover_outline(term_data *td, int sx, int sy)
+{
+	GdkColor hi;
+	GdkPoint pts[4];
+	int mx, my;
+
+	mx = sx + ISO_TILE_W / 2;
+	my = sy + ISO_FLOOR_CY;
+
+	pts[0].x = mx;               pts[0].y = my - ISO_FLOOR_H / 2;  /* arriba */
+	pts[1].x = sx + ISO_TILE_W;  pts[1].y = my;                    /* derecha */
+	pts[2].x = mx;               pts[2].y = my + ISO_FLOOR_H / 2;  /* abajo */
+	pts[3].x = sx;               pts[3].y = my;                    /* izquierda */
+
+	hi.red = 0xFFFF; hi.green = 0xFFFF; hi.blue = 0x3000;  /* amarillo */
+	gdk_gc_set_rgb_fg_color(td->gc, &hi);
+	gdk_gc_set_line_attributes(td->gc, 2, GDK_LINE_SOLID,
+	                           GDK_CAP_BUTT, GDK_JOIN_MITER);
+	gdk_draw_polygon(td->drawing_area->window, td->gc, FALSE, pts, 4);
+	gdk_gc_set_line_attributes(td->gc, 0, GDK_LINE_SOLID,
+	                           GDK_CAP_BUTT, GDK_JOIN_MITER);
+}
+
 /*
  * Callback de celda del núcleo iso: elige y dibuja el/los tile(s) de la celda.
  * Se dibuja una celda si está MEMORIZADA (CAVE_MARK) o VISIBLE ahora mismo
@@ -3507,8 +3594,12 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 	if (!iso_inb(cy, cx)) return;
 
 	/* Celda ni memorizada ni visible: rombo oscuro (rellena los huecos del
-	 * borde explorado que asoman bajo la parte transparente de los muros). */
-	if (!(cave[cy][cx].info & (CAVE_MARK | CAVE_SEEN)))
+	 * borde explorado que asoman bajo la parte transparente de los muros).
+	 * EXCEPCIÓN: la celda del propio jugador siempre se dibuja (suelo + sprite),
+	 * aunque su rejilla no esté marcada/iluminada (p.ej. pueblo de noche), para
+	 * que el personaje no desaparezca. */
+	if (!(cave[cy][cx].info & (CAVE_MARK | CAVE_SEEN)) &&
+	                !((cy == p_ptr->py) && (cx == p_ptr->px)))
 	{
 		iso_blit(td, ISO_T_DARK, sx, sy);
 		return;
@@ -3516,20 +3607,52 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 
 	f = cave[cy][cx].feat;
 
-	if (iso_is_wall_feat(f))
+	/* Escombros (FEAT_RUBBLE 49 y 206 "pile of rubble"): tile custom como overlay
+	 * sobre el suelo. Antes del check de muro para que mande aunque la feature
+	 * tenga el flag WALL. */
+	if (((f == FEAT_RUBBLE) || (f == 206)) && rubble_tile)
+	{
+		iso_blit(td, iso_ground_tile(f), sx, sy);
+		gdk_draw_pixbuf(td->drawing_area->window, td->gc, rubble_tile,
+		                0, 0, sx, sy + DO_DY, DO_TILE_W, DO_TILE_H,
+		                GDK_RGB_DITHER_NONE, 0, 0);
+	}
+	else if (iso_is_wall_feat(f))
 	{
 		iso_blit(td, ISO_T_FLOOR, sx, sy);                       /* suelo debajo */
 
 		if (dun_level == 0)
 		{
-			/* PUEBLO: edificios y muralla son rectángulos MACIZOS (sin auto-tiling:
-			 * las piezas de pared fina 71+ sobre un bloque relleno se ven como
-			 * losas sueltas): cada celda = un bloque entero. Usamos el sprite
-			 * especial de edificio (más alto, tapa tintada) para TODA celda de muro
-			 * del pueblo; si no está cargado, el cubo de piedra 70.
-			 * (Nota: no distinguimos edificio vs muralla porque la cara SUR del
-			 * edificio es FEAT_PERM_SOLID, no tejado -> distinguir la dejaba gris.) */
-			if (bldg_block)
+			/* PUEBLO: rectángulos MACIZOS (sin auto-tiling). Diferenciamos CASA de
+			 * MURALLA: las feats de edificio (190..198 = tejados/remates/chimeneas,
+			 * ventanas, barril) Y los muros PERM que tocan una de ellas (la base/
+			 * cara de la casa, que es FEAT_PERM_SOLID) se pintan con el bloque-
+			 * edificio (tapa roja) -> casa uniforme. El resto de muros del pueblo
+			 * (muralla suelta) van con el cubo de piedra gris. */
+			bool is_building = (f >= 190) && (f <= 198);
+
+			/* Un muro PERM es parte de una casa si hay un tejado (190..198) cerca.
+			 * Radio 2 porque algunos edificios (p.ej. alcalde+museo) tienen la
+			 * pared sur de DOS filas de grosor y la exterior queda a 2 celdas del
+			 * tejado. La muralla/borde del mapa está lejísimos de cualquier
+			 * tejado, así que sigue cayendo en el cubo de piedra. */
+			if (!is_building)
+			{
+				int dy, dx;
+				for (dy = -2; (dy <= 2) && !is_building; dy++)
+				{
+					for (dx = -2; dx <= 2; dx++)
+					{
+						int ny = cy + dy, nx = cx + dx;
+						int nf;
+						if (!iso_inb(ny, nx)) continue;
+						nf = cave[ny][nx].feat;
+						if ((nf >= 190) && (nf <= 198)) { is_building = TRUE; break; }
+					}
+				}
+			}
+
+			if (bldg_block && is_building)
 				gdk_draw_pixbuf(td->drawing_area->window, td->gc, bldg_block,
 				                0, 0, sx, sy, 54, 49, GDK_RGB_DITHER_NONE, 0, 0);
 			else
@@ -3572,6 +3695,12 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 		iso_blit(td, iso_ground_tile(f), sx, sy);
 		iso_blit(td, ISO_T_STAIR + 1, sx, sy);
 	}
+	else if ((f == FEAT_FLOWER) && flower_tile)
+	{
+		/* hierba con flores: tile custom (lib/xtra/iso/grass_flowers.png). */
+		gdk_draw_pixbuf(td->drawing_area->window, td->gc, flower_tile,
+		                0, 0, sx, sy, 54, 49, GDK_RGB_DITHER_NONE, 0, 0);
+	}
 	else if (do_sheet && iso_do_tile(f) >= 0)
 	{
 		/* feature sin tile en dg_iso32 -> tile extra de Dungeon Odyssey sobre suelo
@@ -3604,13 +3733,63 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 			/* 32 de ancho centrado en el tile (54); pies hacia el centro del
 			 * rombo (alto 49) para que el actor "se pose" en la celda. */
 			int dx = sx + (ISO_TILE_W - 32) / 2;
-			int dy = sy + ISO_TILE_H / 2 - 32 + 6;
+			int dy = sy + ISO_TILE_H / 2 - 32 + ISO_ACTOR_DROP;
 
 			gdk_draw_pixbuf(td->drawing_area->window, td->gc, gerv_sheet,
 			                col * 32, row * 32, dx, dy, 32, 32,
 			                GDK_RGB_DITHER_NONE, 0, 0);
 		}
 	}
+
+	/* Barra de vida sobre el actor (jugador o monstruo visible) si no está al
+	 * 100%. Verde = vida restante, rojo = daño, con marco negro. */
+	{
+		int chp = -1, mhp = 0;
+
+		if ((cy == p_ptr->py) && (cx == p_ptr->px))
+		{
+			chp = p_ptr->chp;
+			mhp = p_ptr->mhp;
+		}
+		else if (cave[cy][cx].m_idx)
+		{
+			monster_type *m_ptr = &m_list[cave[cy][cx].m_idx];
+			if (m_ptr->ml)
+			{
+				chp = m_ptr->hp;
+				mhp = m_ptr->maxhp;
+			}
+		}
+
+		if ((mhp > 0) && (chp >= 0) && (chp < mhp))
+		{
+			GdkColor col_bg, col_red, col_green;
+			int bw = 28, bh = 4;
+			int bx = sx + (ISO_TILE_W - bw) / 2;
+			int by = sy + ISO_TILE_H / 2 - 32 + ISO_ACTOR_DROP - bh - 2;  /* sobre el sprite */
+			int gw = (bw * chp) / mhp;
+
+			if (gw < 0) gw = 0;
+			if (gw > bw) gw = bw;
+
+			col_bg.red = col_bg.green = col_bg.blue = 0x0000;     /* negro */
+			col_red.red = 0xD000;  col_red.green = 0x1000; col_red.blue = 0x1000;
+			col_green.red = 0x1000; col_green.green = 0xC000; col_green.blue = 0x1000;
+
+			/* Marco negro (relleno) como fondo. */
+			gdk_gc_set_rgb_fg_color(td->gc, &col_bg);
+			gdk_draw_rectangle(td->drawing_area->window, td->gc, TRUE,
+			                   bx - 1, by - 1, bw + 2, bh + 2);
+			/* Daño (rojo) y vida restante (verde). */
+			gdk_gc_set_rgb_fg_color(td->gc, &col_red);
+			gdk_draw_rectangle(td->drawing_area->window, td->gc, TRUE,
+			                   bx, by, bw, bh);
+			gdk_gc_set_rgb_fg_color(td->gc, &col_green);
+			gdk_draw_rectangle(td->drawing_area->window, td->gc, TRUE,
+			                   bx, by, gw, bh);
+		}
+	}
+
 }
 
 /*
@@ -3772,10 +3951,26 @@ static void iso_overlay_text_row(term_data *td, int row)
 /* Pinta la escena isométrica completa sobre la ventana principal. */
 static void iso_draw_scene(term_data *td)
 {
-	int win_w = td->cols * td->font_wid;
-	int win_h = td->rows * td->font_hgt;
+	int fw = td->font_wid, fh = td->font_hgt;
+	int win_w = td->cols * fw;
+	int win_h = td->rows * fh;
+
+	/* Reservamos a la IZQUIERDA la barra de stats (cols 0..COL_MAP-1) y ARRIBA
+	 * la línea de mensajes (fila 0), igual que el resto de modos: la escena iso
+	 * se dibuja solo en la región del mapa y esos márgenes se recomponen desde
+	 * el render 2D del term (backing store). */
+	int ox = COL_MAP * fw;
+	int oy = ROW_MAP * fh;
+	int map_w = win_w - ox;
+	int map_h = win_h - oy;
+
+	GdkRectangle clip;
 
 	if (!iso_sheet || !td->drawing_area->window) return;
+
+	/* Por si el term fuese diminuto: sin sitio para márgenes, pinta a pantalla
+	 * completa (comportamiento anterior). */
+	if (map_w <= 0 || map_h <= 0) { ox = oy = 0; map_w = win_w; map_h = win_h; }
 
 	/* Auditoría de cobertura (una sola vez, bajo TOMETIK_ISO_AUDIT). Aquí los
 	 * x_attr/x_char ya están poblados por el prf de gráficos (estamos pintando
@@ -3786,17 +3981,45 @@ static void iso_draw_scene(term_data *td)
 		if (!iso_audited) { iso_audited = TRUE; iso_audit_coverage(); }
 	}
 
-	/* fondo negro */
+	/* Fondo negro SOLO en la región del mapa. */
 	gdk_draw_rectangle(td->drawing_area->window,
 	                   td->drawing_area->style->black_gc, TRUE,
-	                   0, 0, win_w, win_h);
+	                   ox, oy, map_w, map_h);
 
-	iso_render_scene(td, p_ptr->px, p_ptr->py, win_w, win_h, iso_cell_cb);
+	/* Recorta los blits del mapa a su región (muros/sprites altos cerca del
+	 * borde no invaden la barra ni la línea de mensajes). */
+	clip.x = ox; clip.y = oy; clip.width = map_w; clip.height = map_h;
+	gdk_gc_set_clip_rectangle(td->gc, &clip);
 
-	/* Recompón la línea de mensajes/prompt (fila 0), que la escena iso acaba
-	 * de tapar. Sin esto, comandos como wield/quaff/eat/drop no muestran su
-	 * "... which item?" en modo iso. */
-	iso_overlay_text_row(td, 0);
+	iso_render_scene(td, p_ptr->px, p_ptr->py, map_w, map_h, ox, oy, iso_cell_cb);
+
+	/* Rombo de resaltado del tile bajo el ratón, AL FINAL para que quede ENCIMA
+	 * de todo (tiles, muros altos, actores). Se proyecta su celda como hace la
+	 * escena (mismas dimensiones y offset). Aún con el clip del mapa activo. */
+	if ((iso_hover_y >= 0) && (iso_hover_x >= 0))
+	{
+		int hsx, hsy;
+		iso_project(iso_hover_x, iso_hover_y, p_ptr->px, p_ptr->py,
+		            map_w, map_h, &hsx, &hsy);
+		iso_hover_outline(td, hsx + ox, hsy + oy);
+	}
+
+	gdk_gc_set_clip_rectangle(td->gc, NULL);
+
+	/* Recompón la barra de stats y la línea de mensajes desde el backing store
+	 * (la escena iso no las toca). Si no hay backing store, al menos recompón
+	 * el texto de la fila 0 (prompts de wield/quaff/...). */
+	if (td->backing_store)
+	{
+		gdk_draw_pixmap(td->drawing_area->window, td->gc, td->backing_store,
+		                0, 0, 0, 0, win_w, oy);              /* línea de mensajes */
+		gdk_draw_pixmap(td->drawing_area->window, td->gc, td->backing_store,
+		                0, oy, 0, oy, ox, win_h - oy);       /* barra lateral */
+	}
+	else
+	{
+		iso_overlay_text_row(td, 0);
+	}
 }
 
 static errr Term_xtra_gtk(int n, int v)
@@ -5885,11 +6108,19 @@ static bool gtk_map_pixel_to_cave(term_data *td, int px, int py, int *cy, int *c
 {
 	if (iso_mode)
 	{
-		/* Inverso de la proyección isométrica, centrada en el jugador. */
-		int win_w = td->cols * td->font_wid;
-		int win_h = td->rows * td->font_hgt;
+		/* Inverso de la proyección isométrica. El mapa iso vive desplazado por la
+		 * barra de stats (ox) y la línea de mensajes (oy); fuera de esa región no
+		 * hay casilla de mapa. */
+		int fw = td->font_wid, fh = td->font_hgt;
+		int ox = COL_MAP * fw;
+		int oy = ROW_MAP * fh;
+		int map_w = td->cols * fw - ox;
+		int map_h = td->rows * fh - oy;
 
-		iso_unproject(px, py, p_ptr->px, p_ptr->py, win_w, win_h, cx, cy);
+		if (map_w <= 0 || map_h <= 0) { ox = oy = 0; map_w = td->cols * fw; map_h = td->rows * fh; }
+		if (px < ox || py < oy) return FALSE;
+
+		iso_unproject(px - ox, py - oy, p_ptr->px, p_ptr->py, map_w, map_h, cx, cy);
 		return TRUE;
 	}
 	else
@@ -5914,37 +6145,71 @@ static bool gtk_map_pixel_to_cave(term_data *td, int px, int py, int *cy, int *c
 	}
 }
 
-/* Crea el popup del tooltip la primera vez. */
+/* Crea el popup del tooltip la primera vez, con aspecto de tooltip clásico
+ * (fondo amarillo pálido, texto negro, multilínea alineado a la izquierda). */
 static void tooltip_ensure(void)
 {
+	GdkColor bg, fg;
+
 	if (tooltip_win) return;
 
 	tooltip_win = gtk_window_new(GTK_WINDOW_POPUP);
-	/* Hereda el estilo "tooltip" del tema (fondo amarillento si existe). */
 	gtk_widget_set_name(tooltip_win, "gtk-tooltips");
-	gtk_container_set_border_width(GTK_CONTAINER(tooltip_win), 2);
+	gtk_container_set_border_width(GTK_CONTAINER(tooltip_win), 4);
 
 	tooltip_label = gtk_label_new("");
-	gtk_misc_set_alignment(GTK_MISC(tooltip_label), 0.0, 0.5);
+	gtk_misc_set_alignment(GTK_MISC(tooltip_label), 0.0, 0.0);
+	gtk_label_set_justify(GTK_LABEL(tooltip_label), GTK_JUSTIFY_LEFT);
 	gtk_container_add(GTK_CONTAINER(tooltip_win), tooltip_label);
 	gtk_widget_show(tooltip_label);
+
+	/* Amarillo pálido clásico + texto negro (independiente del tema). */
+	bg.red = 0xFFFF; bg.green = 0xFFFF; bg.blue = 0xC000;
+	fg.red = 0x0000; fg.green = 0x0000; fg.blue = 0x0000;
+	gtk_widget_modify_bg(tooltip_win, GTK_STATE_NORMAL, &bg);
+	gtk_widget_modify_fg(tooltip_label, GTK_STATE_NORMAL, &fg);
 }
 
-/* Oculta el tooltip y olvida la celda mostrada. */
+/* Realmente pinta el globo (lo llama el timer tras el retardo). */
+static gboolean tooltip_reveal_cb(gpointer data)
+{
+	tooltip_ensure();
+	gtk_label_set_text(GTK_LABEL(tooltip_label), tooltip_pending);
+	/* Un poco abajo-derecha del cursor, para no taparlo. */
+	gtk_window_move(GTK_WINDOW(tooltip_win), tooltip_px + 12, tooltip_py + 16);
+	gtk_widget_show(tooltip_win);
+
+	tooltip_timer = 0;
+	return FALSE;   /* one-shot */
+}
+
+/* Oculta el tooltip, cancela el timer pendiente y olvida la celda mostrada. */
 static void tooltip_hide(void)
 {
 	tooltip_cy = tooltip_cx = -1;
+	if (tooltip_timer) { g_source_remove(tooltip_timer); tooltip_timer = 0; }
 	if (tooltip_win) gtk_widget_hide(tooltip_win);
 }
 
-/* Muestra/actualiza el tooltip con 'text' junto al puntero (coords de raíz). */
-static void tooltip_show(cptr text, gint root_x, gint root_y)
+/* Programa el tooltip para 'text' junto al puntero, tras TOOLTIP_DELAY_MS. */
+static void tooltip_arm(cptr text, gint root_x, gint root_y)
 {
-	tooltip_ensure();
-	gtk_label_set_text(GTK_LABEL(tooltip_label), text);
-	/* Un poco abajo-derecha del cursor, para no taparlo. */
-	gtk_window_move(GTK_WINDOW(tooltip_win), root_x + 12, root_y + 16);
-	gtk_widget_show(tooltip_win);
+	strnfmt(tooltip_pending, sizeof(tooltip_pending), "%s", text);
+	tooltip_px = root_x;
+	tooltip_py = root_y;
+
+	if (tooltip_timer) g_source_remove(tooltip_timer);
+	tooltip_timer = g_timeout_add(TOOLTIP_DELAY_MS, tooltip_reveal_cb, NULL);
+}
+
+/* Quita el resaltado de hover (iso) y repinta la escena si hacía falta. */
+static void iso_clear_hover(term_data *td)
+{
+	if (!iso_mode) return;
+	if ((iso_hover_y == -1) && (iso_hover_x == -1)) return;
+
+	iso_hover_y = iso_hover_x = -1;
+	if (game_in_progress && character_generated) iso_draw_scene(td);
 }
 
 /* Movimiento del ratón sobre el mapa: actualiza el tooltip de casilla. */
@@ -5955,31 +6220,48 @@ static gboolean motion_notify_event_handler(
 {
 	term_data *td = (term_data *)user_data;
 	int cy = 0, cx = 0;
-	char buf[160];
+	char buf[256];
 
 	/* Solo con una partida realmente en curso (cave[] poblado). */
 	if (!game_in_progress || !character_generated)
 	{
 		tooltip_hide();
+		iso_clear_hover(td);
 		return FALSE;
 	}
 
 	if (!gtk_map_pixel_to_cave(td, (int)event->x, (int)event->y, &cy, &cx))
 	{
 		tooltip_hide();
+		iso_clear_hover(td);
 		return FALSE;
 	}
 
-	/* Misma celda: solo reposicionar el globo si está visible. */
+	/* Misma celda: si el globo ya está visible, lo seguimos con el cursor;
+	 * si aún está en el retardo, actualizamos dónde aparecerá. */
 	if (cy == tooltip_cy && cx == tooltip_cx)
 	{
 		if (tooltip_win && GTK_WIDGET_VISIBLE(tooltip_win))
 			gtk_window_move(GTK_WINDOW(tooltip_win),
 			                (gint)event->x_root + 12, (gint)event->y_root + 16);
+		else if (tooltip_timer)
+		{
+			tooltip_px = (gint)event->x_root;
+			tooltip_py = (gint)event->y_root;
+		}
 		return FALSE;
 	}
 
-	/* Pedir al motor el "qué hay aquí" (vacío => nada que mostrar). */
+	/* Cambiamos de celda: resaltar el tile bajo el ratón (iso) repintando la
+	 * escena con el nuevo rombo marcado. */
+	if (iso_mode && ((cy != iso_hover_y) || (cx != iso_hover_x)))
+	{
+		iso_hover_y = cy;
+		iso_hover_x = cx;
+		iso_draw_scene(td);
+	}
+
+	/* Pedir al motor el "qué hay aquí". */
 	describe_grid(cy, cx, buf);
 
 	if (buf[0] == '\0')
@@ -5988,20 +6270,25 @@ static gboolean motion_notify_event_handler(
 		return FALSE;
 	}
 
+	/* Nueva celda con contenido: rearmar el retardo (oculta el globo previo). */
 	tooltip_cy = cy;
 	tooltip_cx = cx;
-	tooltip_show(buf, (gint)event->x_root, (gint)event->y_root);
+	if (tooltip_win) gtk_widget_hide(tooltip_win);
+	tooltip_arm(buf, (gint)event->x_root, (gint)event->y_root);
 
 	return FALSE;
 }
 
-/* El ratón sale del mapa: ocultar el tooltip. */
+/* El ratón sale del mapa: ocultar el tooltip y quitar el resaltado. */
 static gboolean leave_notify_event_handler(
         GtkWidget *widget,
         GdkEventCrossing *event,
         gpointer user_data)
 {
+	term_data *td = (term_data *)user_data;
+
 	tooltip_hide();
+	iso_clear_hover(td);
 	return FALSE;
 }
 

@@ -4788,10 +4788,27 @@ static void travel_clear(void)
 void travel_cancel(void)
 {
 	bool interrupted = (travelling != 0);
+	bool was_exploring = (exploring != 0);
 
 	travel_clear();
 
-	if (interrupted) msg_print("You stop travelling.");
+	if (interrupted)
+		msg_print(was_exploring ? "You stop exploring." : "You stop travelling.");
+}
+
+/*
+ * Hard stop from inside travel_step(): end BOTH travel and any auto-explore
+ * (so we don't immediately re-pick a goal), then optionally report why.
+ */
+static void travel_abort(cptr msg)
+{
+	if (exploring)
+	{
+		exploring = 0;
+		p_ptr->redraw |= (PR_STATE);
+	}
+	travel_clear();
+	if (msg) msg_print(msg);
 }
 
 /*
@@ -4884,8 +4901,7 @@ void travel_step(void)
 	/* Confusion would scramble the chosen direction. */
 	if (p_ptr->confused)
 	{
-		msg_print("You are too confused to travel.");
-		travel_clear();
+		travel_abort("You are too confused to travel.");
 		return;
 	}
 
@@ -4895,16 +4911,14 @@ void travel_step(void)
 	/* A monster stepped into our path: stop short instead of bumping it. */
 	if (cave[ny][nx].m_idx)
 	{
-		msg_print("There is a monster in your way.");
-		travel_clear();
+		travel_abort("There is a monster in your way.");
 		return;
 	}
 
 	/* The next tile is no longer enterable (e.g. a door closed on us). */
 	if (!cave_floor_bold(ny, nx))
 	{
-		msg_print("Your way is blocked.");
-		travel_clear();
+		travel_abort("Your way is blocked.");
 		return;
 	}
 
@@ -4921,13 +4935,15 @@ void travel_step(void)
 	}
 	if (!dir)
 	{
-		travel_clear();
+		travel_abort(NULL);
 		return;
 	}
 
-	/* Take the step: one game turn (monsters act in between). */
+	/* Take the step: one game turn (monsters act in between). While auto-
+	 * exploring we always grab items in passing; plain travel honours the
+	 * player's always_pickup option. */
 	energy_use = 100;
-	move_player_aux(dir, always_pickup, 1, TRUE);
+	move_player_aux(dir, (exploring ? TRUE : always_pickup), 1, TRUE);
 
 	/* Animate: draw the new position and pause briefly, so travelling and
 	 * auto-explore are watchable instead of teleport-fast. */
@@ -4938,6 +4954,28 @@ void travel_step(void)
 	/* move_player_aux may have already cancelled us via disturb() (a trap, a
 	 * newly seen monster, ...) and reported it -- respect that. */
 	if (!travelling) return;
+
+	/* Auto-explore: stop and announce when we reach something notable, so the
+	 * player can decide (DCSS-style). Travel-to-click keeps going. */
+	if (exploring)
+	{
+		cptr note = NULL;
+
+		switch (cave[p_ptr->py][p_ptr->px].feat)
+		{
+		case FEAT_LESS:        note = "There is a staircase up here."; break;
+		case FEAT_MORE:        note = "There is a staircase down here."; break;
+		case FEAT_SHOP:        note = "There is a shop entrance here."; break;
+		case FEAT_QUEST_ENTER: note = "There is a quest entrance here."; break;
+		default:               break;
+		}
+
+		if (note)
+		{
+			travel_abort(note);
+			return;
+		}
+	}
 
 	/* Advance; announce arrival at the goal. During auto-explore each leg ends
 	 * silently (only the final "Done exploring." matters). */

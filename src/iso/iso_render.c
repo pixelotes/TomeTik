@@ -52,7 +52,7 @@ void iso_unproject(int mx, int my, int px, int py,
 }
 
 void iso_render_scene(void *ctx, int px, int py,
-                      int win_w, int win_h, iso_cell_fn cell)
+                      int win_w, int win_h, int ox, int oy, iso_cell_fn cell)
 {
 	/* Alcance en celdas del cave que cubre la ventana (con margen para que
 	 * los tiles altos -muros- que entran por los bordes no se corten). */
@@ -81,7 +81,10 @@ void iso_render_scene(void *ctx, int px, int py,
 			if (sx + ISO_TILE_W < 0 || sx > win_w) continue;
 			if (sy + ISO_TILE_H < 0 || sy > win_h) continue;
 
-			cell(ctx, cx, cy, sx, sy);
+			/* (ox,oy) desplaza el blit real (p.ej. para dejar a la izquierda la
+			 * barra de stats del term); el clipping de arriba va en coords del
+			 * sub-rect del mapa (win_w x win_h). */
+			cell(ctx, cx, cy, sx + ox, sy + oy);
 		}
 	}
 }
