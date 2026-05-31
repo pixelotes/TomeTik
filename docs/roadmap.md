@@ -15,6 +15,11 @@ Mejoras y objetivos futuros (ToME 2.2.2 + tiles, port moderno en Docker).
 - [ ] **Ir a coordenadas al hacer clic.**
 - [ ] **Menú contextual con clic derecho.**
 
+## Interfaz / UX
+- [ ] **Barras de vida sobre los personajes** (jugador y monstruos) cuando los PV
+  están por debajo del 100%. Mejora de UX: feedback visual del estado de salud sin
+  abrir menús. Mostrar solo si HP < máximo; ocultar al 100%.
+
 ## Jugabilidad / motor
 - [ ] **Campo de visión / niebla de guerra.**
 - [ ] **Pathfinding A\*.**

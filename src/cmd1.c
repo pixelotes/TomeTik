@@ -4668,6 +4668,169 @@ void run_step(int dir)
 
 
 /*
+ * Auto-travel ("click to walk"): walk the player along a precomputed A* path,
+ * one step per game turn, until the goal is reached or something interrupts.
+ *
+ * This is the shared engine half of the mouse "go to" feature and the planned
+ * base for auto-explore: a frontend (or the explorer) only has to pick a goal
+ * grid and call travel_to(); the per-turn stepping, energy use and interruption
+ * are handled here, mirroring how run_step()/running work.
+ *
+ * The current route and our position along it.
+ */
+static path_result *travel_route = NULL;
+static int travel_idx = 0;
+
+/*
+ * Walkability for the travel A*: a grid may be entered iff it is a KNOWN
+ * (remembered/visible) floor-like feature -- no walls, closed doors or unknown
+ * tiles. Monsters are ignored here (the path may cross a monster's grid); the
+ * stepping code below stops short instead of bumping into them.
+ */
+static bool travel_walkable_hook(int y, int x, void *user)
+{
+	(void)user;
+
+	if (!(cave[y][x].info & (CAVE_MARK))) return (FALSE);
+	if (!cave_floor_bold(y, x)) return (FALSE);
+
+	return (TRUE);
+}
+
+/*
+ * Stop auto-travelling and release the route. Safe to call when not travelling.
+ * Called from disturb() so any disturbance (monster, damage, key press, ...)
+ * cancels travel just like it cancels running.
+ */
+void travel_cancel(void)
+{
+	if (travel_route)
+	{
+		path_free(travel_route);
+		travel_route = NULL;
+	}
+	travel_idx = 0;
+
+	if (travelling)
+	{
+		travelling = 0;
+
+		/* Mirror running's cleanup. */
+		p_ptr->update |= (PU_TORCH);
+		p_ptr->redraw |= (PR_STATE);
+	}
+}
+
+/*
+ * Begin auto-travelling to grid (gy, gx). Returns TRUE if a path was found and
+ * travel started, FALSE otherwise (no path, goal not walkable, can't travel).
+ */
+bool travel_to(int gy, int gx)
+{
+	path_result *route;
+	int sy = p_ptr->py;
+	int sx = p_ptr->px;
+
+	/* Cancel running/resting/repeat/previous-travel first. */
+	disturb(0, 0);
+
+	/* States where precise auto-walking makes no sense. */
+	if (p_ptr->confused || p_ptr->image || p_ptr->immovable) return (FALSE);
+
+	/* Sanity / no-op. */
+	if (!in_bounds2(gy, gx)) return (FALSE);
+	if ((gy == sy) && (gx == sx)) return (FALSE);
+
+	/* Only travel to a tile we could actually reach (walkable, known). */
+	if (!travel_walkable_hook(gy, gx, NULL)) return (FALSE);
+
+	/* Path over cave[][] without copying it. */
+	route = astar_find_path_cb(cur_hgt, cur_wid,
+	                           travel_walkable_hook, NULL,
+	                           sy, sx, gy, gx, ASTAR_8DIR);
+
+	/* steps[0] is the player's own tile, so a real path has length >= 2. */
+	if (!route || (route->length < 2))
+	{
+		path_free(route);
+		return (FALSE);
+	}
+
+	travel_route = route;
+	travel_idx = 1;                 /* next tile to step onto */
+	travelling = route->length;     /* > 0 => active (also a step bound) */
+
+	return (TRUE);
+}
+
+/*
+ * Take one travel step. Called from process_player()'s energy loop while
+ * travelling, exactly where running calls run_step(). Stops (via travel_cancel)
+ * on arrival or if the world changed under the route (door closed, monster in
+ * the way, terrain altered).
+ */
+void travel_step(void)
+{
+	int ny, nx, dir, d;
+
+	/* Nothing to do / route consumed. */
+	if (!travel_route || (travel_idx >= travel_route->length))
+	{
+		travel_cancel();
+		return;
+	}
+
+	/* Confusion would scramble the chosen direction. */
+	if (p_ptr->confused)
+	{
+		travel_cancel();
+		return;
+	}
+
+	ny = travel_route->steps[travel_idx].y;
+	nx = travel_route->steps[travel_idx].x;
+
+	/* The next tile must still be enterable and clear of monsters. */
+	if (!cave_floor_bold(ny, nx) || cave[ny][nx].m_idx)
+	{
+		travel_cancel();
+		return;
+	}
+
+	/* Direction from the player to the next tile (also verifies adjacency). */
+	dir = 0;
+	for (d = 1; d <= 9; d++)
+	{
+		if (d == 5) continue;
+		if ((p_ptr->py + ddy[d] == ny) && (p_ptr->px + ddx[d] == nx))
+		{
+			dir = d;
+			break;
+		}
+	}
+	if (!dir)
+	{
+		travel_cancel();
+		return;
+	}
+
+	/* Take the step: one game turn (monsters act in between). */
+	energy_use = 100;
+	move_player_aux(dir, always_pickup, 1, TRUE);
+
+	/* Advance; finish on arrival. move_player_aux may have already cancelled
+	 * us via disturb() (e.g. a trap or a newly seen monster) -- respect that. */
+	if (!travelling) return;
+
+	travel_idx++;
+	if ((--travelling <= 0) || (travel_idx >= travel_route->length))
+	{
+		travel_cancel();
+	}
+}
+
+
+/*
  * Take care of the various things that can happen when you step
  * into a space. (Objects, traps, and stores.)
  */
