@@ -16,15 +16,25 @@ Mejoras y objetivos futuros (ToME 2.2.2 + tiles, port moderno en Docker).
   transitable → A\* (con corner-cutting) + travel paso a paso por turno
   (`travel_to`/`travel_step`/`travel_cancel`, cmd1.c). Reusa la identificación de
   celda del tooltip; GTK2 (iso/2D/ASCII) y GDI. Mensajes de inicio/llegada/parada.
+- [x] **Resaltar el tile bajo el ratón** (iso): rombo de suelo amarillo en la celda
+  en hover; se repinta al cambiar de celda. (2D/ASCII pendiente.)
 - [ ] **Menú contextual con clic derecho.**
 
 ## Interfaz / UX
-- [ ] **Barras de vida sobre los personajes** (jugador y monstruos) cuando los PV
-  están por debajo del 100%. Mejora de UX: feedback visual del estado de salud sin
-  abrir menús. Mostrar solo si HP < máximo; ocultar al 100%.
+- [x] **Barras de vida sobre los personajes** (jugador y monstruos) con HP<100%:
+  barra verde/rojo con marco negro sobre el sprite, en `iso_cell_cb`. **Solo modo
+  iso por ahora**; falta portarlo a tiles 2D.
+- [x] **Tooltip de casilla muestra TODO** lo del tile (monstruo + objetos + trampa +
+  suelo), con retardo de aparición y estilo (GTK2 y GDI).
+- [ ] **Sidebar de stats en iso**: hecho parcial — se reserva el margen izquierdo y
+  se recompone la barra 2D; revisar si el viewport iso queda bien proporcionado.
 
 ## Jugabilidad / motor
-- [ ] **Campo de visión / niebla de guerra.**
+- [~] **Campo de visión / niebla de guerra.** En **superficie** (pueblo/exterior
+  local, `!dun_level && !wild_mode`) la visión es **total**: al entrar al nivel se
+  llama `wiz_lite()` (ilumina+memoriza todo), como de día. En **mazmorra** se
+  conserva el FOV/radio de antorcha normal. Pendiente: niebla de guerra propiamente
+  (recordar visto vs visible), revelar monstruos en superficie (ahora solo en LOS).
 - [x] **Pathfinding A\*** (`pathfind.{h,c}`): A* genérico con heap binario, 4-dir /
   8-dir / 8-dir con corner-cutting, callback de caminabilidad sobre `cave[][]`.
 - [x] **Autoexplore** (estilo DCSS, tecla **Ctrl-E**): viaja a la frontera no
