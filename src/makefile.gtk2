@@ -323,7 +323,7 @@ LIBS = $(shell pkg-config --libs gtk+-2.0) -lX11 -lncurses
 BASESRCS = \
   main-gtk2.c iso/iso_render.c main-gtk.c main-gcu.c main-x11.c main-xaw.c main-sdl.c \
   z-rand.c z-util.c z-form.c z-virt.c z-term.c z-sock.c \
-  variable.c tables.c plots.c util.c cave.c dungeon.c \
+  variable.c tables.c plots.c util.c cave.c dungeon.c pathfind.c \
   melee1.c melee2.c modules.c \
   object1.c object2.c randart.c squeltch.c traps.c \
   monster1.c monster2.c monster3.c ghost.c \
@@ -339,7 +339,7 @@ BASESRCS = \
 BASEOBJS = \
   main-gtk2.o iso/iso_render.o main-gtk.o main-gcu.o main-x11.o main-xaw.o main-sdl.o \
   z-rand.o z-util.o z-form.o z-virt.o z-term.o z-sock.o \
-  variable.o tables.o plots.o util.o cave.o dungeon.o \
+  variable.o tables.o plots.o util.o cave.o dungeon.o pathfind.o \
   melee1.o melee2.o modules.o \
   object1.o object2.o randart.o squeltch.o traps.o \
   monster1.o monster2.o monster3.o ghost.o \

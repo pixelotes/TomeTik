@@ -5263,6 +5263,240 @@ cptr look_mon_desc(int m_idx)
 
 
 /*
+ * Non-interactive sibling of target_set_aux(): build a one-line, human
+ * readable description of what is at grid (y,x) -- the same information the
+ * "look" command shows -- into 'out_val' (caller buffer, at least 160 bytes).
+ *
+ * Used by graphical frontends for mouse-hover tooltips. 'out_val' is set to
+ * the empty string when there is nothing worth describing (off the map, or an
+ * unknown/unseen grid), so the caller can simply hide the tooltip on "".
+ *
+ * Mirrors OmnibandTk's angtk_examine(), adapted to the ToME 2.2.2 cave_type.
+ * It must NOT call inkey()/prt()/Term_*: it only reads game state.
+ */
+void describe_grid(int y, int x, char *out_val)
+{
+	cave_type *c_ptr;
+
+	cptr s1, s2, s3;
+
+	bool boring;
+
+	int feat;
+
+	s16b this_o_idx, next_o_idx = 0;
+
+	/* Nothing to see */
+	out_val[0] = '\0';
+
+	/* Off the map */
+	if (!in_bounds2(y, x)) return;
+
+	c_ptr = &cave[y][x];
+
+	/* Assume boring */
+	boring = TRUE;
+
+	/* Default intro */
+	s1 = "You see ";
+	s2 = "";
+	s3 = "";
+
+	/* Hack -- under the player */
+	if ((y == p_ptr->py) && (x == p_ptr->px))
+	{
+		s1 = "You are ";
+		s2 = "on ";
+	}
+
+	/* Hack -- hallucination */
+	if (p_ptr->image)
+	{
+		sprintf(out_val, "%s%ssomething strange", s1, s2);
+		return;
+	}
+
+	/* Actual monsters */
+	if (c_ptr->m_idx)
+	{
+		monster_type *m_ptr = &m_list[c_ptr->m_idx];
+		monster_race *r_ptr = race_inf(m_ptr);
+
+		/* Visible, and not a sleeping mimic (those look like an object) */
+		if (m_ptr->ml && !((r_ptr->flags9 & RF9_MIMIC) && m_ptr->csleep))
+		{
+			char m_name[80];
+			cptr mstat;
+
+			/* Not boring */
+			boring = FALSE;
+
+			/* Get the monster name ("a kobold") */
+			monster_desc(m_name, m_ptr, 0x08);
+
+			/* Note non-hostile monsters */
+			switch (m_ptr->status)
+			{
+			case MSTATUS_NEUTRAL:
+			case MSTATUS_NEUTRAL_M:
+			case MSTATUS_NEUTRAL_P:
+				mstat = " (neutral)";
+				break;
+			case MSTATUS_PET:
+				mstat = " (pet)";
+				break;
+			case MSTATUS_FRIEND:
+				mstat = " (coaligned)";
+				break;
+			case MSTATUS_COMPANION:
+				mstat = " (companion)";
+				break;
+			default:
+				mstat = "";
+				break;
+			}
+
+			/* "You see a kobold (somewhat wounded)" */
+			sprintf(out_val, "%s%s%s%s (%s)%s",
+			        s1, s2, s3, m_name,
+			        look_mon_desc(c_ptr->m_idx), mstat);
+			return;
+		}
+	}
+
+	/* Scan the pile of (known) objects in the grid */
+	{
+		int floor_num = 0;
+		s16b floor_o = 0;
+
+		for (this_o_idx = c_ptr->o_idx; this_o_idx; this_o_idx = next_o_idx)
+		{
+			object_type *o_ptr = &o_list[this_o_idx];
+
+			next_o_idx = o_ptr->next_o_idx;
+
+			if (o_ptr->marked)
+			{
+				floor_num++;
+				if (!floor_o) floor_o = this_o_idx;
+			}
+		}
+
+		/* One known object */
+		if (floor_num == 1)
+		{
+			char o_name[80];
+
+			object_desc(o_name, &o_list[floor_o], TRUE, 3);
+			sprintf(out_val, "%s%s%s%s", s1, s2, s3, o_name);
+			return;
+		}
+
+		/* A pile of known objects */
+		else if (floor_num > 1)
+		{
+			sprintf(out_val, "%s%s%sa pile of %d items",
+			        s1, s2, s3, floor_num);
+			return;
+		}
+	}
+
+	/* Actual traps */
+	if ((c_ptr->info & (CAVE_TRDT)) && c_ptr->t_idx)
+	{
+		cptr name = "a trap", s4;
+
+		/* Name trap */
+		if (t_info[c_ptr->t_idx].ident)
+		{
+			s4 = format("(%s)", t_name + t_info[c_ptr->t_idx].name);
+		}
+		else
+		{
+			s4 = "an unknown trap";
+		}
+
+		sprintf(out_val, "%s%s%s%s %s", s1, s2, s3, name, s4);
+		return;
+	}
+
+	/* Feature (apply "mimic") */
+	if (c_ptr->mimic)
+	{
+		feat = c_ptr->mimic;
+	}
+	else
+	{
+		feat = f_info[c_ptr->feat].mimic;
+	}
+
+	/* Require knowledge about grid, or ability to see grid */
+	if (!(c_ptr->info & (CAVE_MARK)) && !player_can_see_bold(y, x))
+	{
+		/* Forget feature */
+		feat = FEAT_NONE;
+	}
+
+	/* Terrain feature if needed */
+	if (boring || (feat >= FEAT_GLYPH))
+	{
+		cptr name;
+
+		/* Nothing known here -- leave the tooltip empty */
+		if (feat == FEAT_NONE) return;
+
+		/* Hack -- special handling for shop entrances */
+		if (feat == FEAT_SHOP)
+		{
+			name = st_name + st_info[c_ptr->special].name;
+		}
+		else
+		{
+			name = f_name + f_info[feat].name;
+		}
+
+		/* Pick a prefix */
+		if (*s2 &&
+		                (((feat >= FEAT_MINOR_GLYPH) &&
+		                  (feat <= FEAT_PATTERN_XTRA2)) ||
+		                 (feat == FEAT_DIRT) ||
+		                 (feat == FEAT_GRASS) ||
+		                 (feat == FEAT_FLOWER))) s2 = "on ";
+		else if (*s2 && (feat == FEAT_SMALL_TREES)) s2 = "by ";
+		else if (*s2 && (feat >= FEAT_DOOR_HEAD)) s2 = "in ";
+
+		/* Pick proper indefinite article */
+		s3 = (is_a_vowel(name[0])) ? "an " : "a ";
+
+		/* Hack -- special introduction for shop doors */
+		if (feat == FEAT_SHOP)
+		{
+			s3 = "the entrance to the ";
+		}
+
+		/* Hack -- named dungeon entrances */
+		if ((feat == FEAT_MORE) && c_ptr->special)
+		{
+			s3 = "";
+			name = d_text + d_info[c_ptr->special].text;
+		}
+
+		/* Hack -- wilderness town tiles */
+		if (p_ptr->wild_mode && (feat == FEAT_TOWN))
+		{
+			s3 = "";
+			name = format("%s(%s)",
+			              wf_name + wf_info[wild_map[y][x].feat].name,
+			              wf_text + wf_info[wild_map[y][x].feat].text);
+		}
+
+		sprintf(out_val, "%s%s%s%s", s1, s2, s3, name);
+	}
+}
+
+
+
+/*
  * Angband sorting algorithm -- quick sort in place
  *
  * Note that the details of the data we are sorting is hidden,

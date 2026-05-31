@@ -256,6 +256,12 @@ static term_data data[MAX_TERM_DATA];
 #include "iso/iso_render.h"
 static bool iso_mode = FALSE;        /* TRUE solo en GRAF_MODE_ISO (lo fija init_graphics) */
 extern bool iso_in_store;            /* store.c: TRUE en pantalla de tienda */
+
+/* --- TomeTik: tooltip de casilla al pasar el ratón (ver motion handler) --- */
+static GtkWidget *tooltip_win = NULL;    /* popup borderless que sigue al ratón */
+static GtkWidget *tooltip_label = NULL;
+static int tooltip_cy = -1;              /* última celda descrita (para no repetir) */
+static int tooltip_cx = -1;
 static GdkPixbuf *iso_sheet = NULL;  /* dg_iso32.gif (14x15 tiles 54x49, cian transp.) */
 /* Fase 4: lámina Gervais 2D 32x32 (lib/xtra/graf/32x32.bmp) para actores
  * (jugador/monstruos/objetos). map_info da (a,c); tile = fila a&0x7F, col c&0x7F.
@@ -268,6 +274,10 @@ static int gerv_cols = 0, gerv_rows = 0;
  * Sheet ensamblada en lib/xtra/iso/do_extra.png (7 cols). Se blitean con offset -5
  * en Y para alinear el rombo de suelo (DO 54px vs dg_iso32 49px). Ver iso_do_tile(). */
 static GdkPixbuf *do_sheet = NULL;
+/* TomeTik: sprite especial (PNG con alfa, 54x49) para los edificios del pueblo;
+ * más alto que el cubo 70 y con la tapa tintada. lib/xtra/iso/building_block.png.
+ * Si falta, se cae al cubo de piedra normal (ISO_T_SINGLE). */
+static GdkPixbuf *bldg_block = NULL;
 #define DO_TILE_W   54
 #define DO_TILE_H   54
 #define DO_COLS      7
@@ -2473,6 +2483,12 @@ static bool iso_load_sheets(void)
 		plog_fmt("iso: no pude cargar %s; features extra como suelo gris", path);
 	}
 
+	/* Sprite especial de edificio (PNG con canal alfa propio; opcional). */
+	path_build(path, 1024, ANGBAND_DIR_XTRA, "iso/building_block.png");
+	bldg_block = gdk_pixbuf_new_from_file(path, NULL);
+	if (!bldg_block)
+		plog_fmt("iso: no pude cargar %s; edificios como cubo 70", path);
+
 	return TRUE;
 }
 
@@ -3502,13 +3518,18 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 
 		if (dun_level == 0)
 		{
-			/* PUEBLO: edificios y muralla son rectángulos MACIZOS. El original
-			 * (dg32+iso.cfg, ChooseTheme con !$depth -> which=9 "white block")
-			 * NO hace auto-tiling aquí: pinta cada celda con el cubo entero
-			 * (tile 70), porque las piezas de pared fina (71+) sobre un bloque
-			 * relleno se ven como losas/vallas sueltas. Cubo uniforme = masa de
-			 * piedra sólida y limpia. */
-			iso_blit(td, ISO_T_SINGLE, sx, sy);
+			/* PUEBLO: edificios y muralla son rectángulos MACIZOS (sin auto-tiling:
+			 * las piezas de pared fina 71+ sobre un bloque relleno se ven como
+			 * losas sueltas): cada celda = un bloque entero. Usamos el sprite
+			 * especial de edificio (más alto, tapa tintada) para TODA celda de muro
+			 * del pueblo; si no está cargado, el cubo de piedra 70.
+			 * (Nota: no distinguimos edificio vs muralla porque la cara SUR del
+			 * edificio es FEAT_PERM_SOLID, no tejado -> distinguir la dejaba gris.) */
+			if (bldg_block)
+				gdk_draw_pixbuf(td->drawing_area->window, td->gc, bldg_block,
+				                0, 0, sx, sy, 54, 49, GDK_RGB_DITHER_NONE, 0, 0);
+			else
+				iso_blit(td, ISO_T_SINGLE, sx, sy);
 		}
 		else
 		{
@@ -3664,6 +3685,24 @@ static void iso_audit_coverage(void)
 
 	fprintf(fp, "RESUMEN: %d monstruos, %d objetos sin tile (invisibles en iso); "
 	            "%d features pintadas como suelo gris.\n", n_mon, n_obj, n_feat);
+
+	/* Histograma de features del nivel actual (cave): para saber de qué están
+	 * hechos los edificios vs el borde del pueblo (afinar el sprite de edificio). */
+	{
+		static int hist[256];
+		int y, x;
+		for (i = 0; i < 256; i++) hist[i] = 0;
+		for (y = 0; y < cur_hgt; y++)
+			for (x = 0; x < cur_wid; x++)
+				hist[cave[y][x].feat & 0xFF]++;
+		fprintf(fp, "\n== HISTOGRAMA DE FEATURES DEL NIVEL ACTUAL (dun_level=%d) ==\n",
+		        dun_level);
+		for (i = 0; i < 256; i++)
+			if (hist[i])
+				fprintf(fp, "  feat %3d (0x%02X) x%-5d %s%s\n", i, i, hist[i],
+				        (i < max_f_idx) ? (f_name + f_info[i].name) : "?",
+				        iso_is_wall_feat(i) ? "  [WALL]" : "");
+	}
 
 	my_fclose(fp);
 	plog_fmt("iso-audit: informe escrito en %s (%d mon, %d obj, %d feat)",
@@ -5046,6 +5085,18 @@ static gboolean expose_event_handler(
 	/* Paranoia */
 	if (td == NULL) return (TRUE);
 
+	/* TomeTik: en modo iso la escena se dibuja DIRECTO a la ventana (el backing
+	 * store guarda el render 2D del term). Por eso cualquier expose -p.ej. al
+	 * arrastrarse el popup del tooltip por encima del mapa- debe repintar la
+	 * escena iso, no blitear el 2D del backing store. Mismas condiciones que el
+	 * repintado iso de TERM_XTRA_FRESH. */
+	if (iso_mode && iso_sheet && game_in_progress && character_generated
+	                && !iso_in_store && (td == &data[0]))
+	{
+		iso_draw_scene(td);
+		return (TRUE);
+	}
+
 	/* The window has a backing store */
 	if (td->backing_store)
 	{
@@ -5747,6 +5798,143 @@ static void add_menu_update_callbacks()
 
 
 /*
+ * TomeTik: tooltips de casilla al pasar el ratón por el mapa.
+ *
+ * Funciona en los tres modos de render (iso / tiles 2D / ASCII) y con tiles
+ * simples o dobles (bigtile): el texto lo genera el motor con describe_grid()
+ * (el mismo "qué hay aquí" del comando look), y el píxel se convierte a celda
+ * del cave según el modo. El globo es un GTK_WINDOW_POPUP que sigue al cursor.
+ */
+
+/* Convierte un píxel (px,py) del drawing area del mapa a la celda del cave
+ * (*cy,*cx). Devuelve FALSE si el píxel cae fuera del área de mapa (p.ej. el
+ * sidebar de texto o la línea superior en modo 2D/ASCII). */
+static bool gtk_map_pixel_to_cave(term_data *td, int px, int py, int *cy, int *cx)
+{
+	if (iso_mode)
+	{
+		/* Inverso de la proyección isométrica, centrada en el jugador. */
+		int win_w = td->cols * td->font_wid;
+		int win_h = td->rows * td->font_hgt;
+
+		iso_unproject(px, py, p_ptr->px, p_ptr->py, win_w, win_h, cx, cy);
+		return TRUE;
+	}
+	else
+	{
+		/* 2D / ASCII: inverso de panel_col_of()/panel_row_of() (cave.c). El
+		 * mapa empieza en la celda (COL_MAP,ROW_MAP) del term; con bigtile cada
+		 * columna del cave ocupa 2 celdas de term. */
+		int scol = px / td->font_wid;
+		int srow = py / td->font_hgt;
+		int col = scol - COL_MAP;
+		int row = srow - ROW_MAP;
+
+		/* Fuera del área de mapa (sidebar / línea de mensajes). */
+		if (col < 0 || row < 0) return FALSE;
+
+		if (use_bigtile) col /= 2;
+		if (use_zoom) { col /= arg_zoom; row /= arg_zoom; }
+
+		*cx = col + panel_col_min;
+		*cy = row + panel_row_min;
+		return TRUE;
+	}
+}
+
+/* Crea el popup del tooltip la primera vez. */
+static void tooltip_ensure(void)
+{
+	if (tooltip_win) return;
+
+	tooltip_win = gtk_window_new(GTK_WINDOW_POPUP);
+	/* Hereda el estilo "tooltip" del tema (fondo amarillento si existe). */
+	gtk_widget_set_name(tooltip_win, "gtk-tooltips");
+	gtk_container_set_border_width(GTK_CONTAINER(tooltip_win), 2);
+
+	tooltip_label = gtk_label_new("");
+	gtk_misc_set_alignment(GTK_MISC(tooltip_label), 0.0, 0.5);
+	gtk_container_add(GTK_CONTAINER(tooltip_win), tooltip_label);
+	gtk_widget_show(tooltip_label);
+}
+
+/* Oculta el tooltip y olvida la celda mostrada. */
+static void tooltip_hide(void)
+{
+	tooltip_cy = tooltip_cx = -1;
+	if (tooltip_win) gtk_widget_hide(tooltip_win);
+}
+
+/* Muestra/actualiza el tooltip con 'text' junto al puntero (coords de raíz). */
+static void tooltip_show(cptr text, gint root_x, gint root_y)
+{
+	tooltip_ensure();
+	gtk_label_set_text(GTK_LABEL(tooltip_label), text);
+	/* Un poco abajo-derecha del cursor, para no taparlo. */
+	gtk_window_move(GTK_WINDOW(tooltip_win), root_x + 12, root_y + 16);
+	gtk_widget_show(tooltip_win);
+}
+
+/* Movimiento del ratón sobre el mapa: actualiza el tooltip de casilla. */
+static gboolean motion_notify_event_handler(
+        GtkWidget *widget,
+        GdkEventMotion *event,
+        gpointer user_data)
+{
+	term_data *td = (term_data *)user_data;
+	int cy = 0, cx = 0;
+	char buf[160];
+
+	/* Solo con una partida realmente en curso (cave[] poblado). */
+	if (!game_in_progress || !character_generated)
+	{
+		tooltip_hide();
+		return FALSE;
+	}
+
+	if (!gtk_map_pixel_to_cave(td, (int)event->x, (int)event->y, &cy, &cx))
+	{
+		tooltip_hide();
+		return FALSE;
+	}
+
+	/* Misma celda: solo reposicionar el globo si está visible. */
+	if (cy == tooltip_cy && cx == tooltip_cx)
+	{
+		if (tooltip_win && GTK_WIDGET_VISIBLE(tooltip_win))
+			gtk_window_move(GTK_WINDOW(tooltip_win),
+			                (gint)event->x_root + 12, (gint)event->y_root + 16);
+		return FALSE;
+	}
+
+	/* Pedir al motor el "qué hay aquí" (vacío => nada que mostrar). */
+	describe_grid(cy, cx, buf);
+
+	if (buf[0] == '\0')
+	{
+		tooltip_hide();
+		return FALSE;
+	}
+
+	tooltip_cy = cy;
+	tooltip_cx = cx;
+	tooltip_show(buf, (gint)event->x_root, (gint)event->y_root);
+
+	return FALSE;
+}
+
+/* El ratón sale del mapa: ocultar el tooltip. */
+static gboolean leave_notify_event_handler(
+        GtkWidget *widget,
+        GdkEventCrossing *event,
+        gpointer user_data)
+{
+	tooltip_hide();
+	return FALSE;
+}
+
+
+/*
  * Create Gtk widgets for a terminal window and set up callbacks
  */
 static void init_gtk_window(term_data *td, int i)
@@ -5847,6 +6035,25 @@ static void init_gtk_window(term_data *td, int i)
 	        "expose_event",
 	        GTK_SIGNAL_FUNC(expose_event_handler),
 	        (gpointer)td);
+
+	/* TomeTik: tooltips de casilla al pasar el ratón (solo en el mapa). El
+	 * drawing area no recibe eventos de movimiento por defecto: hay que pedir
+	 * la máscara explícitamente. */
+	if (main_window)
+	{
+		gtk_widget_add_events(td->drawing_area,
+		                      GDK_POINTER_MOTION_MASK | GDK_LEAVE_NOTIFY_MASK);
+		gtk_signal_connect(
+		        GTK_OBJECT(td->drawing_area),
+		        "motion_notify_event",
+		        GTK_SIGNAL_FUNC(motion_notify_event_handler),
+		        (gpointer)td);
+		gtk_signal_connect(
+		        GTK_OBJECT(td->drawing_area),
+		        "leave_notify_event",
+		        GTK_SIGNAL_FUNC(leave_notify_event_handler),
+		        (gpointer)td);
+	}
 
 
 	/* Create menu */

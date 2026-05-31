@@ -133,7 +133,7 @@ cp -f tome ..
 === RESUMEN ===
 build rc=0
 --- binario producido ---
--rwxr-xr-x 1 root root 8044440 May 31 13:39 /work/src/tome
--rwxr-xr-x 1 root root 8044440 May 31 13:39 /work/tome
+-rwxr-xr-x 1 root root 8057192 May 31 14:11 /work/src/tome
+-rwxr-xr-x 1 root root 8057192 May 31 14:11 /work/tome
 --- nº de errores (formato gcc fichero:linea:col: error:) ---
 --- primeros 40 errores ---

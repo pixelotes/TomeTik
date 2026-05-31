@@ -151,12 +151,34 @@ hornean en el script (magenta->alfa por capa). Preview de los 24 en /tmp (no com
 AUDITORÍA FINAL: 0 mon, 0 obj sin tile; SOLO 2 features grises (F1 y F172 open floor),
 que es CORRECTO (suelo = tile 13, el último de la 1ª fila de dg_iso32). Town sin regresión.
 
-### PENDIENTE inmediato del iso
-- 2º foco del usuario aún pendiente: sprites ALTOS/GRANDES en iso (anclaje/altura +
-  recuadro negro), falta ejemplo concreto.
-- (Futuro) casas reales del pueblo: dg_iso32 tiene casas iso 1-celda (171-186); hoy son
-  cubos macizos. Verificar in-game los nuevos tiles DO (fuente/altar/portal/Straight
-  Road) en mazmorra/quest (en Bree no aparecen).
+### SPRITE DE EDIFICIO (bloque rojo) — HECHO 2026-05-31
+El usuario dibujó `lib/xtra/iso/building_block.png` (54x49 RGBA, alfa propio): cubo de
+piedra MÁS ALTO (opaco y0-48 vs el 70 que era y7-48) con la TAPA TINTADA DE ROJO.
+- main-gtk2.c: `bldg_block` (cargado en iso_load_sheets vía gdk_pixbuf_new_from_file,
+  el PNG ya trae alfa -> sin color clave). En el branch del pueblo (dun_level==0), TODA
+  celda de muro se blitea con bldg_block en (sx,sy); fallback a cubo 70 si no carga.
+- Se PROBÓ distinguir edificio (tejados 190-198 / FEAT_PERM_EXTRA) vs muralla
+  (FEAT_PERM_SOLID) para dejar la muralla gris, pero la CARA SUR de los edificios es
+  FEAT_PERM_SOLID -> salía gris (mal). Revertido: todo el muro del pueblo = bloque rojo.
+- Casas iso 1-celda de dg_iso32 (171-186) NO sirven: no son tileables (extraídas en
+  screencaps/building_tiles/ por si acaso). El bloque rojo es la solución elegida.
+- Diagnóstico útil: histograma de feats del nivel en la auditoría (TOMETIK_ISO_AUDIT).
+  Bree = 628 PERM_SOLID (borde/muralla) + ~279 tejado (190-195, edificios).
+Captura: screencaps/iso_town_red_buildings.png.
+
+### ISO: estado al cerrar (2026-05-31) — buen punto de parada
+Modo iso funcional y pulido: town de Bree jugable, modo "Isometric" conmutable en
+Options->Graphics, cobertura de tiles ~100% (entidades vía graf-gervais.prf+Neil;
+features vía dg_iso32 + Dungeon Odyssey do_extra), edificios con sprite rojo propio.
+
+### PENDIENTE futuro del iso (cuando se retome)
+- 2º foco no abordado: sprites ALTOS/GRANDES en iso (anclaje/altura + recuadro negro
+  tras los actores), falta ejemplo concreto (en Bree solo humanoides 1x1).
+- Verificar in-game los tiles DO (fuente/altar/portal/Straight Road/fuego) en
+  mazmorra/quest: en Bree no aparecen, validados solo por render sintético.
+- (Opcional) edificios de 2 alturas (apilar building_block con offset vertical).
+- (Opcional) pantallas full-screen dentro del modo iso (hoja C, inventario, mapa M)
+  las tapa el iso; hoy se accede cambiando de modo de gráficos.
 - 2º foco del usuario: afinar sprites ALTOS/GRANDES en iso (anclaje/altura + recuadro
   negro). Falta un ejemplo concreto (en el pueblo solo hay humanoides 1x1).
 - Mejor representación de casas (tejados con altura/color real; hoy cubos blancos).

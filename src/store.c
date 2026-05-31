@@ -1729,6 +1729,15 @@ void display_store(void)
 
 	/* Draw in the inventory */
 	display_inventory();
+
+	/* TomeTik: forzar el repintado de la pantalla de tienda AHORA. Si no, el
+	 * dibujado queda pendiente hasta el siguiente Term_fresh(), que ocurre
+	 * dentro de request_command()->inkey()... pero inkey() NO hace fresh si ya
+	 * hay una tecla en cola (typeahead, o la propia tecla que te metió en la
+	 * entrada). De ahí que ~2 de cada 10 veces la UI de la tienda no apareciera
+	 * hasta pulsar otra tecla. Más notorio en iso (la ventana mostraba la escena
+	 * iso anterior). */
+	Term_fresh();
 }
 
 
