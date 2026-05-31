@@ -134,15 +134,29 @@ Tiene justo los huecos que faltaban. Pipeline:
 - OJO repo: `dungeonodyssey/` son ~3000 PNGs fuente; solo se commitea `do_extra.png`
   (ensamblado) + el script. Plantear gitignore de `dungeonodyssey/`.
 
-### PENDIENTE inmediato del iso — FEATURES sin tile (18 restantes)
-- **Dejar como suelo (correcto):** open floor (1,172), Underground Tunnel (173,204),
-  town (203). [5]
-- **Sin equivalente en NINGUNA fuente (dejar suelo o arte nuevo):**
-  - glyph of warding (3), explosive rune (64): runas; no hay tile iso.
-  - Straight Road (65-73): camino mágico azul; sin tile (stand-in: suelo azul/tinte). [9]
-  - Void Jumpgate (176), void (183): portal/vacío; sin tile (stand-in 208/209).
+### TANDA 3 DE MAPEO (DO ampliado) — APLICADA 2026-05-31. COBERTURA ~100%.
+Añadidos 10 tiles a do_extra.png (índices 14-23, enum DO_* ampliado; build_do_extra.py
+soporta 'copy'/'pad'/'comp'). Mapeos elegidos por el usuario:
+- glyph of warding (FEAT_GLYPH 3) -> GlyphGreen (Items, 32x32 padeado y centrado).
+- explosive rune (FEAT_MINOR_GLYPH 64) -> GlyphRed.
+- Straight Road tramos (65-70) -> L1_HB_Graveyard01 (suelo teal mágico); descargado
+  (71) -> L1_HB_Darkwater01; salida (72) -> Graveyard01 + poof.gif (composite horneado);
+  corrupto (73) -> Darkwater01 + L1_Terrain027 (composite).
+- Underground Tunnel (173, 204) -> L1_Terrain049.
+- Void Jumpgate (FEAT_BETWEEN2 176) -> HB_SummoningPortal01.
+- void (183) -> L1_HB_FloorStone06.  town (FEAT_TOWN 203) -> L2_Town01.
+Fuentes en subdirs DO: Terrain/, XR module/, Items/, Silmar/ (poof). Las 32x32 se
+padean centradas (27,37); poof es GIF (transp. índice) -> convert RGBA. Composites se
+hornean en el script (magenta->alfa por capa). Preview de los 24 en /tmp (no commiteado).
+AUDITORÍA FINAL: 0 mon, 0 obj sin tile; SOLO 2 features grises (F1 y F172 open floor),
+que es CORRECTO (suelo = tile 13, el último de la 1ª fila de dg_iso32). Town sin regresión.
+
+### PENDIENTE inmediato del iso
 - 2º foco del usuario aún pendiente: sprites ALTOS/GRANDES en iso (anclaje/altura +
   recuadro negro), falta ejemplo concreto.
+- (Futuro) casas reales del pueblo: dg_iso32 tiene casas iso 1-celda (171-186); hoy son
+  cubos macizos. Verificar in-game los nuevos tiles DO (fuente/altar/portal/Straight
+  Road) en mazmorra/quest (en Bree no aparecen).
 - 2º foco del usuario: afinar sprites ALTOS/GRANDES en iso (anclaje/altura + recuadro
   negro). Falta un ejemplo concreto (en el pueblo solo hay humanoides 1x1).
 - Mejor representación de casas (tejados con altura/color real; hoy cubos blancos).

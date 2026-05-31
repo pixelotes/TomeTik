@@ -275,7 +275,9 @@ static GdkPixbuf *do_sheet = NULL;
 enum {
 	DO_FOUNTAIN = 0, DO_PIT, DO_FIRE, DO_TRAP, DO_MONTRAP,
 	DO_ALTAR_BEING, DO_ALTAR_WINDS, DO_ALTAR_FORCE, DO_ALTAR_DARK, DO_ALTAR_NATURE,
-	DO_NETHER, DO_MIRKY, DO_WATER, DO_EMBERS
+	DO_NETHER, DO_MIRKY, DO_WATER, DO_EMBERS,
+	DO_GRAVEYARD, DO_DARKWATER, DO_GRAVE_POOF, DO_DARKWATER_CORRUPT,
+	DO_TUNNEL, DO_PORTAL, DO_FLOORSTONE, DO_TOWN, DO_GLYPH_GREEN, DO_GLYPH_RED
 };
 
 /*
@@ -3455,6 +3457,19 @@ static int iso_do_tile(int f)
 		case 102:                          return DO_NETHER;     /* nether mist */
 		case 208: case 210:                return DO_MIRKY;      /* vapour / dense mist */
 		case 209:                          return DO_WATER;      /* condensing water */
+		case FEAT_GLYPH:                   return DO_GLYPH_GREEN; /* glyph of warding (3) */
+		case FEAT_MINOR_GLYPH:             return DO_GLYPH_RED;  /* explosive rune (64) */
+		/* Straight Road (camino mágico): tramos 65-70 suelo "graveyard" teal;
+		 * 71 descargado (dark water); 72 salida (graveyard + poof); 73 corrupto. */
+		case 65: case 66: case 67:
+		case 68: case 69: case 70:         return DO_GRAVEYARD;
+		case 71:                           return DO_DARKWATER;
+		case 72:                           return DO_GRAVE_POOF;
+		case 73:                           return DO_DARKWATER_CORRUPT;
+		case 173: case 204:                return DO_TUNNEL;     /* Underground Tunnel */
+		case FEAT_BETWEEN2:                return DO_PORTAL;     /* Void Jumpgate (176) */
+		case 183:                          return DO_FLOORSTONE; /* void */
+		case FEAT_TOWN:                    return DO_TOWN;       /* town (203) */
 		default:                           return -1;
 	}
 }
