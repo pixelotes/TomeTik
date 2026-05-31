@@ -254,7 +254,7 @@ static term_data data[MAX_TERM_DATA];
 
 /* --- TomeTik: modo isométrico (renderer nuevo, ver src/iso/iso_render.{h,c}) --- */
 #include "iso/iso_render.h"
-static bool iso_mode = FALSE;        /* activado con -i */
+static bool iso_mode = FALSE;        /* TRUE solo en GRAF_MODE_ISO (lo fija init_graphics) */
 extern bool iso_in_store;            /* store.c: TRUE en pantalla de tienda */
 static GdkPixbuf *iso_sheet = NULL;  /* dg_iso32.gif (14x15 tiles 54x49, cian transp.) */
 /* Fase 4: lámina Gervais 2D 32x32 (lib/xtra/graf/32x32.bmp) para actores
@@ -608,6 +608,7 @@ static void term_data_set_fg(term_data *td, byte attr)
 #define GRAF_MODE_NONE	0
 #define GRAF_MODE_OLD	1
 #define GRAF_MODE_NEW	2
+#define GRAF_MODE_ISO	3   /* TomeTik: isométrico (Gervais 2D + overlay iso en data[0]) */
 
 static int graf_mode = GRAF_MODE_NONE;
 /* TomeTik: arrancar con tiles Gervais activados (GRAF_MODE_NEW = 32x32 Gervais).
@@ -2401,6 +2402,49 @@ static bool graf_init(
  * (oops, they must be representable by u16b), as long as they are lesser
  * or equal to 32 if you use smooth rescaling.
  */
+/*
+ * TomeTik: carga (perezosa, una sola vez) las láminas del modo isométrico:
+ *  - iso_sheet  = lib/xtra/iso/dg_iso32.gif (terreno iso; cian #00FFFF -> alfa)
+ *  - gerv_sheet = lib/xtra/graf/32x32.bmp   (actores; negro (0,0,0) -> alfa)
+ * Devuelve TRUE si iso_sheet quedó disponible (mínimo para dibujar el terreno).
+ * Llamada al entrar en GRAF_MODE_ISO; segura de invocar varias veces.
+ */
+static bool iso_load_sheets(void)
+{
+	char path[1024];
+	GdkPixbuf *raw;
+
+	if (iso_sheet) return TRUE;   /* ya cargadas */
+
+	path_build(path, 1024, ANGBAND_DIR_XTRA, "iso/dg_iso32.gif");
+	raw = gdk_pixbuf_new_from_file(path, NULL);
+	if (!raw)
+	{
+		plog_fmt("iso: no pude cargar %s; modo iso no disponible", path);
+		return FALSE;
+	}
+	iso_sheet = gdk_pixbuf_add_alpha(raw, TRUE, 0x00, 0xFF, 0xFF);
+	g_object_unref(raw);
+
+	/* Lámina Gervais 2D para actores. El mismo fichero que usa el render 2D;
+	 * NEGRO PURO (0,0,0) = color de fondo -> alfa transparente. */
+	path_build(path, 1024, ANGBAND_DIR_XTRA_GRAF, "32x32.bmp");
+	raw = gdk_pixbuf_new_from_file(path, NULL);
+	if (raw)
+	{
+		gerv_sheet = gdk_pixbuf_add_alpha(raw, TRUE, 0, 0, 0);
+		gerv_cols = gdk_pixbuf_get_width(gerv_sheet) / 32;
+		gerv_rows = gdk_pixbuf_get_height(gerv_sheet) / 32;
+		g_object_unref(raw);
+	}
+	else
+	{
+		plog_fmt("iso: no pude cargar %s; sin actores", path);
+	}
+
+	return TRUE;
+}
+
 static void init_graphics(void)
 {
 	cptr tile_name;
@@ -2460,6 +2504,11 @@ static void init_graphics(void)
 		 * "new" tile assignments
 		 * It is updated for ToME by Andreas Koch
 		 */
+	/* TomeTik: el modo isométrico se apoya en los tiles Gervais 32x32: el term
+	 * 2D los pinta debajo y map_info() devuelve los índices (a,c) que el overlay
+	 * iso usa para los actores. Así que se configura igual que GRAF_MODE_NEW; lo
+	 * único distinto (activar el repintado iso) lo decide iso_mode más abajo. */
+	case GRAF_MODE_ISO:
 	case GRAF_MODE_NEW:
 		{
 			/* TomeTik: usar el tileset 32x32 de David Gervais (lo que
@@ -2495,6 +2544,17 @@ static void init_graphics(void)
 	/* Update current graphics mode */
 	graf_mode = graf_mode_request;
 	smooth_rescaling = smooth_rescaling_request;
+
+	/* TomeTik: el repintado isométrico se activa SOLO en GRAF_MODE_ISO. En el
+	 * resto de modos (None/Old/New) iso_mode=FALSE -> TERM_XTRA_FRESH no pinta la
+	 * escena iso y se ve el render 2D normal del term. Carga perezosa de láminas
+	 * al entrar la primera vez; si fallan, se cae de vuelta a Gervais 2D (New). */
+	iso_mode = (graf_mode == GRAF_MODE_ISO);
+	if (iso_mode && !iso_load_sheets())
+	{
+		iso_mode = FALSE;
+		graf_mode = graf_mode_request = GRAF_MODE_NEW;
+	}
 
 	/* Reset visuals */
 #ifndef ANG281_RESET_VISUALS
@@ -4998,6 +5058,8 @@ static GtkItemFactoryEntry main_menu_items[] =
 	  change_graf_mode_event_handler, GRAF_MODE_OLD, "<CheckItem>" },
 	{ "/Options/Graphics/New", NULL,
 	  change_graf_mode_event_handler, GRAF_MODE_NEW, "<CheckItem>" },
+	{ "/Options/Graphics/Isometric", NULL,
+	  change_graf_mode_event_handler, GRAF_MODE_ISO, "<CheckItem>" },
 # ifdef USE_DOUBLE_TILES
 	{ "/Options/Graphics/sep3", NULL,
 	  NULL, 0, "<Separator>" },
@@ -5328,6 +5390,9 @@ static void graf_menu_update_handler(
 	check_menu_item(
 	        "<Angband>/Options/Graphics/New",
 	        (graf_mode == GRAF_MODE_NEW));
+	check_menu_item(
+	        "<Angband>/Options/Graphics/Isometric",
+	        (graf_mode == GRAF_MODE_ISO));
 
 #ifdef USE_DOUBLE_TILES
 
@@ -5759,10 +5824,12 @@ errr init_gtk2(int argc, char **argv)
 			continue;
 		}
 
-		/* TomeTik: modo isométrico (renderer nuevo, tiles dg_iso32) */
+		/* TomeTik: arrancar en modo isométrico (= seleccionar GRAF_MODE_ISO).
+		 * init_graphics fija iso_mode y carga las láminas. Se puede alternar en
+		 * caliente desde Options -> Graphics. */
 		if (streq(argv[i], "-i"))
 		{
-			iso_mode = TRUE;
+			graf_mode_request = GRAF_MODE_ISO;
 			continue;
 		}
 
@@ -5814,49 +5881,9 @@ errr init_gtk2(int argc, char **argv)
 		init_gtk_window(td, i);
 	}
 
-	/* TomeTik: cargar la lámina de tiles isométricos (modo iso). gdk-pixbuf
-	 * carga el GIF directo; convertimos cian #00FFFF -> alfa transparente. */
-	if (iso_mode)
-	{
-		char path[1024];
-		GdkPixbuf *raw;
-
-		path_build(path, 1024, ANGBAND_DIR_XTRA, "iso/dg_iso32.gif");
-		raw = gdk_pixbuf_new_from_file(path, NULL);
-		if (raw)
-		{
-			iso_sheet = gdk_pixbuf_add_alpha(raw, TRUE, 0x00, 0xFF, 0xFF);
-			g_object_unref(raw);
-		}
-		else
-		{
-			plog_fmt("iso: no pude cargar %s; modo iso desactivado", path);
-			iso_mode = FALSE;
-		}
-
-		/* Lámina Gervais 2D para actores (jugador/monstruos/objetos). El mismo
-		 * fichero que usa el render 2D; (24,24,24) = color de fondo -> alfa. */
-		if (iso_mode)
-		{
-			GdkPixbuf *graw;
-			path_build(path, 1024, ANGBAND_DIR_XTRA_GRAF, "32x32.bmp");
-			graw = gdk_pixbuf_new_from_file(path, NULL);
-			if (graw)
-			{
-				/* La lámina Gervais usa NEGRO PURO (0,0,0) como fondo transparente
-			 * (= bg_pixel del render 2D, leído en (0, 6*32)); los detalles usan
-			 * (16,16,16)+ así que no se hacen huecos. */
-			gerv_sheet = gdk_pixbuf_add_alpha(graw, TRUE, 0, 0, 0);
-				gerv_cols = gdk_pixbuf_get_width(gerv_sheet) / 32;
-				gerv_rows = gdk_pixbuf_get_height(gerv_sheet) / 32;
-				g_object_unref(graw);
-			}
-			else
-			{
-				plog_fmt("iso: no pude cargar %s; sin actores", path);
-			}
-		}
-	}
+	/* TomeTik: las láminas del modo iso (dg_iso32.gif + 32x32.bmp) se cargan de
+	 * forma perezosa en init_graphics()/iso_load_sheets() la primera vez que se
+	 * entra en GRAF_MODE_ISO (sea por -i al arrancar o por el menú Graphics). */
 
 	/* Activate the "Angband" window screen */
 	Term_activate(&data[0].t);

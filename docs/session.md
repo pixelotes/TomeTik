@@ -42,13 +42,32 @@ Se eliminó el viejo motor Simutrans/SDL (muerto) y se escribió uno nuevo y lim
     store.c), `extern` en main-gtk2.c, gate `&& !iso_in_store` en `TERM_XTRA_FRESH`.
     Verificado: tienda muestra texto, ESC vuelve al iso.
 
+### EDIFICIOS DEL PUEBLO (tejados) — RESUELTO 2026-05-31 (commiteado)
+Síntoma: los edificios salían como losas grises planas y "transparentes" (solo se
+pintaba el muro sur). CAUSA: los edificios del pueblo NO son `FEAT_PERM_SOLID`, sino
+features de **TEJADO** (190 grass roof, 191 roof top, 192 chimney, 193-195 brick roof,
+196/197 ventanas, 198 barril) — todas con flag `FF1_WALL` en f_info. No estaban en
+`iso_is_wall_feat` → caían al `else` y se pintaban como suelo plano (tile 13).
+FIX en `src/main-gtk2.c` (commiteado):
+1. `iso_is_wall_feat` reescrito: un feat es muro iso si tiene `FF1_WALL` (vía
+   `f_info[f].flags1`), EXCLUYENDO puertas (`iso_is_door_feat`, arco aparte) y
+   overlays (`iso_overlay_tile(f)>=0`: árbol/montaña/escombros/árbol-muerto, que son
+   WALL en f_info pero se pintan como sprite). Captura tejados/ventanas/barril +
+   todos los muros reales sin listas de rangos. Forward-decls + guarda `max_f_idx`.
+2. En el pueblo (`dun_level == 0`) los muros NO usan auto-tiling: cada celda = cubo
+   entero (tile 70) uniforme. Replica el original (dg32+iso.cfg ChooseTheme fuerza
+   `which=9` "white block" con !$depth). Edificio macizo -> masa de cubos limpia,
+   opaca, sin transparencias. En mazmorra (dun_level>0) se mantiene el auto-tiling.
+VERIFICADO por el usuario en VNC: "ahora se ve perfecto".
+
 ### PENDIENTE inmediato del iso
-- Otras pantallas a pantalla completa (hoja de personaje `C`, inventario, mapa `M`,
-  menús) TAMBIÉN las tapa el iso. Aplicar el mismo patrón de flag o uno general
-  (NO `character_icky`: rompe el town).
-- Feats de terreno de ToME sin `#define` (0xBE,0xBF,0xC1,0xC2,0xC3,0xC8,0x57) salen como
-  suelo gris; mirar `lib/data/f_info.txt` (o `f_info.txt` en src) para mapearlos.
-- Mejor representación de casas (el usuario lo dejó para el futuro).
+- **EL ELEFANTE**: cualquier pantalla full-screen (hoja de personaje `C`, inventario,
+  mapa `M`, menús, ayuda, listas de hechizos, mensajes...) la TAPA el iso, porque
+  `TERM_XTRA_FRESH` repinta la escena iso sobre data[0] incondicionalmente. El flag
+  `iso_in_store` fue un parche puntual; falta una solución GENERAL (NO `character_icky`:
+  también es TRUE al pintar el mapa de este TomeTik -> pantalla negra en el town).
+- Mejor representación de casas (tejados con altura/color real, el usuario lo dejó
+  para el futuro; hoy son cubos blancos macizos uniformes).
 - Recuadro negro tras los sprites de actor: aceptado por ahora (arte Gervais).
 
 ## Cómo construir / ejecutar / PROBAR
@@ -79,12 +98,13 @@ usuario una vez; el classifier ya lo bloquea). Gestiona SOLO `tometik-play`.
   python3 -c "from PIL import Image ..."`). Town iso ≈ 45% verde, 2% negro; pantalla
   de tienda/menú ≈ 93% negro + texto blanco/cian/amarillo. Capturas en `screencaps/`.
 
-## Ficheros tocados esta sesión (sin commitear aún)
-- `src/main-gtk2.c` (todo el iso: carga, mapeo feature→tile, wall_shape, actores, gate).
+## Ficheros del iso (ya commiteados)
+- `src/main-gtk2.c` (todo el iso: carga, mapeo feature→tile vía flag FF1_WALL,
+  wall_shape en mazmorra, cubos uniformes en pueblo, actores, gate de tienda).
 - `src/store.c` (flag `iso_in_store`).
-- `src/iso/iso_render.{h,c}` (núcleo portable, de sesiones previas).
+- `src/iso/iso_render.{h,c}` (núcleo portable de geometría).
 - `docker/Dockerfile` (+xdotool), `docker/run-vnc.sh` (TOMETIK_ISO).
-- `docs/roadmap.md`, `session.md`, `screencaps/` (nuevos).
+- `docs/roadmap.md`, `session.md`, `screencaps/`.
 
 ## Memoria persistente
 Lee la memoria del proyecto: `tometik-port-goal` (en
