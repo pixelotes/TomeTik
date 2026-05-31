@@ -3492,8 +3492,12 @@ static int iso_do_tile(int f)
 
 /*
  * Callback de celda del núcleo iso: elige y dibuja el/los tile(s) de la celda.
- * Solo celdas conocidas (CAVE_MARK). Muros llevan suelo debajo (los tiles de
- * muro son transparentes en la zona del rombo, igual que los "dynamic" del cfg).
+ * Se dibuja una celda si está MEMORIZADA (CAVE_MARK) o VISIBLE ahora mismo
+ * (CAVE_SEEN): en mazmorra el suelo iluminado solo por la antorcha queda
+ * CAVE_SEEN pero NO se memoriza, así que con solo CAVE_MARK el jugador y su
+ * radio de luz salían en negro (el 2D dibuja lo visible, no solo lo memorizado).
+ * Muros llevan suelo debajo (los tiles de muro son transparentes en la zona del
+ * rombo, igual que los "dynamic" del cfg).
  */
 static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 {
@@ -3502,9 +3506,9 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 
 	if (!iso_inb(cy, cx)) return;
 
-	/* Celda desconocida: rombo oscuro (rellena los huecos del borde explorado
-	 * que asoman bajo la parte transparente de los muros). */
-	if (!(cave[cy][cx].info & CAVE_MARK))
+	/* Celda ni memorizada ni visible: rombo oscuro (rellena los huecos del
+	 * borde explorado que asoman bajo la parte transparente de los muros). */
+	if (!(cave[cy][cx].info & (CAVE_MARK | CAVE_SEEN)))
 	{
 		iso_blit(td, ISO_T_DARK, sx, sy);
 		return;
@@ -5933,6 +5937,37 @@ static gboolean leave_notify_event_handler(
 	return FALSE;
 }
 
+/* Clic en el mapa: "go to" (click-to-walk). Botón izquierdo sobre una casilla
+ * transitable -> el motor calcula la ruta A* y camina hasta allí. Reutiliza la
+ * misma identificación de celda que el tooltip. El ESCAPE que inyectamos solo
+ * sirve para desbloquear el inkey() en el que el motor está esperando comando;
+ * el bucle de turnos ve 'travelling' y va dando los pasos. */
+static gboolean button_press_event_handler(
+        GtkWidget *widget,
+        GdkEventButton *event,
+        gpointer user_data)
+{
+	term_data *td = (term_data *)user_data;
+	int cy = 0, cx = 0;
+
+	/* Solo botón izquierdo, con partida en curso y no dentro de menú/tienda. */
+	if (event->button != 1) return FALSE;
+	if (!game_in_progress || !character_generated || character_icky) return FALSE;
+
+	if (!gtk_map_pixel_to_cave(td, (int)event->x, (int)event->y, &cy, &cx))
+		return FALSE;
+
+	/* Iniciar el viaje; si hay ruta, desbloquear el inkey para que el bucle de
+	 * turnos empiece a caminar. Si la casilla no es transitable, no se hace nada. */
+	if (travel_to(cy, cx))
+	{
+		tooltip_hide();
+		Term_keypress(ESCAPE);
+	}
+
+	return TRUE;
+}
+
 
 /*
  * Create Gtk widgets for a terminal window and set up callbacks
@@ -6042,7 +6077,8 @@ static void init_gtk_window(term_data *td, int i)
 	if (main_window)
 	{
 		gtk_widget_add_events(td->drawing_area,
-		                      GDK_POINTER_MOTION_MASK | GDK_LEAVE_NOTIFY_MASK);
+		                      GDK_POINTER_MOTION_MASK | GDK_LEAVE_NOTIFY_MASK
+		                      | GDK_BUTTON_PRESS_MASK);
 		gtk_signal_connect(
 		        GTK_OBJECT(td->drawing_area),
 		        "motion_notify_event",
@@ -6052,6 +6088,11 @@ static void init_gtk_window(term_data *td, int i)
 		        GTK_OBJECT(td->drawing_area),
 		        "leave_notify_event",
 		        GTK_SIGNAL_FUNC(leave_notify_event_handler),
+		        (gpointer)td);
+		gtk_signal_connect(
+		        GTK_OBJECT(td->drawing_area),
+		        "button_press_event",
+		        GTK_SIGNAL_FUNC(button_press_event_handler),
 		        (gpointer)td);
 	}
 

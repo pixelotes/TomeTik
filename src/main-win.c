@@ -4169,6 +4169,28 @@ LRESULT FAR PASCAL AngbandWndProc(HWND hWnd, UINT uMsg,
 			return 0;
 		}
 
+		/* TomeTik: clic izquierdo en el mapa -> "go to" (click-to-walk) */
+	case WM_LBUTTONDOWN:
+		{
+			int cx = 0, cy = 0;
+			int px = (int)(short)LOWORD(lParam);
+			int py = (int)(short)HIWORD(lParam);
+
+			/* Solo con partida en curso y fuera de menús/tiendas. */
+			if (!td || !character_generated || character_icky) break;
+
+			if (!win_map_pixel_to_cave(td, px, py, &cy, &cx)) break;
+
+			/* Iniciar viaje; el ESCAPE desbloquea el inkey() en el que el motor
+			 * espera comando, y el bucle de turnos camina viendo 'travelling'. */
+			if (travel_to(cy, cx))
+			{
+				win_tooltip_hide(hWnd);
+				Term_keypress(ESCAPE);
+			}
+			break;
+		}
+
 		/* TomeTik: tooltip de casilla al pasar el ratón por el mapa */
 	case WM_MOUSEMOVE:
 		{

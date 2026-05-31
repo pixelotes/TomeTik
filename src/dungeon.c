@@ -4788,7 +4788,7 @@ void process_player(void)
 	if (!avoid_abort)
 	{
 		/* Check for "player abort" (semi-efficiently for resting) */
-		if (running || command_rep || (resting && !(resting & 0x0F)))
+		if (running || travelling || command_rep || (resting && !(resting & 0x0F)))
 		{
 			/* Do not wait */
 			inkey_scan = TRUE;
@@ -4930,6 +4930,13 @@ void process_player(void)
 			 * Eru and do the opposite for the other deities -- pelpel
 			 */
 			/* p_ptr->did_nothing = TRUE; */
+		}
+
+		/* Auto-travelling (click-to-walk / auto-explore) */
+		else if (travelling)
+		{
+			/* Take a step along the route */
+			travel_step();
 		}
 
 		/* Repeated command */
