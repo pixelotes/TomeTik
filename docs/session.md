@@ -60,15 +60,94 @@ FIX en `src/main-gtk2.c` (commiteado):
    opaca, sin transparencias. En mazmorra (dun_level>0) se mantiene el auto-tiling.
 VERIFICADO por el usuario en VNC: "ahora se ve perfecto".
 
-### PENDIENTE inmediato del iso
-- **EL ELEFANTE**: cualquier pantalla full-screen (hoja de personaje `C`, inventario,
-  mapa `M`, menús, ayuda, listas de hechizos, mensajes...) la TAPA el iso, porque
-  `TERM_XTRA_FRESH` repinta la escena iso sobre data[0] incondicionalmente. El flag
-  `iso_in_store` fue un parche puntual; falta una solución GENERAL (NO `character_icky`:
-  también es TRUE al pintar el mapa de este TomeTik -> pantalla negra en el town).
-- Mejor representación de casas (tejados con altura/color real, el usuario lo dejó
-  para el futuro; hoy son cubos blancos macizos uniformes).
-- Recuadro negro tras los sprites de actor: aceptado por ahora (arte Gervais).
+### MODO "Isometric" en el menú Graphics — HECHO 2026-05-31 (probado a mano)
+El iso era un flag `-i` siempre activo; no se podía alternar (ni acceder a otros
+modos de tiles). Ahora el iso es un 4º MODO de gráficos, junto a None/Old/New:
+- `GRAF_MODE_ISO = 3` (main-gtk2.c). Entrada de menú `/Options/Graphics/Isometric`
+  + check sincronizado en `graf_menu_update_handler`.
+- En `init_graphics`: `GRAF_MODE_ISO` se configura IGUAL que `GRAF_MODE_NEW` (tiles
+  Gervais 32x32 por debajo: el term 2D los pinta y `map_info` da los índices que el
+  overlay iso usa para los actores). Al final, `iso_mode = (graf_mode==GRAF_MODE_ISO)`
+  -> sólo en ese modo `TERM_XTRA_FRESH` pinta la escena iso; en None/Old/New el iso
+  se apaga y se ve el render 2D normal. Cambio en caliente vía el menú (KTRL+R React).
+- Láminas iso (dg_iso32.gif + 32x32.bmp) ahora con CARGA PEREZOSA en
+  `iso_load_sheets()` (1ª vez que se entra a iso); si fallan, fallback a New.
+- `-i` ahora hace `graf_mode_request = GRAF_MODE_ISO` (sigue arrancando en iso por
+  defecto vía TOMETIK_ISO=1). Se eliminó el bloque de carga de láminas del arranque.
+- IMPORTANTE: NO tocar `character_icky` para gatear el iso. Es TRUE durante TODO el
+  juego normal (dungeon.c:5619-5857 envuelve el bucle) -> gatearlo apagaría el iso
+  siempre y además rompía el redibujado global. Por eso el gate de tiendas es el flag
+  puntual `iso_in_store` (que va bien). Alternar a otro modo es la vía para acceder a
+  pantallas full-screen sin que las tape el iso.
+
+### AUDITORÍA DE COBERTURA DE TILES iso — HECHO 2026-05-31
+Por qué importa SOLO en iso: en iso solo bliteamos el sprite del actor si map_info
+devuelve un tile gráfico (a&0x80). Una entidad sin tile (x_attr sin 0x80) es
+INVISIBLE en iso (en 2D sale como letra ASCII). Herramienta: `iso_audit_coverage()`
+en main-gtk2.c, disparada UNA vez en el 1er `iso_draw_scene` si `TOMETIK_ISO_AUDIT`
+está en el entorno (OJO: hay que auditar en tiempo de RENDER, no en init_graphics:
+allí los x_attr aún no están poblados por el prf -> falso "todo sin tile"). Escribe
+`lib/user/iso_coverage.txt` (ANGBAND_DIR_USER). Recorre r_info/k_info (x_attr&0x80)
+y f_info (features que iso_cell_cb pinta como suelo gris tile 13).
+RESULTADO con save PLAYER: 0 monstruos, 0 objetos sin tile; 43 features como suelo
+gris (5 falsos positivos: open floor, cobblestone road, town, field, rocky ground).
+- **Neil, the Sorceror (R:1076)** no tenía tile (último r_idx, sin entrada en el prf)
+  -> añadido `R:1076:0xAB/0x98` en graf-gervais.prf (reusa el tile del Sorcerer
+  genérico R:638). Verificado: 0 monstruos sin tile.
+
+### EXTRACCIÓN DE TILES 2D DE FEATURES FALTANTES — HECHO 2026-05-31
+Para buscar equivalentes iso a ojo: extraídos los 42 tiles 2D Gervais (32x32) de las
+features que en iso salen como suelo gris, a `screencaps/missing_tiles_2d/` con nombre
+`F<idx>_<nombre>.png` + `_contact_sheet.png` (hoja etiquetada con idx/nombre/row,col).
+Método (sin recompilar): parsear el informe + `lib/pref/graf-gervais.prf` (`F:idx:
+0xAttr/0xChar` -> row=attr&0x7F, col=char&0x7F) y recortar `lib/xtra/graf/32x32.bmp`
+(64x71 tiles de 32px). `F212 dead small tree` es ASCII (sin tile 2D). NOTA: `F183
+void` salió como un gato blanco (posible rareza del prf), extraído fiel igualmente.
+
+### MAPEO iso DE FEATURES FALTANTES — TANDA 1 APLICADA 2026-05-31
+Lámina iso completa etiquetada en `screencaps/iso_sheet_labeled.png` (índices 0-209).
+Aplicados en iso_cell_cb (43 -> 34 features como suelo gris):
+- web(16) -> overlay 42 (red); field(181) -> suelo 30 (surcos); cobblestone road
+  (200,201) -> suelo 15 (adoquín); rocky ground(207) -> suelo 58 (grava); dead small
+  tree(212) -> overlay 46 sobre hierba; illusion wall(189) -> cubo muro 70 (es FLOOR
+  pero se ve muro; caso especial en iso_is_wall_feat); quest exit(9) y town exit(12)
+  -> arco de piedra abierto 93/94. (Auditoría actualizada para no marcarlas.)
+HALLAZGO: dg_iso32 tiene CASAS iso de 1 celda (171 choza paja, 172/173 adobe, 174
+cobertizo, 175/177 tejado rojo, 176 tejado gris, 178 puesto/toldo, 179 tejado HIERBA,
+180 torre mago, 182-184 tiendas, 185/186 fortaleza) -> para el futuro de "casas reales"
+(casan con feats tejado 190-195).
+
+### TILES EXTRA DE DUNGEON ODYSSEY (do_extra) — TANDA 2 APLICADA 2026-05-31
+Segunda fuente de tiles iso: **Dungeon Odyssey** (abandonware, licencia OK por el
+usuario), en `dungeonodyssey/` (PNGs sueltos 54x54, iso, magenta #FF00FF transp.).
+Tiene justo los huecos que faltaban. Pipeline:
+- `tools/build_do_extra.py` ensambla los tiles elegidos en `lib/xtra/iso/do_extra.png`
+  (7 cols; el ORDEN define el enum DO_* en main-gtk2.c -> no reordenar sin tocar el enum).
+- main-gtk2.c: `do_sheet` (cargado en iso_load_sheets, magenta->alfa), `do_blit(idx,
+  sx,sy)` blitea en `sy+DO_DY` (DO_DY=-5: alinea rombo de suelo, DO 54px vs dg 49px),
+  `iso_do_tile(f)` mapea feature->índice DO, y un branch en iso_cell_cb (suelo + tile DO).
+- Mapeado (43->18 features grises): fuente(2,15)=Fountain01; dark pit(87)=PitOpen; great
+  fire(178)/fire(205)=PoolFire; trap(17)=TrapDoor; monster trap(175)=PitSpikesSilver;
+  altares(161-165)=AltarNeutral/04/Good/Evil/05; nether mist(102)=PoolPoison; vapour/
+  mist(208,210)=PoolMirky; condensing water(209)=PoolWater. Render de muestra (cada tile
+  sobre el rombo) en `screencaps/do_tiles_on_iso_floor.png`. Verificado: town sin regresión.
+- OJO repo: `dungeonodyssey/` son ~3000 PNGs fuente; solo se commitea `do_extra.png`
+  (ensamblado) + el script. Plantear gitignore de `dungeonodyssey/`.
+
+### PENDIENTE inmediato del iso — FEATURES sin tile (18 restantes)
+- **Dejar como suelo (correcto):** open floor (1,172), Underground Tunnel (173,204),
+  town (203). [5]
+- **Sin equivalente en NINGUNA fuente (dejar suelo o arte nuevo):**
+  - glyph of warding (3), explosive rune (64): runas; no hay tile iso.
+  - Straight Road (65-73): camino mágico azul; sin tile (stand-in: suelo azul/tinte). [9]
+  - Void Jumpgate (176), void (183): portal/vacío; sin tile (stand-in 208/209).
+- 2º foco del usuario aún pendiente: sprites ALTOS/GRANDES en iso (anclaje/altura +
+  recuadro negro), falta ejemplo concreto.
+- 2º foco del usuario: afinar sprites ALTOS/GRANDES en iso (anclaje/altura + recuadro
+  negro). Falta un ejemplo concreto (en el pueblo solo hay humanoides 1x1).
+- Mejor representación de casas (tejados con altura/color real; hoy cubos blancos).
+- (Opcional) pantallas full-screen dentro del propio modo iso las sigue tapando el
+  iso; de momento se accede cambiando de modo de gráficos.
 
 ## Cómo construir / ejecutar / PROBAR
 ```bash
