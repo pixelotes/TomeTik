@@ -4,7 +4,8 @@ CLAUDE.md
 tome
 tome.gtk2
 tometik.exe
-*.o (cualquier objeto: arch-específico, regenerado en build)
+# objetos: arch-específicos, se regeneran en cada build (NO versionar)
+*.o
 src/tolua
 src/tome
 src/tometik.exe
@@ -28,5 +29,3 @@ lib/user/iso_coverage.txt
 # Varios
 *.bak
 .DS_Store
-origsources/*.o
-*.o
