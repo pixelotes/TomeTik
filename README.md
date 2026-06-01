@@ -15,9 +15,10 @@ This is a fork of **TomeTik**, the graphical version of ToME created by
 original TomeTik is what made ToME playable with David Gervais's tiles and added
 the first isometric mode — all the credit for that work goes to Pousse Rapière.
 
-What this fork does is take **TomeTik 0.3** (built on ToME 2.2.2) and bring it to
-modern systems: it now compiles with current toolchains and runs on Linux and
-Windows, with several frontends and a finished isometric renderer.
+What this fork does is take **TomeTik 0.3** (originally built on ToME 2.2.2),
+bring it to modern systems — it now compiles with current toolchains and runs on
+Linux and Windows, with several frontends and a finished isometric renderer — and
+**update the game base to ToME 2.3.5**, the last release of the 2.x line.
 
 ## How you can play
 
@@ -32,8 +33,8 @@ The graphics are optional — you can pick whatever you like:
 ## Reused from OmnibandTk
 
 OmnibandTk is a separate Tk frontend for playing many different Angband variants.
-It isn't related to TomeTik, but it shares the same ToME 2.2.2 base, so we reuse
-its **`graf-*.prf` tile-mapping files** (which tell the game what tile to draw for
+It isn't related to TomeTik, but it also targets ToME, so we reuse its
+**`graf-*.prf` tile-mapping files** (which tell the game what tile to draw for
 each monster, object and terrain), along with the David Gervais isometric tileset
 they use.
 

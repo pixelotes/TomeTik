@@ -1,6 +1,6 @@
 # TomeTik — Roadmap
 
-Mejoras y objetivos futuros (ToME 2.2.2 + tiles, port moderno en Docker).
+Mejoras y objetivos futuros (ToME 2.3.5 + tiles, port moderno en Docker).
 
 ## Render isométrico
 - [x] **Finalizar el modo isométrico.**

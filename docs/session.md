@@ -4,7 +4,7 @@
 > ("he commiteado, sigue con X"). NO commitees salvo que lo pida.
 
 ## Qué es esto
-`/Users/raul/Documents/GitHub/TomeTik` = port moderno de **ToME 2.2.2 + tiles**
+`/Users/raul/Documents/GitHub/TomeTik` = port moderno de **ToME 2.3.5 + tiles**
 (antiguo "TomeTik", Windows GDI) que ahora compila en Docker (Debian 12, gcc 12).
 Frontends: **X11/curses**, **GTK2 + tiles Gervais 32×32**, **Windows GDI (.exe mingw)**.
 Acceso por **VNC :5900 + noVNC navegador :6080** (pass `tometik`). Pipeline de release
