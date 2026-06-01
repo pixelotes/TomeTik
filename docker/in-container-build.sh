@@ -37,7 +37,7 @@ if [ "${FRONTEND}" = "windows" ]; then
     # Hay que borrarlos para que mingw los recompile a PE/COFF; si no, el link
     # falla con "Relocations in generic ELF (EM: 183)". El binario ./tolua ya
     # está enlazado y los w_*.c ya generados, así que es seguro borrar los .o.
-    rm -f *.o lua/*.o 2>/dev/null || true
+    rm -f *.o lua/*.o iso/*.o 2>/dev/null || true
 
     echo "=== cross-compile tometik.exe (jN) ===" | tee -a "${LOG}"
     make -f makefile.mingw -j"$(nproc)" -k 2>&1 | tee -a "${LOG}"
@@ -71,7 +71,7 @@ make -f "${MK}" clean 2>&1 | tee -a "${LOG}"
 # Limpieza a fondo: el clean de los makefiles NO borra lua/*.o, y un build de
 # windows previo deja ahí objetos mingw (i686 PE) que romperían el link nativo
 # ("file in wrong format"). Borramos todos los .o, los stubs y tolua.
-rm -f ./tolua tometik.exe w_*.c *.o lua/*.o 2>/dev/null || true
+rm -f ./tolua tometik.exe w_*.c *.o lua/*.o iso/*.o 2>/dev/null || true
 
 # Paso 1: construir el generador 'tolua' EN SERIE. El makefile no declara
 # './tolua' como dependencia de las reglas que generan w_*.c, así que con -j
