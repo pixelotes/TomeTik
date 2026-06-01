@@ -67,22 +67,24 @@ jobs:
       - name: Empaquetar artefactos (Linux + Windows)
         run: bash docker/package-release.sh "${{ steps.ver.outputs.version }}"
 
-      - name: Login en GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Construir y publicar imagen noVNC en GHCR
-        run: |
-          V="${{ steps.ver.outputs.version }}"
-          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
-          IMG="ghcr.io/${OWNER}/tometik"
-          docker build -f docker/Dockerfile.runtime -t "${IMG}:${V}" -t "${IMG}:latest" .
-          docker push "${IMG}:${V}"
-          docker push "${IMG}:latest"
-          echo "IMG=${IMG}" >> "$GITHUB_ENV"
+      # --- DESACTIVADO en la release 2.2.2: no se genera ni publica la imagen
+      # --- noVNC en GHCR. La release solo trae los binarios Linux/Windows.
+      # - name: Login en GHCR
+      #   uses: docker/login-action@v3
+      #   with:
+      #     registry: ghcr.io
+      #     username: ${{ github.actor }}
+      #     password: ${{ secrets.GITHUB_TOKEN }}
+      #
+      # - name: Construir y publicar imagen noVNC en GHCR
+      #   run: |
+      #     V="${{ steps.ver.outputs.version }}"
+      #     OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+      #     IMG="ghcr.io/${OWNER}/tometik"
+      #     docker build -f docker/Dockerfile.runtime -t "${IMG}:${V}" -t "${IMG}:latest" .
+      #     docker push "${IMG}:${V}"
+      #     docker push "${IMG}:latest"
+      #     echo "IMG=${IMG}" >> "$GITHUB_ENV"
 
       - name: Crear Release con los artefactos
         uses: softprops/action-gh-release@v2
@@ -104,9 +106,3 @@ jobs:
             - **Windows** (GDI, 32-bit): `tometik-${{ steps.ver.outputs.version }}-windows.zip` — descomprime y ejecuta `tometik.exe`.
             - **Linux GTK2** (multiventana + tiles): `tometik-${{ steps.ver.outputs.version }}-linux-gtk2.tar.gz` — `./play.sh`.
             - **Linux X11/curses** (texto): `tometik-${{ steps.ver.outputs.version }}-linux-x11.tar.gz` — `./play.sh`.
-
-            ### Jugar en el navegador (sin instalar nada)
-            ```sh
-            docker run --rm -p 127.0.0.1:6080:6080 ${{ env.IMG }}:${{ steps.ver.outputs.version }}
-            ```
-            Luego abre http://localhost:6080/vnc.html (contraseña: `tometik`).
