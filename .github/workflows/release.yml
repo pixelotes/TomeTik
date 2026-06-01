@@ -97,7 +97,8 @@ jobs:
           body: |
             ## TomeTik v${{ steps.ver.outputs.version }}
 
-            ToME 2.2.2 + tiles David Gervais 32x32, portado a sistemas modernos.
+            ToME + tiles David Gervais 32×32, portado a sistemas modernos.
+            (La versión base de ToME corresponde al número de esta release.)
 
             ### Descargas
             - **Windows** (GDI, 32-bit): `tometik-${{ steps.ver.outputs.version }}-windows.zip` — descomprime y ejecuta `tometik.exe`.
