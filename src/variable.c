@@ -136,6 +136,7 @@ s32b old_turn; 			/* Turn when level began (feelings) */
 bool wizard; 			/* Is the player currently in Wizard mode? */
 
 bool use_sound; 			/* The "sound" mode is enabled */
+bool use_music; 			/* TomeTik: background music enabled (off by default) */
 bool use_graphics; 		/* The "graphics" mode is enabled */
 bool use_bigtile = FALSE;
 	/*

@@ -65,11 +65,19 @@ Mejoras y objetivos futuros (ToME 2.2.2 + tiles, port moderno en Docker).
 - [ ] **Backportear mejoras de ToME 2.4.0ah** (la versión C++).
 
 ## Audio
-- [ ] **Habilitar sonidos y música.** Los sonidos de OmnibandTk ya están copiados en
-  **`lib/egg/`** (398 WAVs, ~18MB). El mapeo evento→sonido y la lógica de música de
-  OmnibandTk (Tcl, solo de referencia) están en **`docs/sound-reference/`**. Falta un
-  backend de sonido en C (SDL_mixer/OpenAL en Linux; equivalente en Windows/GDI).
-- [ ] **Música:** buscar música de inspiración medieval con licencia libre (no copyright).
+- [x] **Sonidos.** Backend hecho en ambos frontends, **desactivado por defecto**,
+  activable desde el nuevo **menú Audio → Sound**. GTK2: **SDL2_mixer** (mezcla real,
+  carga perezosa, parsea `lib/xtra/sound/Sound.cfg`). GDI: `PlaySound` (Win32, ya
+  existía bajo `USE_SOUND`, ahora habilitado). Assets: 59/64 eventos de ToME mapeados
+  a los WAV de OmnibandTk (`lib/egg`), **copiados+renombrados** a `lib/xtra/sound/` con
+  el nombre del evento, + `Sound.cfg` generado. Vacíos a propósito: flee, walk,
+  hitwall, wakeup, unused. **OJO:** no se oye en el Docker/noVNC (headless, sin
+  tarjeta de sonido ni audio por VNC); se prueba en el `.exe` Windows o build Linux
+  nativo con audio. Docker build lleva ahora `libsdl2-dev`/`libsdl2-mixer-dev`.
+- [~] **Música.** Toggle **Audio → Music** + backend GTK2 (SDL2_mixer `Mix_Music`,
+  busca el primer fichero en `lib/xtra/music/`, loop). **Falta la música en sí**
+  (medieval, licencia libre). GDI: toggle presente, reproducción pendiente.
+  Pendiente: buscar música de inspiración medieval con licencia libre (no copyright).
   - OmnibandTk usaba **FMOD** (`fmod.dll`); formatos soportados (de `music.tcl`):
     módulos de tracker (`.mod .it .xm .s3m .mtm .umx .mo3`), `.mp3/.mp2/.mp1`, `.ogg`,
     `.wav`. **NO MIDI** (habría que sintetizarlo a OGG/WAV antes).

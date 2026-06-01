@@ -63,6 +63,13 @@ ANGBAND MENU
   MENUITEM "Take note (:)", 2058
  }
 
+ /* TomeTik: menú Audio (sonido y música, desactivados por defecto). */
+ POPUP "A&udio"
+ {
+  MENUITEM "&Sound", 402
+  MENUITEM "&Music", 405
+ }
+
  POPUP "&Window"
  {
   POPUP "&Visibility"
@@ -189,7 +196,6 @@ ANGBAND MENU
 	 * End TomeTik 0.3
 	 */
 
-  MENUITEM "&Sound", 402
   MENUITEM SEPARATOR
   MENUITEM "Unused menu option", 410
   MENUITEM "Activate Screensaver", 411

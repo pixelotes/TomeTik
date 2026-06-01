@@ -197,6 +197,7 @@
 	 * End TomeTik 0.3
 	 */
 #define IDM_OPTIONS_SOUND		402
+#define IDM_AUDIO_MUSIC			405	/* TomeTik: toggle de música (menú Audio) */
 	/*
 	 * Start TomeTik 0.3
 	 */
@@ -3017,8 +3018,11 @@ static void setup_menus(void)
 	               MF_BYCOMMAND | MF_DISABLED | MF_GRAYED);
 	EnableMenuItem(hm, IDM_OPTIONS_BIGTILE,
 	               MF_BYCOMMAND | MF_DISABLED | MF_GRAYED);
+	/* TomeTik: sonido y música activables desde el menú Audio. */
 	EnableMenuItem(hm, IDM_OPTIONS_SOUND,
-	               MF_BYCOMMAND | MF_DISABLED | MF_GRAYED);
+	               MF_BYCOMMAND | MF_ENABLED);
+	EnableMenuItem(hm, IDM_AUDIO_MUSIC,
+	               MF_BYCOMMAND | MF_ENABLED);
 	EnableMenuItem(hm, IDM_OPTIONS_UNUSED,
 	               MF_BYCOMMAND | MF_DISABLED | MF_GRAYED);
 	EnableMenuItem(hm, IDM_OPTIONS_SAVER,
@@ -3039,6 +3043,8 @@ static void setup_menus(void)
 	              (arg_bigtile ? MF_CHECKED : MF_UNCHECKED));
 	CheckMenuItem(hm, IDM_OPTIONS_SOUND,
 	              (arg_sound ? MF_CHECKED : MF_UNCHECKED));
+	CheckMenuItem(hm, IDM_AUDIO_MUSIC,
+	              (use_music ? MF_CHECKED : MF_UNCHECKED));
 	CheckMenuItem(hm, IDM_OPTIONS_UNUSED,
 	              (0 ? MF_CHECKED : MF_UNCHECKED));
 	CheckMenuItem(hm, IDM_OPTIONS_SAVER,
@@ -3735,6 +3741,13 @@ ofn.lStructSize = sizeof(OPENFILENAME);
 			/* Hack -- Force redraw */
 			Term_key_push(KTRL('R'));
 
+			break;
+		}
+
+		/* TomeTik: toggle de música (sin reproducción aún en GDI). */
+	case IDM_AUDIO_MUSIC:
+		{
+			use_music = !use_music;
 			break;
 		}
 

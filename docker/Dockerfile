@@ -23,6 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         pkg-config \
         libgtk2.0-dev \
+        libsdl2-dev \
+        libsdl2-mixer-dev \
         gcc-mingw-w64-i686 \
         binutils-mingw-w64-i686 \
         mingw-w64-tools \
