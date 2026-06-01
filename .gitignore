@@ -4,8 +4,8 @@ CLAUDE.md
 tome
 tome.gtk2
 tometik.exe
-src/*.o
-src/lua/*.o
+# objetos: arch-específicos, se regeneran en cada build (NO versionar)
+*.o
 src/tolua
 src/tome
 src/tometik.exe
