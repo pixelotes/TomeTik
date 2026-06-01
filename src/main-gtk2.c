@@ -204,8 +204,17 @@ struct term_data
 # define TERM_DATA_DRAWABLE(td) \
 ((td)->backing_store ? (td)->backing_store : (td)->drawing_area->window)
 
+/*
+ * TomeTik: en modo iso EN VIVO (sin menú/lista: character_icky==0, fuera de
+ * tienda) NO volcamos el render 2D del term a la ventana principal: lo redibuja
+ * la escena iso en TERM_XTRA_FRESH. Si no, los tiles 2D asomaban un instante en
+ * el mapa antes de que el iso los tapara (artefactos al redibujar). En menús/
+ * listas (character_icky>0) y sub-ventanas sí se vuelca, igual que antes.
+ */
 # define TERM_DATA_REFRESH(td, x, y, wid, hgt) \
-if ((td)->backing_store) gdk_draw_pixmap( \
+if ((td)->backing_store && \
+    !(iso_mode && ((td) == &data[0]) && !character_icky && !iso_in_store)) \
+gdk_draw_pixmap( \
 (td)->drawing_area->window, \
 (td)->gc, \
 (td)->backing_store, \
