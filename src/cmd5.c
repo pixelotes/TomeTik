@@ -12,7 +12,7 @@
 
 
 #include "angband.h"
-#include "lua.h"
+#include "lua/lua.h"
 #include "tolua.h"
 
 extern lua_State *L;
@@ -24,13 +24,21 @@ extern lua_State *L;
 bool is_school_book(object_type *o_ptr)
 {
 	if (o_ptr->tval == TV_BOOK)
+	{
 		return TRUE;
+	}
 	else if (o_ptr->tval == TV_DAEMON_BOOK)
+	{
 		return TRUE;
+	}
 	else if (o_ptr->tval == TV_INSTRUMENT)
+	{
 		return TRUE;
+	}
 	else
+	{
 		return FALSE;
+	}
 }
 
 /* Does it contains a schooled spell ? */
@@ -98,8 +106,13 @@ bool is_magestaff()
 
 extern void do_cmd_browse_aux(object_type *o_ptr)
 {
+	u32b f1, f2, f3, f4, f5, esp;
+	object_flags(o_ptr, &f1, &f2, &f3, &f4, &f5, &esp);
+
 	if (is_school_book(o_ptr))
 		browse_school_spell(o_ptr->sval, o_ptr->pval, o_ptr);
+	else if (f5 & TR5_SPELL_CONTAIN && o_ptr->pval2 != -1)
+		browse_school_spell(255, o_ptr->pval2, o_ptr);
 }
 
 void do_cmd_browse(void)
@@ -550,7 +563,7 @@ void shriek_effect()
 	case 8:
 	case 9:
 		{
-			msg_print("You made a high pitched shriek!");
+			msg_print("You make a high-pitched shriek!");
 			aggravate_monsters(1);
 
 			break;
@@ -558,7 +571,7 @@ void shriek_effect()
 	case 2:
 	case 6:
 		{
-			msg_print("Oups! You call a monster.");
+			msg_print("Oops! You call a monster.");
 			summon_specific(p_ptr->py, p_ptr->px, max_dlv[dungeon_type], 0);
 
 			break;
@@ -1073,7 +1086,7 @@ int use_symbiotic_power(int r_idx, bool great, bool only_number, bool no_cost)
 	if (!flag)
 	{
 		energy_use = 0;
-		return num;
+		return -1;
 	}
 
 	/* 'Powerful' monsters have wider radii */
@@ -2064,7 +2077,7 @@ int use_symbiotic_power(int r_idx, bool great, bool only_number, bool no_cost)
 		int chance, pchance;
 
 		chance = (monster_powers[power].mana + r_ptr->level);
-		pchance = adj_str_wgt[A_WIS] / 2 + get_skill(SKILL_POSSESSION);
+		pchance = adj_str_wgt[p_ptr->stat_ind[A_WIS]] / 2 + get_skill(SKILL_POSSESSION);
 
 		if (rand_int(chance) >= pchance)
 		{
@@ -2205,7 +2218,7 @@ u32b get_school_spell(cptr do_what, cptr check_fct, s16b force_book)
 		/* If it can be wielded, it must */
 		if ((wield_slot(o_ptr) != -1) && (item < INVEN_WIELD) && (f5 & TR5_WIELD_CAST))
 		{
-			msg_format("You cannot %s from that object, it must be wielded first.", do_what);
+			msg_format("You cannot %s from that object; it must be wielded first.", do_what);
 			return -1;
 		}
 	}

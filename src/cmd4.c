@@ -246,7 +246,8 @@ void do_cmd_message_one(void)
  */
 void do_cmd_messages(void)
 {
-	int i, j, k, n, q;
+	int i, j, k, n;
+	u32b q;
 	int wid, hgt;
 
 	char shower[80];
@@ -334,7 +335,7 @@ void do_cmd_messages(void)
 		if (k == '4')
 		{
 			/* Scroll left */
-			q = (q >= wid / 2) ? (q - wid / 2) : 0;
+			q = (q >= ((u32b)wid / 2)) ? (q - wid / 2) : 0;
 
 			/* Success */
 			continue;
@@ -744,7 +745,7 @@ bool change_option(cptr name, bool value)
 		}
 	}
 
-	cmsg_format(TERM_VIOLET, "Warning, change_option could'nt find option '%s'", name);
+	cmsg_format(TERM_VIOLET, "Warning, change_option couldn't find option '%s'.", name);
 	return FALSE;
 }
 
@@ -1210,7 +1211,7 @@ void do_cmd_options(void)
 		Term_clear();
 
 		/* Why are we here */
-		prt("Angband options", 2, 0);
+		prt("Options", 2, 0);
 
 		/* Give some choices */
 		prt("(1) User Interface Options", 4, 5);
@@ -3475,7 +3476,7 @@ void do_cmd_knowledge_artifacts(void)
 		{
 			object_type forge;
 			object_type *q_ptr;
-			s32b f1, f2, f3, f4, f5, esp;
+			u32b f1, f2, f3, f4, f5, esp;
 
 			/* Get local object */
 			q_ptr = &forge;
@@ -3679,13 +3680,37 @@ static void do_cmd_knowledge_uniques(void)
 				/* Print a message */
 				if (dead)
 				{
-					fprintf(fff, "#####R %-70s is dead\n",
-					        (r_name + r_ptr->name));
+					/* Don't print the unique's ASCII symbol
+					 * if use_graphics is on. */
+					if (use_graphics)
+					{
+						fprintf(fff, "[[[[[R%-70s is dead]\n",
+					        	(r_name + r_ptr->name));
+					}
+					else
+					{
+						fprintf(fff, "[[[[[%c%c] [[[[[R%-68s is dead]\n",
+							conv_color[r_ptr->d_attr],
+							r_ptr->d_char,
+					        	(r_name + r_ptr->name));
+					}
 				}
 				else
 				{
-					fprintf(fff, " %-70s is alive\n",
-					        (r_name + r_ptr->name));
+					/* Don't print the unique's ASCII symbol
+					 * if use_graphics is on. */
+					if (use_graphics)
+					{
+						fprintf(fff, "[[[[[w%-70s is alive]\n",
+					        	(r_name + r_ptr->name));
+					}
+					else
+					{
+						fprintf(fff, "[[[[[%c%c] [[[[[w%-68s is alive]\n",
+							conv_color[r_ptr->d_attr],
+							r_ptr->d_char,
+					        	(r_name + r_ptr->name));
+					}
 				}
 			}
 		}
@@ -4264,11 +4289,13 @@ static void do_cmd_knowledge_quests(void)
 			{
 				/**/
 				if (!(dungeon_flags1 & DF1_PRINCIPAL)) continue;
+				if ((dun_level < 1) || (dun_level >= MAX_RANDOM_QUEST)) continue;
 				if (!random_quests[dun_level].type) continue;
+				if (random_quests[dun_level].done) continue;
 				if (p_ptr->inside_quest) continue;
 				if (!dun_level) continue;
 
-				if (!is_randhero())
+				if (!is_randhero(dun_level))
 				{
 					fprintf(fff, "#####yCaptured princess!\n");
 					fprintf(fff, "A princess is being held prisoner and tortured here!\n");
@@ -4722,7 +4749,7 @@ void do_cmd_time()
 char *macro_recorder_current = NULL;
 void macro_recorder_start()
 {
-	msg_print("Starting macro recording, press this key again to stop. Note that if the action you want to record accepts the @ key, use it, it will remove your the need to inscribe stuff.");
+	msg_print("Starting macro recording, press this key again to stop. Note that if the action you want to record accepts the @ key, use it; it will remove your the need to inscribe stuff.");
 	C_MAKE(macro_recorder_current, 1, char);
 	macro_recorder_current[0] = '\0';
 }
@@ -4764,7 +4791,7 @@ void macro_recorder_stop()
 		/* Prompt */
 		C_MAKE(str, (strlen(macro) + 1) * 3, char);
 		ascii_to_text(str, macro);
-		msg_format("Added a macro '%s', if you want it to stay permanently press @ now and dump macros to a file.", str);
+		msg_format("Added a macro '%s'. If you want it to stay permanently, press @ now and dump macros to a file.", str);
 		C_FREE(str, (strlen(macro) + 1) * 3, char);
 	}
 

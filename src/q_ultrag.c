@@ -24,36 +24,40 @@ bool quest_ultra_good_move_hook(char *fmt)
 		if ((c_ptr->feat != FEAT_SHOP) || (c_ptr->special != 23)) return (FALSE);
 
 		quick_messages = FALSE;
-		cmsg_print(TERM_YELLOW, "You meet Galadriel.");
+		cmsg_print(TERM_L_BLUE, "You meet Galadriel.");
 		cmsg_print(TERM_YELLOW, "'I still cannot believe this is all over.'");
-		cmsg_print(TERM_YELLOW, "'Morgoth reign of terror is gone for good!'");
-		cmsg_print(TERM_YELLOW, "'His spirit is now banned to the Void where he cannot do much harm.'");
-		cmsg_print(TERM_YELLOW, "'We will never thank you enough, hero!'");
-		cmsg_print(TERM_YELLOW, "Although everything seems alright, Galadriel seems a bit subdued.");
-		cmsg_print(TERM_YELLOW, "'The spirit of Morgoth is not destroyed, only banned.'");
+		cmsg_print(TERM_YELLOW, "'Morgoth's reign of terror is over at last!'");
+		cmsg_print(TERM_YELLOW, "'His spirit has been banished to the Void where he cannot do much harm.'");
+		cmsg_print(TERM_YELLOW, "'We can never thank you enough, hero!'");
+		cmsg_print(TERM_L_BLUE, "Although everything seems all right, Galadriel seems a little subdued.");
+		cmsg_print(TERM_YELLOW, "'The spirit of Morgoth is not destroyed however -- only banished.'");
 		cmsg_print(TERM_YELLOW, "'He can still control his allies left on Arda.'");
-		cmsg_print(TERM_YELLOW, "'Maybe .. maybe there could be a way to end this thread forever.'");
-		cmsg_print(TERM_YELLOW, "'Somebody would have to go into the Void and do it.'");
-		cmsg_print(TERM_YELLOW, "'But going there is certain death, we cannot ask it to anybody.'");
-		cmsg_print(TERM_YELLOW, "'But you can choose of you free will to attempt it.'");
-		cmsg_print(TERM_YELLOW, "'You can stay there and do whatever you want of your future.'");
-		cmsg_print(TERM_YELLOW, "'Becoming a king if you so desire. Or you can enter the Void'");
-		cmsg_print(TERM_YELLOW, "'to fight an hopeless battle and face certain death.'");
+		cmsg_print(TERM_YELLOW, "'Maybe... maybe there could be a way to remove the threat of evil forever.'");
+		cmsg_print(TERM_YELLOW, "'Somebody would have to go into the Void to do it.'");
+		cmsg_print(TERM_YELLOW, "'But going there is certain death; we cannot ask it of anyone.'");
+		cmsg_print(TERM_YELLOW, "'But you may choose, of your own free will, to attempt it...'");
+		cmsg_print(TERM_L_BLUE, "Galadriel plainly presents the choice that now lies before you:");
+
+		cmsg_print(TERM_YELLOW, "'You have earned the right to make whatever you wish of your future.'");
+		cmsg_print(TERM_YELLOW, "'Become a ruler of Arda if you so desire; reign long, enjoying'");
+		cmsg_print(TERM_YELLOW, "'the adulation of all, and have a happy life. Or, you can turn your'");
+		cmsg_print(TERM_YELLOW, "'back on safety. Enter the Void, alone, to fight a hopeless battle'");
+		cmsg_print(TERM_YELLOW, "'and face certain death.'");
 
 		/* This is SO important a question that flush pending inputs */
 		flush();
 
 		if (!get_check("Will you stay on Arda and lead a happy life?"))
 		{
-			cmsg_print(TERM_YELLOW, "'So be it, I will open a portal to the Void.'");
-			cmsg_print(TERM_YELLOW, "'But you must know this, the portal is one way only'");
-			cmsg_print(TERM_YELLOW, "'It will close once you enter, as to not permit the horrors'");
-			cmsg_print(TERM_YELLOW, "'that lurks there to enter Arda. Your only way to come back'");
-			cmsg_print(TERM_YELLOW, "'will be to defeat the spirit of Morgoth, Melkor.'");
+			cmsg_print(TERM_YELLOW, "'So be it. I will open a portal to the Void.'");
+			cmsg_print(TERM_YELLOW, "'But you must know this: the portal can only lead one way.'");
+			cmsg_print(TERM_YELLOW, "'It will close once you enter, so as not to permit the horrors'");
+			cmsg_print(TERM_YELLOW, "'that lurk in the Void to enter Arda. Your only way to come back'");
+			cmsg_print(TERM_YELLOW, "'is to defeat the spirit of Morgoth, known as Melkor.'");
 			cmsg_print(TERM_YELLOW, "'You will not be able to recall back either.'");
-			cmsg_print(TERM_YELLOW, "'You can still choose to retire, it is not too late'");
+			cmsg_print(TERM_YELLOW, "'You can still choose to retire; it is not too late'");
 			cmsg_print(TERM_YELLOW, "'to save your life.'");
-			cmsg_print(TERM_YELLOW, "'One last thing, it is quite certain that Melkor will have erected'");
+			cmsg_print(TERM_YELLOW, "'One last thing: It is quite certain that Melkor will have erected'");
 			cmsg_print(TERM_YELLOW, "'powerful magical barriers around him. You certainly will'");
 			cmsg_print(TERM_YELLOW, "'need to find a way to break them to get to him.'");
 
@@ -101,7 +105,7 @@ bool quest_ultra_good_stair_hook(char *fmt)
 		int i;
 		bool ultimate = FALSE;
 
-		/* Now look for an ULTIMATE artifact, taht is, one imbued with the flame */
+		/* Now look for an ULTIMATE artifact, that is, one imbued with the flame */
 		for (i = INVEN_WIELD; i < INVEN_TOTAL; i++)
 		{
 			u32b f1, f2, f3, f4, f5, esp;
@@ -123,13 +127,13 @@ bool quest_ultra_good_stair_hook(char *fmt)
 		{
 			cmsg_print(TERM_YELLOW, "It seems the level is protected by an impassable barrier of pure magic.");
 			cmsg_print(TERM_YELLOW, "Only the most powerful magic could remove it. You will need to use");
-			cmsg_print(TERM_YELLOW, "the Flame Imperishable to pass. The source of Eru Iluvatar's power himself.");
+			cmsg_print(TERM_YELLOW, "the Flame Imperishable to pass. The source of Eru Iluvatar's own power.");
 			return TRUE;
 		}
 		else
 		{
 			cmsg_print(TERM_YELLOW, "The power of the Flame Imperishable shatters the magical barrier.");
-			cmsg_print(TERM_YELLOW, "THe way before you is free.");
+			cmsg_print(TERM_YELLOW, "The way before you is free.");
 		}
 	}
 
@@ -164,12 +168,12 @@ bool quest_ultra_good_death_hook(char *fmt)
 
 		/* Congratulations */
 		cmsg_print(TERM_L_GREEN, "****** CONGRATULATIONS ******");
-		cmsg_print(TERM_L_GREEN, "You have done more than impossible. You ended the thread of");
-		cmsg_print(TERM_L_GREEN, "Melkor forever. Thanks to you Arda will live in eternal peace.");
+		cmsg_print(TERM_L_GREEN, "You have done more than the impossible. You ended the threat of");
+		cmsg_print(TERM_L_GREEN, "Melkor forever. Thanks to you, Arda will live in eternal peace.");
 		cmsg_print(TERM_L_GREEN, "You feel the spirit of Eru touching you. You feel your spirit rising!");
-		cmsg_print(TERM_L_GREEN, "Before you a portal to Arda opens. You can now come back to your world");
-		cmsg_print(TERM_L_GREEN, "and live happily everafter.");
-		cmsg_print(TERM_L_GREEN, "What you will do now is up to you, but your deeds shall ever be remmebered.");
+		cmsg_print(TERM_L_GREEN, "Before you, a portal to Arda opens. You can now come back to your world");
+		cmsg_print(TERM_L_GREEN, "and live happily ever after.");
+		cmsg_print(TERM_L_GREEN, "What you do now is up to you, but your deeds shall ever be remembered.");
 		cmsg_print(TERM_L_GREEN, "You may retire (commit suicide) when you are ready.");
 
 		/* Create the entrance */
@@ -194,7 +198,7 @@ bool quest_ultra_good_death_hook(char *fmt)
 		/* Mega-Hack -- Prepare to make the Flame Imperishable */
 		object_prep(q_ptr, lookup_kind(TV_JUNK, 255));
 
-		/* Mega-Hack -- Actually create "the one ring" */
+		/* Mega-Hack -- Actually create the Flame Imperishable */
 		k_allow_special[296] = TRUE;
 		apply_magic(q_ptr, -1, TRUE, TRUE, TRUE);
 		k_allow_special[296] = FALSE;
@@ -230,7 +234,7 @@ bool quest_ultra_good_death_hook(char *fmt)
 		inven_carry(q_ptr, FALSE);
 	}
 	return (FALSE);
-};
+}
 bool quest_ultra_good_dump_hook(char *fmt)
 {
 	if (quest[QUEST_ULTRA_GOOD].status >= QUEST_STATUS_TAKEN)
@@ -238,7 +242,7 @@ bool quest_ultra_good_dump_hook(char *fmt)
 		/* Ultra winner ! */
 		if (total_winner == WINNER_ULTRA)
 		{
-			fprintf(hook_file, "\n You destroyed Melkor forever and got elevated to the status of Vala by Eru Iluvatar.");
+			fprintf(hook_file, "\n You destroyed Melkor forever and have been elevated to the status of Vala by Eru Iluvatar.");
 			fprintf(hook_file, "\n Arda will forever be free.");
 		}
 		else

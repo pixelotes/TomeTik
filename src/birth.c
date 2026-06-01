@@ -956,9 +956,6 @@ static void player_wipe(void)
 	/* Hack -- Well fed player */
 	p_ptr->food = PY_FOOD_FULL - 1;
 
-	/* No current music */
-	p_ptr->music = 255;
-
 	/* Wipe the alchemists' recipes */
 	for ( i = 0 ; i < 32 ; i++)
 		alchemist_known_egos[i] = 0;
@@ -983,6 +980,7 @@ static void player_wipe(void)
 
 	/* Assume no cheating */
 	noscore = 0;
+	wizard = 0;
 
 	/* Assume no innate spells */
 	spell_num = 0;
@@ -1197,13 +1195,13 @@ static void player_outfit(void)
 
 
 /* Possible number(and layout) or random quests */
-#define MAX_RANDOM_QUESTS_TYPES ((7 * 3) + (7 * 1))
+#define MAX_RANDOM_QUESTS_TYPES ((8 * 3) + (8 * 1))
 int random_quests_types[MAX_RANDOM_QUESTS_TYPES] =
 {
-	1, 5, 6, 10, 11, 12, 14,          /* Princess type */
-	1, 5, 6, 10, 11, 12, 14,          /* Princess type */
-	1, 5, 6, 10, 11, 12, 14,          /* Princess type */
-	20, 13, 15, 16, 9, 17, 18,          /* Hero Sword Quest */
+	1, 5, 6, 7, 10, 11, 12, 14,          /* Princess type */
+	1, 5, 6, 7, 10, 11, 12, 14,          /* Princess type */
+	1, 5, 6, 7, 10, 11, 12, 14,          /* Princess type */
+	20, 13, 15, 16, 9, 17, 18, 8,        /* Hero Sword Quest */
 };
 
 /* Enforce OoD monsters until this level */
@@ -1334,7 +1332,7 @@ static void gen_random_quests(int n)
 	dungeon_type = old_type;
 }
 
-int dump_classes(s16b *classes, int sel, s32b *restrict)
+int dump_classes(s16b *classes, int sel, u32b *restrictions)
 {
 	int n = 0;
 
@@ -1375,7 +1373,7 @@ int dump_classes(s16b *classes, int sel, s32b *restrict)
 			        cp_ptr->flags1 & PR1_EXPERIMENTAL ? "\nEXPERIMENTAL" : "");
 			print_desc(desc);
 
-			if (!(restrict[classes[n] / 32] & BIT(classes[n])) ||
+			if (!(restrictions[classes[n] / 32] & BIT(classes[n])) ||
 			                cp_ptr->flags1 & PR1_EXPERIMENTAL)
 				c_put_str(TERM_BLUE, buf, 18 + (n / 4), 1 + 20 * (n % 4));
 			else
@@ -1383,7 +1381,7 @@ int dump_classes(s16b *classes, int sel, s32b *restrict)
 		}
 		else
 		{
-			if (!(restrict[classes[n] / 32] & BIT(classes[n])) ||
+			if (!(restrictions[classes[n] / 32] & BIT(classes[n])) ||
 			                cp_ptr->flags1 & PR1_EXPERIMENTAL)
 				c_put_str(TERM_SLATE, buf, 18 + (n / 4), 1 + 20 * (n % 4));
 			else
@@ -1648,7 +1646,7 @@ static bool player_birth_aux_ask()
 
 	int racem[100], max_racem = 0;
 
-	u32b restrict[2];
+	u32b restrictions[2];
 
 	cptr str;
 
@@ -2020,7 +2018,7 @@ static bool player_birth_aux_ask()
 		int z;
 
 		for (z = 0; z < 2; z++)
-			restrict[z] = (rp_ptr->choice[z] | rmp_ptr->pclass[z]) & (~rmp_ptr->mclass[z]);
+			restrictions[z] = (rp_ptr->choice[z] | rmp_ptr->pclass[z]) & (~rmp_ptr->mclass[z]);
 
 		if (max_mc_idx > 1)
 		{
@@ -2073,7 +2071,7 @@ static bool player_birth_aux_ask()
 		{
 			/* Dump classes */
 			sel = 0;
-			n = dump_classes(class_types, sel, restrict);
+			n = dump_classes(class_types, sel, restrictions);
 
 			/* Get a class */
 			while (1)
@@ -2101,7 +2099,7 @@ static bool player_birth_aux_ask()
 				{
 					sel += 4;
 					if (sel >= n) sel %= 4;
-					dump_classes(class_types, sel, restrict);
+					dump_classes(class_types, sel, restrictions);
 				}
 				else if (c == '8')
 				{
@@ -2109,19 +2107,19 @@ static bool player_birth_aux_ask()
 					if (sel < 0) sel = n - 1 -( ( -sel) % 4);
 					/* C's modulus operator does not have defined
 					 results for negative first values. Damn. */
-					dump_classes(class_types, sel, restrict);
+					dump_classes(class_types, sel, restrictions);
 				}
 				else if (c == '6')
 				{
 					sel++;
 					if (sel >= n) sel = 0;
-					dump_classes(class_types, sel, restrict);
+					dump_classes(class_types, sel, restrictions);
 				}
 				else if (c == '4')
 				{
 					sel--;
 					if (sel < 0) sel = n - 1;
-					dump_classes(class_types, sel, restrict);
+					dump_classes(class_types, sel, restrictions);
 				}
 				else if (c == '\r')
 				{
@@ -2134,7 +2132,7 @@ static bool player_birth_aux_ask()
 
 		/* Set class */
 #ifdef RESTRICT_COMBINATIONS
-		if (!(restrict & BIT(k)))
+		if (!(restrictions & BIT(k)))
 		{
 			noscore |= 0x0020;
 			message_add(MESSAGE_MSG, " ", TERM_VIOLET);
@@ -2279,7 +2277,7 @@ static bool player_birth_aux_ask()
 			{
 				strnfmt(buf, 200, "Choose a god (%c-%c), * for a random choice, "
 				        "= for options, 8/2/4/6 for movement: ",
-				        I2A(0), I2A(max_gods));
+				        I2A(0), I2A(max - 1));
 				put_str(buf, 19, 2);
 
 				c = inkey();
@@ -2292,7 +2290,7 @@ static bool player_birth_aux_ask()
 				}
 				if (c == '*')
 				{
-					k = randint(max_gods);
+					k = choice[randint(max) - 1];
 					break;
 				}
 				k = (islower(c) ? A2I(c) : -1);
@@ -2391,8 +2389,6 @@ static bool player_birth_aux_ask()
 	 * the following:
 	 * permanent_levels,
 	 * ironman_rooms,
-	 * cth_monsters,
-	 * zang_monsters,
 	 * joke_monsters,
 	 * always_small_level, and
 	 * fate_option
@@ -2446,21 +2442,21 @@ static bool player_birth_aux_ask()
 		{
 			/* Extra info */
 			Term_putstr(5, 15, -1, TERM_WHITE,
-			            "Please input the number of optional quests you'd like to perform");
+			            "Select the number of optional random quests you'd like to receive.");
 			Term_putstr(5, 16, -1, TERM_WHITE,
-			            "If you do not want any optional quests, enter 0");
+			            "If you do not want any optional quests, enter 0.");
 
 			/* Ask the number of additional quests */
 			while (TRUE)
 			{
-				put_str(format("Number of additional quest? (<%u) ",
-				               MAX_RANDOM_QUEST), 20, 2);
+				put_str(format("Number of quests? (0-%u) ",
+				               MAX_RANDOM_QUEST - 1), 20, 2);
 
 				/* Get a the number of additional quest */
 				while (TRUE)
 				{
 					/* Move the cursor */
-					put_str("", 20, 37);
+					put_str("", 20, 27);
 
 					/* Default */
 					strcpy(inp, "20");
@@ -3089,15 +3085,39 @@ static bool player_birth_aux()
 {
 	char c;
 
+	int i, j;
+
 	int y = 0, x = 0;
 
 	char old_history[4][60];
 
-	int i, j;
-
-
 	/* Ask */
 	if (!player_birth_aux_ask()) return (FALSE);
+
+	for (i = 1; i < max_s_idx; i++)
+		s_info[i].dev = FALSE;
+	for (i = 1; i < max_s_idx; i++)
+	{
+		s32b value = 0, mod = 0;
+
+		compute_skills(&value, &mod, i);
+
+		init_skill(value, mod, i);
+
+		/* Develop only revelant branches */
+		if (s_info[i].value || s_info[i].mod)
+		{
+			int z = s_info[i].father;
+
+			while (z != -1)
+			{
+				s_info[z].dev = TRUE;
+				z = s_info[z].father;
+				if (z == 0)
+					break;
+			}
+		}
+	}
 
 	if (do_quick_start)
 	{
@@ -3375,30 +3395,6 @@ void player_birth(void)
 	/* Finish skills */
 	p_ptr->skill_points = 0;
 	p_ptr->skill_last_level = 1;
-	for (i = 1; i < max_s_idx; i++)
-		s_info[i].dev = FALSE;
-	for (i = 1; i < max_s_idx; i++)
-	{
-		s32b value = 0, mod = 0;
-
-		compute_skills(&value, &mod, i);
-
-		init_skill(value, mod, i);
-
-		/* Develop only revelant branches */
-		if (s_info[i].value || s_info[i].mod)
-		{
-			int z = s_info[i].father;
-
-			while (z != -1)
-			{
-				s_info[z].dev = TRUE;
-				z = s_info[z].father;
-				if (z == 0)
-					break;
-			}
-		}
-	}
 
 	recalc_skills(FALSE);
 
@@ -3429,10 +3425,12 @@ void player_birth(void)
 	message_add(MESSAGE_MSG, " ", TERM_L_BLUE);
 
 	/* Verify autoskiller */
+#if 0
 	if (validate_autoskiller(spp_ptr->skill_ideal) < 0)
 	{
 		message_add(MESSAGE_MSG, "WARNING: Bad autoskill chart", TERM_VIOLET);
 	}
+#endif
 
 	/* Hack -- outfit the player */
 	player_outfit();
@@ -3550,7 +3548,7 @@ int load_savefile_names()
 #ifdef SAVEFILE_USE_UID
 	strnfmt(tmp, 50, "user.%d.svg", player_uid);
 #else
-strcpy(tmp, "global.svg");
+	strcpy(tmp, "global.svg");
 #endif /* SAVEFILE_USE_UID */
 	path_build(buf, 1024, ANGBAND_DIR_SAVE, tmp);
 
@@ -3558,13 +3556,13 @@ strcpy(tmp, "global.svg");
 	FILE_TYPE(FILE_TYPE_TEXT);
 
 	/* Grab permission */
-	safe_setuid_grab();
+	if (savefile_setuid) safe_setuid_grab();
 
 	/* Read the file */
 	fff = my_fopen(buf, "r");
 
 	/* Drop permission */
-	safe_setuid_drop();
+	if (savefile_setuid) safe_setuid_drop();
 
 	/* Failure */
 	if (!fff) return (0);
@@ -3637,13 +3635,13 @@ strcpy(tmp, "global.svg");
 		FILE_TYPE(FILE_TYPE_SAVE);
 
 		/* Grab permission */
-		safe_setuid_grab();
+		if (savefile_setuid) safe_setuid_grab();
 
 		/* Try to open the savefile */
 		fd = fd_open(savefile, O_RDONLY);
 
 		/* Drop permission */
-		safe_setuid_drop();
+		if (savefile_setuid) safe_setuid_drop();
 
 		/* Still existing ? */
 		if (fd >= 0)
@@ -3686,13 +3684,13 @@ void save_savefile_names()
 	FILE_TYPE(FILE_TYPE_TEXT);
 
 	/* Grab permission */
-	safe_setuid_grab();
+	if (savefile_setuid) safe_setuid_grab();
 
 	/* Read the file */
 	fff = my_fopen(buf, "w");
 
 	/* Drop permission */
-	safe_setuid_drop();
+	if (savefile_setuid) safe_setuid_drop();
 
 	/* Failure */
 	if (!fff) return;
@@ -3855,13 +3853,13 @@ savefile_try_again:
 			process_player_name(TRUE);
 
 			/* Grab permission */
-			safe_setuid_grab();
+			if (savefile_setuid) safe_setuid_grab();
 
 			/* Remove the savefile */
 			fd_kill(savefile);
 
 			/* Drop permission */
-			safe_setuid_drop();
+			if (savefile_setuid) safe_setuid_drop();
 
 			/* Restore 'player_base' and 'savefile' */
 			strncpy(player_base, player_base_save, 32);

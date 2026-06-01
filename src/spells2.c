@@ -367,6 +367,9 @@ void identify_pack(void)
 		/* Process the appropriate hooks */
 		process_hooks(HOOK_IDENTIFY, "(d,s)", i, "normal");
 	}
+
+	p_ptr->notice |= (PN_COMBINE | PN_REORDER);
+	p_ptr->window |= (PW_INVEN | PW_EQUIP | PW_PLAYER);
 }
 
 /*
@@ -406,6 +409,10 @@ void identify_pack_fully(void)
 		/* Process the appropriate hooks */
 		process_hooks(HOOK_IDENTIFY, "(d,s)", i, "full");
 	}
+
+	p_ptr->update |= (PU_BONUS);
+	p_ptr->notice |= (PN_COMBINE | PN_REORDER);
+	p_ptr->window |= (PW_INVEN | PW_EQUIP | PW_PLAYER);
 }
 
 /*
@@ -849,14 +856,14 @@ void self_knowledge(FILE *fff)
 			info[i++] = "You are not living.";
 		/* Not implemented */
 		if (r_ptr->flags3 & RF3_HURT_LITE)
-			info[i++] = "Your eyes are sensible to bright light.";
+			info[i++] = "Your eyes are vulnerable to bright light.";
 		/* Not implemented */
 		if (r_ptr->flags3 & RF3_HURT_ROCK)
 			info[i++] = "You can be hurt by rock remover.";
 		if (r_ptr->flags3 & RF3_SUSCEP_FIRE)
-			info[i++] = "You are sensitive to fire.";
+			info[i++] = "You are vulnerable to fire.";
 		if (r_ptr->flags3 & RF3_SUSCEP_COLD)
-			info[i++] = "You are sensitive to cold.";
+			info[i++] = "You are vulnerable to cold.";
 		if (r_ptr->flags3 & RF3_RES_TELE)
 			info[i++] = "You are resistant to teleportation.";
 		if (r_ptr->flags3 & RF3_RES_NETH)
@@ -1101,11 +1108,11 @@ void self_knowledge(FILE *fff)
 			info[i++] = "You appear in grassy areas.";
 
 		if (r_ptr->flags9 & RF9_SUSCEP_ACID)
-			info[i++] = "You are sensitive to acid.";
+			info[i++] = "You are vulnerable to acid.";
 		if (r_ptr->flags9 & RF9_SUSCEP_ELEC)
-			info[i++] = "You are sensitive to electricity.";
+			info[i++] = "You are vulnerable to electricity.";
 		if (r_ptr->flags9 & RF9_SUSCEP_POIS)
-			info[i++] = "You are sensitive to poison.";
+			info[i++] = "You are vulnerable to poison.";
 		if (r_ptr->flags9 & RF9_KILL_TREES)
 			info[i++] = "You can eat trees.";
 		if (r_ptr->flags9 & RF9_WYRM_PROTECT)
@@ -1384,7 +1391,7 @@ void self_knowledge(FILE *fff)
 	}
 	else if (p_ptr->sensible_fire)
 	{
-		info[i++] = "You are very sensible to fire.";
+		info[i++] = "You are very vulnerable to fire.";
 	}
 
 	if (p_ptr->immune_cold)
@@ -2873,7 +2880,6 @@ static bool item_tester_hook_weapon(object_type *o_ptr)
 	case TV_AXE:
 	case TV_HAFTED:
 	case TV_POLEARM:
-	case TV_DIGGING:
 	case TV_BOW:
 	case TV_BOLT:
 	case TV_ARROW:
@@ -2947,9 +2953,12 @@ bool item_tester_hook_weapon_armour(object_type *o_ptr)
  */
 bool item_tester_hook_artifactable(object_type *o_ptr)
 {
-	return (item_tester_hook_weapon(o_ptr) ||
-	        item_tester_hook_armour(o_ptr) ||
-	        (o_ptr->tval == TV_RING) || (o_ptr->tval == TV_AMULET));
+	return ((item_tester_hook_weapon(o_ptr) ||
+	         item_tester_hook_armour(o_ptr) ||
+	         (o_ptr->tval == TV_DIGGING) ||
+	         (o_ptr->tval == TV_RING) || (o_ptr->tval == TV_AMULET))
+	         /* be nice: allow only normal items */
+	         && (!artifact_p(o_ptr)) && (!ego_item_p(o_ptr)));
 }
 
 
@@ -4439,9 +4448,6 @@ bool identify_fully(void)
 	/* Window stuff */
 	p_ptr->window |= (PW_INVEN | PW_EQUIP | PW_PLAYER);
 
-	/* Handle stuff */
-	handle_stuff();
-
 	/* Description */
 	object_desc(o_name, o_ptr, TRUE, 3);
 
@@ -4873,6 +4879,7 @@ bool project_hack(int typ, int dam)
  */
 void project_meteor(int radius, int typ, int dam, u32b flg)
 {
+	cave_type *c_ptr;
 	int x, y, dx, dy, d, count = 0, i;
 	int b = radius + randint(radius);
 	for (i = 0; i < b; i++)
@@ -4887,7 +4894,14 @@ void project_meteor(int radius, int typ, int dam, u32b flg)
 			dy = (p_ptr->py > y) ? (p_ptr->py - y) : (y - p_ptr->py);
 			/* Approximate distance */
 			d = (dy > dx) ? (dy + (dx >> 1)) : (dx + (dy >> 1));
-			if ((d <= 5) && (player_has_los_bold(y, x))) break;
+			c_ptr = &cave[y][x];
+			/* Check distance */
+			if ((d <= 5) &&
+			/* Check line of sight */
+			    (player_has_los_bold(y, x)) &&
+			/* But don't explode IN a wall, letting the player attack through walls */
+			    !(c_ptr->info & CAVE_WALL))
+				break;
 		}
 		if (count >= 1000) break;
 		project(0, 2, y, x, dam, typ, PROJECT_JUMP | flg);
@@ -5163,6 +5177,7 @@ bool genocide_aux(bool player_cast, char typ)
 	int i;
 	bool result = FALSE;
 	int msec = delay_factor * delay_factor * delay_factor;
+	int dam = 0;
 
 	/* Delete the monsters of that "type" */
 	for (i = 1; i < m_max; i++)
@@ -5209,9 +5224,27 @@ bool genocide_aux(bool player_cast, char typ)
 
 		if (player_cast)
 		{
-			/* Take damage */
-			take_hit(randint(4), "the strain of casting Genocide");
+			/* Keep track of damage */
+			dam += randint(4);
 		}
+
+		/* Handle */
+		handle_stuff();
+
+		/* Fresh */
+		Term_fresh();
+
+		/* Delay */
+		Term_xtra(TERM_XTRA_DELAY, msec);
+
+		/* Take note */
+		result = TRUE;
+	}
+
+	if (player_cast)
+	{
+		/* Take damage */
+		take_hit(dam, "the strain of casting Genocide");
 
 		/* Visual feedback */
 		move_cursor_relative(p_ptr->py, p_ptr->px);
@@ -5227,12 +5260,6 @@ bool genocide_aux(bool player_cast, char typ)
 
 		/* Fresh */
 		Term_fresh();
-
-		/* Delay */
-		Term_xtra(TERM_XTRA_DELAY, msec);
-
-		/* Take note */
-		result = TRUE;
 	}
 
 	return (result);
@@ -5264,10 +5291,9 @@ bool genocide(bool player_cast)
 bool mass_genocide(bool player_cast)
 {
 	int i;
-
 	bool result = FALSE;
-
 	int msec = delay_factor * delay_factor * delay_factor;
+	int dam = 0;
 
 	if (dungeon_flags2 & DF2_NO_GENO) return (FALSE);
 
@@ -5323,10 +5349,29 @@ bool mass_genocide(bool player_cast)
 
 		if (player_cast)
 		{
-			/* Hack -- visual feedback */
-			take_hit(randint(3), "the strain of casting Mass Genocide");
+			/* Keep track of damage. */
+			dam += randint(3);
 		}
 
+		/* Handle */
+		handle_stuff();
+
+		/* Fresh */
+		Term_fresh();
+
+		/* Delay */
+		Term_xtra(TERM_XTRA_DELAY, msec);
+
+		/* Note effect */
+		result = TRUE;
+	}
+
+	if (player_cast)
+	{
+		/* Take damage */
+		take_hit(dam, "the strain of casting Mass Genocide");
+
+		/* Visual feedback */
 		move_cursor_relative(p_ptr->py, p_ptr->px);
 
 		/* Redraw */
@@ -5340,12 +5385,6 @@ bool mass_genocide(bool player_cast)
 
 		/* Fresh */
 		Term_fresh();
-
-		/* Delay */
-		Term_xtra(TERM_XTRA_DELAY, msec);
-
-		/* Note effect */
-		result = TRUE;
 	}
 
 	return (result);
@@ -7192,7 +7231,7 @@ void activate_dg_curse(void)
 		case 4:
 		case 5:
 		case 6:
-			msg_print("Oh ! You feel that the curse is replicating itself!");
+			msg_print("Oh! You feel that the curse is replicating itself!");
 			curse_equipment_dg(100, 50 * randint(2));
 			if (randint(8) != 1) break;
 		case 7:
@@ -7208,7 +7247,7 @@ void activate_dg_curse(void)
 			lose_exp(p_ptr->exp / 12);
 			if (rand_int(2))
 			{
-				msg_print("You feel the coldness of the black breath attacking you!");
+				msg_print("You feel the coldness of the Black Breath attacking you!");
 				p_ptr->black_breath = TRUE;
 			}
 			if (randint(8) != 1) break;
@@ -7232,7 +7271,7 @@ void activate_dg_curse(void)
 		case 19:
 		case 20:
 			{
-				msg_print("Wohhh! you see 10 little Morgoths dancing before you!");
+				msg_print("Woah! You see 10 little Morgoths dancing before you!");
 				set_confused(p_ptr->confused + randint(13 * 2));
 				if (rand_int(2)) stop_dg = TRUE;
 			}
@@ -7735,7 +7774,7 @@ void change_wild_mode(void)
 {
 	if (p_ptr->immovable && !p_ptr->wild_mode)
 	{
-		msg_print("Hum, blinking there will take time.");
+		msg_print("Hmm, blinking there will take time.");
 	}
 
 	if (p_ptr->word_recall && !p_ptr->wild_mode)
@@ -7896,6 +7935,9 @@ bool passwall(int dir, bool safe)
 
 	/* Update the monsters */
 	p_ptr->update |= (PU_DISTANCE);
+
+	/* Redraw trap detection status */
+	p_ptr->redraw |= (PR_DTRAP);
 
 	/* Window stuff */
 	p_ptr->window |= (PW_OVERHEAD);

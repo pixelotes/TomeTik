@@ -32,6 +32,7 @@ bool quest_haunted_gen_hook(char *fmt)
 
 	init_flags = INIT_CREATE_DUNGEON;
 	process_dungeon_file(NULL, "haunted.map", &ystart, &xstart, cur_hgt, cur_wid, TRUE);
+	dungeon_flags2 |= DF2_NO_GENO;
 
 	/* Place some ghosts */
 	for (i = 12; i > 0; )
@@ -124,7 +125,7 @@ bool quest_haunted_finish_hook(char *fmt)
 	if (q_idx != QUEST_HAUNTED) return FALSE;
 
 	c_put_str(TERM_YELLOW, "Thank you for saving us!", 8, 0);
-	c_put_str(TERM_YELLOW, "You can use the cave as your house as a reward.", 9, 0);
+	c_put_str(TERM_YELLOW, "You can use the building as your house as a reward.", 9, 0);
 
 	/* Continue the plot */
 	*(quest[q_idx].plot) = QUEST_BETWEEN;

@@ -106,7 +106,7 @@ bool quest_poison_finish_hook(char *fmt)
 
 	if (q_idx != QUEST_POISON) return FALSE;
 
-	c_put_str(TERM_YELLOW, "The water is clean again ! Thanks you so much.", 8, 0);
+	c_put_str(TERM_YELLOW, "The water is clean again! Thank you so much.", 8, 0);
 	c_put_str(TERM_YELLOW, "The beautiful Mallorns are safe. Take this as a proof of our gratitude.", 9, 0);
 
 	q_ptr = &forge;
@@ -196,7 +196,7 @@ bool quest_poison_drop_hook(char *fmt)
 				if (cave[y][x].feat == FEAT_TAINTED_WATER) cave_set_feat(y, x, FEAT_SHAL_WATER);
 			}
 
-		cmsg_print(TERM_YELLOW, "Well done, the water seems to be clean now.");
+		cmsg_print(TERM_YELLOW, "Well done! The water seems to be clean now.");
 
 		cquest.status = QUEST_STATUS_COMPLETED;
 

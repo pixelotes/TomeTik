@@ -10,7 +10,7 @@ bool quest_thrain_death_hook(char *fmt)
 	m_idx = get_next_arg(fmt);
 	r_idx = m_list[m_idx].r_idx;
 
-	if (cquest.status >= QUEST_STATUS_FINISHED) return (FALSE);
+	if ((cquest.status >= QUEST_STATUS_FINISHED) || (dun_level !=cquest.data[0]) || (dungeon_type != DUNGEON_DOL_GULDUR)) return (FALSE);
 	m_ptr = &m_list[m_idx];
 	if ((m_ptr->r_idx != test_monster_name("Dwar, Dog Lord of Waw")) && (m_ptr->r_idx != test_monster_name("Hoarmurath of Dir"))) return (FALSE);
 
@@ -33,10 +33,10 @@ bool quest_thrain_death_hook(char *fmt)
 
 	cquest.status = QUEST_STATUS_FINISHED;
 	cmsg_print(TERM_YELLOW, "Thrain speaks:");
-	cmsg_print(TERM_YELLOW, "'Ah at last you came to me! but... I fear it is too late for me.");
+	cmsg_print(TERM_YELLOW, "'Ah, at last you came to me!  But... I fear it is too late for me.");
 	cmsg_print(TERM_YELLOW, "However your quest continues, you must beware for the Necromancer");
 	cmsg_print(TERM_YELLOW, "is in fact Sauron, the Dark Lord! He stole the Ring of Durin and tortured");
-	cmsg_print(TERM_YELLOW, "me ... arrgh ... please make him pay!'");
+	cmsg_print(TERM_YELLOW, "me... arrgh... please make him pay!'");
 
 	/* Look for Thrain */
 	for (r = m_max - 1; r >= 1; r--)
@@ -95,16 +95,15 @@ bool quest_thrain_gen_hook(char *fmt)
 	int ystart;
 	int y2, x2, yval, xval;
 	int y1, x1, xsize, ysize;
-	cave_type *c_ptr;
 	monster_type *m_ptr;
-
-	by0 = get_next_arg(fmt);
-	bx0 = get_next_arg(fmt);
 
 	if (dungeon_type != DUNGEON_DOL_GULDUR) return (FALSE);
 	if (cquest.data[0] != dun_level) return (FALSE);
 	if (cquest.data[1]) return (FALSE);
 	if ((cquest.status < QUEST_STATUS_TAKEN) || (cquest.status >= QUEST_STATUS_FINISHED)) return (FALSE);
+
+	by0 = get_next_arg(fmt);
+	bx0 = get_next_arg(fmt);
 
 	/* Pick a room size */
 	xsize = 0;
@@ -120,18 +119,16 @@ bool quest_thrain_gen_hook(char *fmt)
 	/* Get corner values */
 	y1 = yval - ysize / 2;
 	x1 = xval - xsize / 2;
-	y2 = yval + (ysize) / 2;
-	x2 = xval + (xsize) / 2;
+	y2 = y1 + ysize - 1;
+	x2 = x1 + xsize - 1;
 
 	/* Place a full floor under the room */
-	for (y = y1 - 1; y <= y2 + 1; y++)
+	for (y = y1; y <= y2; y++)
 	{
-		for (x = x1 - 1; x <= x2 + 1; x++)
+		for (x = x1; x <= x2; x++)
 		{
-			c_ptr = &cave[y][x];
 			cave_set_feat(y, x, floor_type[rand_int(100)]);
-			c_ptr->info |= (CAVE_ROOM);
-			c_ptr->info |= (CAVE_GLOW);
+			cave[y][x].info |= (CAVE_ROOM|CAVE_GLOW);
 		}
 	}
 

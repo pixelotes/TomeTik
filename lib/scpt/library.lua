@@ -455,7 +455,7 @@ add_quest
 			i = 1
 			count = -1
 			while i <= m_max do
-				monster = m_list[i]
+				local monster = m_list[i]
 				if (monster.r_idx > 0) and (monster.status <= MSTATUS_ENEMY) then
 					count = count + 1
 				end
@@ -494,6 +494,7 @@ add_building_action
 				quest(LIBRARY_QUEST).status = QUEST_STATUS_REWARDED
 				book = create_object(TV_BOOK, 61)
 				book.art_name = quark_add(player_name())
+				book.found = OBJ_FOUND_REWARD
 				set_aware(book)
 				set_known(book)
 				inven_carry(book, FALSE)

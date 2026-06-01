@@ -89,12 +89,12 @@ static cptr desc_insult[] =
 {
 	"insults you!",
 	"insults your mother!",
-	"gives you the finger!",
+	"jumps around you!",
 	"humiliates you!",
 	"defiles you!",
 	"dances around you!",
-	"makes obscene gestures!",
-	"moons you!!!"
+	"makes obnoxious gestures!",
+	"pokes you!!!"
 };
 
 
@@ -579,7 +579,7 @@ bool carried_make_attack_normal(int r_idx)
 					else
 					{
 						/* Message */
-						cmsg_print(TERM_VIOLET, "You feel the dark powers trying to twisting your body, they fail.");
+						cmsg_print(TERM_VIOLET, "You feel the dark powers trying to twisting your body, but they fail.");
 					}
 
 					break;
@@ -1344,6 +1344,19 @@ bool carried_make_attack_normal(int r_idx)
 	return (TRUE);
 }
 
+/*
+ * Give unprotected player the Black Breath with a 1 in (chance) probability
+ *
+ */
+void black_breath_attack(int chance)
+{
+	if (!p_ptr->protundead && randint(chance) == 1)
+	{
+		 msg_print("Your foe calls upon your soul!");
+		 msg_print("You feel the Black Breath slowly draining you of life...");
+		 p_ptr->black_breath = TRUE;
+	}
+}
 
 /*
  * Attack the player via physical attacks.
@@ -1830,29 +1843,16 @@ bool make_attack_normal(int m_idx, byte divis)
 			 */
 			if (r_ptr->flags7 & RF7_NAZGUL)
 			{
-				if (magik(25) && !p_ptr->protundead)
-				{
-					msg_print("Your foe calls upon your soul!");
-					msg_print("You feel the Black Breath slowly draining you of life...");
-					p_ptr->black_breath = TRUE;
-				}
+				black_breath_attack(4);
 			}
 			else if ((m_ptr->level >= 35) && (r_ptr->flags3 & (RF3_UNDEAD)) &&
-			                (r_ptr->flags1 & (RF1_UNIQUE)) &&
-			                (randint(300 - m_ptr->level) == 1) && !p_ptr->protundead)
-
+					    (r_ptr->flags1 & (RF1_UNIQUE)))
 			{
-				msg_print("Your foe calls upon your soul!");
-				msg_print("You feel the Black Breath slowly draining you of life...");
-				p_ptr->black_breath = TRUE;
+				black_breath_attack(300 - m_ptr->level);
 			}
-
-			else if ((m_ptr->level >= 40) && (r_ptr->flags3 & (RF3_UNDEAD)) &&
-			                (randint(450 - m_ptr->level) == 1) && !p_ptr->protundead)
+			else if ((m_ptr->level >= 40) && (r_ptr->flags3 & (RF3_UNDEAD)))
 			{
-				msg_print("Your foe calls upon your soul!");
-				msg_print("You feel the Black Breath slowly draining you of life...");
-				p_ptr->black_breath = TRUE;
+				black_breath_attack(450 - m_ptr->level);
 			}
 
 			/* Hack -- assume all attacks are obvious */
@@ -1908,7 +1908,7 @@ bool make_attack_normal(int m_idx, byte divis)
 					else
 					{
 						/* Message */
-						cmsg_print(TERM_VIOLET, "You feel the dark powers trying to twisting your body, they fail.");
+						cmsg_print(TERM_VIOLET, "You feel the dark powers trying to twisting your body, but they fail.");
 					}
 
 					break;
@@ -1977,10 +1977,12 @@ bool make_attack_normal(int m_idx, byte divis)
 						/* Skip non-objects */
 						if (!o_ptr->k_idx) continue;
 
-						/* Drain charged wands/staffs */
+						/* Drain charged wands/staffs
+						   Hack -- don't let artifacts get drained */
 						if (((o_ptr->tval == TV_STAFF) ||
 						                (o_ptr->tval == TV_WAND)) &&
-						                (o_ptr->pval))
+						                (o_ptr->pval) &&
+					                     !artifact_p(o_ptr))
 						{
 							/* Message */
 							msg_print("Energy drains from your pack!");
@@ -2917,8 +2919,8 @@ bool make_attack_normal(int m_idx, byte divis)
 			if (do_vampire)
 			{
 				/* Change to resist(but never total protection) */
-				if (magik(3) || (magik(m_ptr->level - (p_ptr->lev / 2))))
-					call_lua("gain_corruption", "(s)", "", "Vampire");
+/*				if (magik(3) || (magik(m_ptr->level - (p_ptr->lev / 2))))
+					call_lua("gain_corruption", "(s)", "", "Vampire");*/
 			}
 
 			if (explode)

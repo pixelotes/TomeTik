@@ -31,20 +31,25 @@ void mindcraft_info(char *p, int power)
 	switch (power)
 	{
 	case 0:
+		strnfmt(p, 80, " rad %d", DEFAULT_RADIUS);
 		break;
 	case 1:
 		strnfmt(p, 80, " dam %dd%d", 3 + ((plev - 1) / 4), 3 + plev / 15);
 		break;
 	case 2:
-		strnfmt(p, 80, " range %d", (plev < 25 ? 10 : plev + 2));
+		strnfmt(p, 80, " range %d", (plev < 25 ? 10 : plev + 2 + p_ptr->to_s * 3));
 		break;
 	case 3:
 		strnfmt(p, 80, " range %d", plev * 5);
 		break;
 	case 4:
+		strnfmt(p, 80, " power %d", plev * (plev < 30 ? 1 : 2));
 		break;
 	case 5:
-		strnfmt(p, 80, " dam %dd8", 8 + ((plev - 5) / 4));
+		if (plev > 20)
+			strnfmt(p, 80, " dam %dd8 rad %d", 8 + ((plev - 5) / 4), (plev - 20)/8 + 1);
+		else
+			strnfmt(p, 80, " dam %dd8", 8 + ((plev - 5) / 4));
 		break;
 	case 6:
 		strnfmt(p, 80, " dur %d", plev);
@@ -52,16 +57,19 @@ void mindcraft_info(char *p, int power)
 	case 7:
 		break;
 	case 8:
-		strnfmt(p, 80, " dam %d", plev * ((plev - 5) / 10 + 1));
+		if (plev < 25)
+			strnfmt(p, 80, " dam %d rad %d", (3 * plev) / 2, 2 + (plev / 10));
+		else
+			strnfmt(p, 80, " dam %d", plev * ((plev - 5) / 10 + 1));
 		break;
 	case 9:
-		strnfmt(p, 80, " dur 11-%d", plev + plev / 2);
+		strnfmt(p, 80, " dur 11-%d", 10 + plev + plev / 2);
 		break;
 	case 10:
-		strnfmt(p, 80, " dam %dd6", plev / 2);
+		strnfmt(p, 80, " dam %dd6 rad %d", plev / 2, 0 + (plev - 25) / 10);
 		break;
 	case 11:
-		strnfmt(p, 80, " dam %d", plev * (plev > 39 ? 4 : 3));
+		strnfmt(p, 80, " dam %d rad %d", plev * (plev > 39 ? 4 : 3), 3 + plev / 10);
 		break;
 	}
 }
@@ -125,7 +133,7 @@ bool get_magic_power(int *sn, magic_power *powers, int max_powers,
 
 	int y = 2;
 
-	int x = 20;
+	int x = 18;
 
 	int minfail = 0;
 
@@ -1811,7 +1819,8 @@ void display_activation_info(int num)
 
 void select_an_activation(void)
 {
-	int i, lev, wid, hgt, max, begin = 0, sel = 0;
+	int i, lev, wid, hgt, begin = 0, sel = 0;
+	u32b max;
 	cptr act_list[150];  /* currently, ~127 hardcoded activations */
 	int act_ref[150];
 	char c;
@@ -1865,7 +1874,7 @@ void select_an_activation(void)
 		else if (c == '2')
 		{
 			sel++;
-			if (sel >= max)
+			if (sel >= (s32b)max)
 			{
 				sel = 0;
 				begin = 0;
@@ -1903,27 +1912,45 @@ bool magic_essence(int num)
 		if (o_ptr->k_idx && (o_ptr->tval == TV_BATERIE) && (o_ptr->sval == SV_BATERIE_MAGIC)) j += o_ptr->number;
 	}
 
-	if (j >= num)
+	/* Abort if not enough essences. */
+	if (j < num) return FALSE;
+
+	/* Consume them */
+	i = 0;
+	j = num;
+	while (i < INVEN_WIELD)
 	{
-		/* Consume them */
-		for (i = 0; i < INVEN_WIELD; i++)
+		object_type *o_ptr = &p_ptr->inventory[i];
+
+		if (o_ptr->k_idx && (o_ptr->tval == TV_BATERIE) && (o_ptr->sval == SV_BATERIE_MAGIC))
 		{
-			object_type *o_ptr = &p_ptr->inventory[i];
-
-			if (o_ptr->k_idx && (o_ptr->tval == TV_BATERIE) && (o_ptr->sval == SV_BATERIE_MAGIC))
-			{
-				/* This can lead to invalid object pointer for objects that come after the magic
-				 * essences. Therefore, every artifactable object should come before the essences
-				 */
-				inven_item_increase(i, -num);
-				inven_item_describe(i);
-				inven_item_optimize(i);
-			}
+			/* This can lead to invalid object pointer for objects
+			 * that come after the magic essences. Therefore, every
+			 * artifactable object should come before the essences.
+			 */
+			j -= o_ptr->number;
+			inven_item_increase(i, -num);
+			inven_item_describe(i);
+			inven_item_optimize(i);
+			num = j;
+			if (num <= 0) break;
+			/* Stay on this slot; do not increment i. */
 		}
-
-		return TRUE;
+		else
+		{
+			/* Move on to the next slot. */
+			i++;
+		}
 	}
-	else return FALSE;
+
+	/* Sanity check. */
+	if (num > 0)
+	{
+		msg_format("ERROR: Couldn't destroy %d essences!", num);
+		return FALSE;
+	}
+
+	return TRUE;
 }
 
 
@@ -2120,6 +2147,11 @@ void do_cmd_create_artifact(object_type *q_ptr)
 						msg_print("You cannot do that - you don't know how!");
 						continue;
 					}
+					if (q_ptr->exp - exp < 0)
+					{
+						msg_print("Not enough experience.  Decrease power or deselect flags.");
+						continue;
+					}
 					pval++;
 					break;
 				}
@@ -2180,7 +2212,15 @@ void do_cmd_create_artifact(object_type *q_ptr)
 						continue;
 					}
 					if (flags_select[j]) flags_select[j] = 0;
-					else if (!flags_select[j]) flags_select[j] = 1;
+					else if (!flags_select[j])
+					{
+						if (q_ptr->exp - exp < 0)
+						{
+							msg_print("Not enough experience.  Decrease power or deselect flags.");
+							continue;
+						}
+						flags_select[j] = 1;
+					}
 					break;
 				}
 			}
@@ -2501,12 +2541,15 @@ bool item_tester_hook_empower(object_type *o_ptr)
 		if ( lev < 25 && o_ptr->name2)
 			return FALSE;
 
-		/* Empowering an artifact can create a more powerful
-		 * artifact, disallow below level 50 */
-		if ( lev < 50 && artifact_p(o_ptr))
+		/* Disallow double-ego and artifact unless the character has
+		 * the artifact creation ability. */
+		if (!has_ability(AB_CREATE_ART) && 
+		   (artifact_p(o_ptr) || (o_ptr->name2 && o_ptr->name2b)))
 			return FALSE;
 
+		/* Otherwise... */
 		return TRUE;
+
 	default:
 		return FALSE;
 	}
@@ -2815,7 +2858,7 @@ void strip_and_print(char *str, int color, int num)
 
 	if (num > 60)
 	{
-		msg_print("attempting to display too many items!");
+		msg_print("Attempting to display too many items!");
 		return;
 	}
 	ch = selectchar[num];
@@ -2896,10 +2939,9 @@ void alchemist_recipe_book(void)
 
 				if (alchemist_recipes[al_idx].tval == 1)
 				{
-
 					if (alchemist_known_egos[alchemist_recipes[al_idx].sval / 32]
-					                & (1 << (alchemist_recipes[al_idx].sval % 32)) ) ;
-					essence[alchemist_recipes[al_idx].sval_essence] = TRUE;
+					                & (1 << (alchemist_recipes[al_idx].sval % 32)) )
+						essence[alchemist_recipes[al_idx].sval_essence] = TRUE;
 					continue;
 				}
 
@@ -3503,7 +3545,7 @@ void alchemist_gain_level(int lev)
 			o_ptr->name2 = egos[ego];
 			alchemist_learn_object(o_ptr);
 		}
-		msg_print("You recall your old master teaching you about elemental item infusing");
+		msg_print("You recall your old master teaching you about elemental item infusing.");
 	}
 	if ( lev == 10)
 	{
@@ -3519,13 +3561,13 @@ void alchemist_gain_level(int lev)
 	if ( lev == 25)
 	{
 		msg_print("You recall your old master reminiscing about legendary infusings");
-		msg_print("and the Philosophers' stone");
+		msg_print("and the Philosophers' stone.");
 
 		/* No auto-learn on artifacts - by this level, you'll have *ID*'d several */
 	}
 	if ( lev == 25)
 	{
-		msg_print("You wonder about shocking daggers of slay evil");
+		msg_print("You wonder about shocking daggers of slay evil.");
 	}
 	if ( lev == 50)
 	{
@@ -3558,7 +3600,7 @@ void alchemist_gain_level(int lev)
  */
 void alchemist_check_level()
 {
-	int lev = get_skill(SKILL_ALCHEMY);
+	u32b lev = get_skill(SKILL_ALCHEMY);
 	if ( alchemist_gained > lev )
 		return;
 	/*Paranoia*/
@@ -3839,6 +3881,10 @@ void do_cmd_alchemist(void)
 			{
 				o_ptr->pval = pval;
 			}
+			else if ((o_ptr->tval == TV_BOOK) && (o_ptr->sval == 255))
+			{
+				o_ptr->pval = pval;
+			}
 			else if (o_ptr->tval == TV_SHOT
 			                || o_ptr->tval == TV_ARROW
 			                || o_ptr->tval == TV_BOLT)
@@ -4081,7 +4127,7 @@ void do_cmd_alchemist(void)
 			                || (ego && !(alchemist_known_egos[ego / 32] & (1 << (ego % 32)))))
 			                && randint(3) == 1)
 			{
-				msg_print("While destroying it, you gain insight into this item");
+				msg_print("While destroying it, you gain insight into this item.");
 				/* If over level 10, the player has a chance of 'greater ID'
 				 * on extracted items
 				 */
@@ -4197,6 +4243,11 @@ void do_cmd_alchemist(void)
 							s_ptr->pval2 = o_ptr->pval2;
 							s_ptr->pval3 = o_ptr->pval3;
 						}
+						/* Restore the spell stored in a random book */
+						else if ((o_ptr->tval == TV_BOOK) && (o_ptr->sval == 255))
+						{
+							s_ptr->pval = o_ptr->pval;
+						}
 						/* Restore the type of explosive ammo */
 						else if (o_ptr->tval == TV_SHOT || o_ptr->tval == TV_ARROW
 						                || o_ptr->tval == TV_BOLT)
@@ -4275,7 +4326,6 @@ void do_cmd_alchemist(void)
 	else if (ext == 3)
 	{
 		int item;
-		object_type *o_ptr;
 
 		cptr q, s;
 
@@ -4445,7 +4495,7 @@ static void print_spell_batch(int batch, int max)
 		}
 		else
 		{
-			strnfmt(buff, 80, "  %c) %-30s %3d %4d%% %3d %2dd%d ",
+			strnfmt(buff, 80, "  %c) %-30s %3d %4d%% %3d %3dd%d ",
 			        I2A(i), rspell->name,
 			        rspell->level, spell_chance_random(rspell), rspell->mana,
 			        rspell->dam_dice, rspell->dam_sides);
@@ -5126,7 +5176,6 @@ void do_cmd_possessor()
 			}
 		}
 	}
-
 	else if (ext == 2)
 	{
 		if (p_ptr->disembodied)
@@ -5137,6 +5186,10 @@ void do_cmd_possessor()
 		{
 			do_cmd_leave_body(TRUE);
 		}
+	}
+	else
+	{
+		return;
 	}
 
 	/* Take a turn */
@@ -5186,11 +5239,11 @@ void do_cmd_archer(void)
 
 	if (get_skill(SKILL_ARCHERY) >= 20)
 	{
-		strnfmt(com, 80, "Create [S]hots, Create [A]rrow or Create [B]olt? ");
+		strnfmt(com, 80, "Create [S]hots, [A]rrows or [B]olts? ");
 	}
 	else if (get_skill(SKILL_ARCHERY) >= 10)
 	{
-		strnfmt(com, 80, "Create [S]hots or Create [A]rrow? ");
+		strnfmt(com, 80, "Create [S]hots or [A]rrows? ");
 	}
 	else
 	{
@@ -5543,7 +5596,7 @@ void do_cmd_necromancer(void)
 			b = randint(100);
 			if (b < 10)
 			{
-				msg_print("Oh, no! You become an undead !");
+				msg_print("Oh, no! You become undead!");
 
 				p_ptr->necro_extra |= CLASS_UNDEAD;
 				p_ptr->necro_extra2 = 2 * plev;
@@ -5566,7 +5619,7 @@ void do_cmd_necromancer(void)
 			}
 			else if (b < 40)
 			{
-				msg_print("Suddenly you feel that you're in bad situation...");
+				msg_print("Suddenly you feel that you're in a bad situation...");
 				summon_specific(p_ptr->py, p_ptr->px, max_dlv[dungeon_type],
 				                (plev >= 30) ? SUMMON_HI_UNDEAD : SUMMON_UNDEAD);
 			}
@@ -7163,12 +7216,19 @@ void summon_true(int r_idx, int item)
 	/* Non-uniques are easier to handle */
 	else
 	{
-		/* It can be used multiple times */
-		used = FALSE;
+		if (get_skill(SKILL_SUMMON) == 0)
+		{
+			used = TRUE;
+		}
+		else
+		{
+			/* It can be used multiple times */
+			used = FALSE;
 
-		/* But it is not 100% sure */
-		chance = (r_ptr->level * 25 / get_skill(SKILL_SUMMON));
-		if (magik(chance)) used = TRUE;
+			/* But it is not 100% sure (note: skill > 0) */
+			chance = (r_ptr->level * 25 / get_skill(SKILL_SUMMON));
+			if (magik(chance)) used = TRUE;
+		}
 
 		chance = (get_skill(SKILL_SUMMON) * 130 / (r_ptr->level + 1));
 
@@ -7468,7 +7528,7 @@ void symbiotic_info(char *p, int power)
 		}
 	case 5:
 		{
-			strnfmt(p, 80, " heal %d\%", 15 + get_skill_scale(SKILL_SYMBIOTIC, 35));
+			strnfmt(p, 80, " heal %d%%", 15 + get_skill_scale(SKILL_SYMBIOTIC, 35));
 			break;
 		}
 	}
@@ -7603,11 +7663,16 @@ void do_cmd_symbiotic(void)
 					}
 					else
 					{
+						/* TODO fix this hack hack hack hackity hack with ToME 3 flags */
 						q_ptr = &forge;
 						object_prep(q_ptr, lookup_kind(TV_HYPNOS, 1));
 						q_ptr->number = 1;
 						q_ptr->pval = m_ptr->r_idx;
 						q_ptr->pval2 = m_ptr->hp;
+						q_ptr->pval3 = m_ptr->maxhp;
+						/* overflow alert */
+						q_ptr->exp = m_ptr->exp;
+						q_ptr->elevel = m_ptr->level;
 						object_aware(q_ptr);
 						object_known(q_ptr);
 
@@ -7660,8 +7725,22 @@ void do_cmd_symbiotic(void)
 
 				if ((m_idx = place_monster_one(y, x, o_ptr->pval, 0, FALSE, MSTATUS_PET)) == 0) return;
 
+				/* TODO fix this hack hack hack hackity hack with ToME 3 flags */
+				/* Have to be careful here; releasing the symbiote into a
+                 * dungeon with leveled monsters will level the symbiote
+                 * before we can get hold of it. We'll be nice and use the
+                 * larger of the saved exp and the exp that the newly-generated
+                 * monster starts with. */
 				m_ptr = &m_list[m_idx];
+				if (m_ptr->exp < o_ptr->exp)
+				{
+					m_ptr->exp = o_ptr->exp;
+					monster_check_experience(m_idx, TRUE);
+					if (m_ptr->level != o_ptr->elevel)
+						cmsg_format(TERM_VIOLET, "ERROR: level-%d HYPNOS becomes level-%d symbiote", o_ptr->elevel, m_ptr->level);
+				}
 				m_ptr->hp = o_ptr->pval2;
+				m_ptr->maxhp = o_ptr->pval3;
 
 				floor_item_increase(0 - item, -1);
 				floor_item_describe(0 - item);
@@ -7684,7 +7763,7 @@ void do_cmd_symbiotic(void)
 			/* Life Share */
 		case 3:
 			{
-				s32b percent1, percent2, max;
+				s32b percent1, percent2;
 
 				if (!o_ptr->k_idx)
 				{
@@ -7693,20 +7772,19 @@ void do_cmd_symbiotic(void)
 				}
 
 				r_ptr = &r_info[o_ptr->pval];
-				max = maxroll(r_ptr->hdice, r_ptr->hside);
 
 				percent1 = p_ptr->chp;
 				percent1 = (percent1 * 100) / p_ptr->mhp;
 
 				percent2 = o_ptr->pval2;
-				percent2 = (percent2 * 100) / max;
+				percent2 = (percent2 * 100) / o_ptr->pval3;
 
 				/* Now get the average */
 				percent1 = (percent1 + percent2) / 2;
 
 				/* And set the hp of monster & player to it */
 				p_ptr->chp = (percent1 * p_ptr->mhp) / 100;
-				o_ptr->pval2 = (percent1 * max) / 100;
+				o_ptr->pval2 = (percent1 * o_ptr->pval3) / 100;
 
 				/* Redraw */
 				p_ptr->redraw |= (PR_HP);
@@ -7729,7 +7807,8 @@ void do_cmd_symbiotic(void)
 					break;
 				}
 
-				use_symbiotic_power(o_ptr->pval, FALSE, FALSE, TRUE);
+				if (0 > use_symbiotic_power(o_ptr->pval, FALSE, FALSE, TRUE))
+					return;
 
 				break;
 			}
@@ -7737,7 +7816,7 @@ void do_cmd_symbiotic(void)
 			/* Heal Symbiote */
 		case 5:
 			{
-				int max, hp;
+				int hp;
 
 				if (!o_ptr->k_idx)
 				{
@@ -7746,10 +7825,9 @@ void do_cmd_symbiotic(void)
 				}
 
 				r_ptr = &r_info[o_ptr->pval];
-				max = maxroll(r_ptr->hdice, r_ptr->hside);
-				hp = max * (15 + get_skill_scale(SKILL_SYMBIOTIC, 35)) / 100;
+				hp = o_ptr->pval3 * (15 + get_skill_scale(SKILL_SYMBIOTIC, 35)) / 100;
 				o_ptr->pval2 += hp;
-				if (o_ptr->pval2 > max) o_ptr->pval2 = max;
+				if (o_ptr->pval2 > o_ptr->pval3) o_ptr->pval2 = o_ptr->pval3;
 
 				msg_format("%s is healed.", symbiote_name(TRUE));
 
@@ -7769,7 +7847,8 @@ void do_cmd_symbiotic(void)
 					break;
 				}
 
-				use_symbiotic_power(o_ptr->pval, TRUE, FALSE, TRUE);
+				if(0 > use_symbiotic_power(o_ptr->pval, TRUE, FALSE, TRUE))
+					return;
 
 				break;
 			}
@@ -7894,7 +7973,7 @@ void do_cmd_create_boulder()
 
 		(void)inven_carry(q_ptr, FALSE);
 
-		msg_print("You make some boulder.");
+		msg_print("You make some boulders.");
 
 		p_ptr->update |= (PU_VIEW | PU_FLOW | PU_MON_LITE);
 		p_ptr->window |= (PW_OVERHEAD);

@@ -18,6 +18,7 @@ TIDALWAVE = add_spell
 				["max_level"] =		{ 20, 50 },
 			},
 	},
+	["inertia"] = 	{ 4, 100 },
 	["spell"] = 	function()
 			fire_wave(GF_WAVE, 0, 40 + get_level(TIDALWAVE, 200), 0, 6 + get_level(TIDALWAVE, 10), EFF_WAVE)
 			return TRUE
@@ -27,7 +28,7 @@ TIDALWAVE = add_spell
 	end,
 	["desc"] =	{
 			"Summons a monstrous tidal wave that will expand and crush the",
-			"monsters under it's mighty waves"
+			"monsters under its mighty waves."
 	}
 }
 
@@ -49,6 +50,7 @@ ICESTORM = add_spell
 				["max_level"] =		{ 25, 45 },
 			},
 	},
+	["inertia"] = 	{ 3, 40 },
 	["spell"] = 	function()
 			local type
 	
@@ -61,8 +63,8 @@ ICESTORM = add_spell
 			return "dam "..(80 + get_level(ICESTORM, 200)).." rad "..(1 + get_level(ICESTORM, 3, 0)).." dur "..(20 + get_level(ICESTORM, 70))
 	end,
 	["desc"] =	{
-			"Engulfs you in a storm of roaring cold that strikes your foes",
-			"At level 10 it turns into shards of ice"
+			"Engulfs you in a storm of roaring cold that strikes your foes.",
+			"At level 10 it turns into shards of ice."
 	}
 }
 
@@ -74,6 +76,7 @@ ENTPOTION = add_spell
 	["mana"] = 	7,
 	["mana_max"] = 	15,
 	["fail"] = 	35,
+	["inertia"] = 	{ 1, 30 },
 	["spell"] = 	function()
 			set_food(PY_FOOD_MAX - 1)
 			msg_print("The Ent's Potion fills your stomach.")
@@ -93,9 +96,9 @@ ENTPOTION = add_spell
 			end
 	end,
 	["desc"] =	{
-			"Fills up your stomach",
-			"At level 5 it boldens your heart",
-			"At level 12 it make you heroic"
+			"Fills up your stomach.",
+			"At level 5 it boldens your heart.",
+			"At level 12 it make you heroic."
 	}
 }
 
@@ -107,6 +110,7 @@ VAPOR = add_spell
 	["mana"] = 	2,
 	["mana_max"] = 	12,
 	["fail"] = 	20,
+	["inertia"] = 	{ 1, 30 },
 	["spell"] = 	function()
 			fire_cloud(GF_WATER, 0, 3 + get_level(VAPOR, 20), 3 + get_level(VAPOR, 9, 0), 5)
 			return TRUE
@@ -115,7 +119,7 @@ VAPOR = add_spell
        			return "dam "..(3 + get_level(VAPOR, 20)).." rad "..(3 + get_level(VAPOR, 9, 0)).." dur 5"
 	end,
 	["desc"] =	{
-			"Fills the air with toxic moisture to eradicate annoying critters"
+			"Fills the air with toxic moisture to eradicate annoying critters."
 	}
 }
 

@@ -123,14 +123,7 @@ s16b get_skill(int skill)
  */
 s16b get_skill_scale(int skill, u32b scale)
 {
-#if 0
-	/* XXX XXX XXX */
-	return (((s_info[skill].value / 10) * (scale * (SKILL_STEP / 10)) /
-	         (SKILL_MAX / 10)) /
-	        (SKILL_STEP / 10));
-#else
-
-u32b temp;
+	s32b temp;
 
 	/*
 	* SKILL_STEP shouldn't matter here because the second parameter is
@@ -145,8 +138,6 @@ u32b temp;
 	temp = scale * s_info[skill].value;
 
 	return (temp / SKILL_MAX);
-
-#endif
 }
 
 
@@ -266,8 +257,10 @@ void dump_skills(FILE *fff)
 			strcat(buf, format(" - %s", s_info[i].name + s_name));
 		}
 
-		fprintf(fff, "%-50s%02ld.%03ld [%01d.%03d]",
-		        buf, s_info[i].value / SKILL_STEP, s_info[i].value % SKILL_STEP,
+		fprintf(fff, "%-49s%s%02ld.%03ld [%01ld.%03ld]",
+		        buf, s_info[i].value < 0 ? "-" : " ",
+			ABS(s_info[i].value) / SKILL_STEP,
+			ABS(s_info[i].value) % SKILL_STEP,
 		        s_info[i].mod / 1000, s_info[i].mod % 1000);
 	}
 
@@ -332,9 +325,12 @@ void print_skills(int table[MAX_SKILLS][2], int max, int sel, int start)
 			      j + 7 - start, table[j][1] * 4);
 		}
 		c_prt(color,
-		      format("%02ld.%03ld [%01d.%03d]",
-		             s_info[i].value / SKILL_STEP, s_info[i].value % SKILL_STEP,
-		             s_info[i].mod / 1000, s_info[i].mod % 1000),
+		      format("%s%02ld.%03ld [%01d.%03d]",
+		             s_info[i].value < 0 ? "-" : " ",
+			     ABS(s_info[i].value) / SKILL_STEP,
+			     ABS(s_info[i].value) % SKILL_STEP,
+			     ABS(s_info[i].mod) / 1000,
+			     ABS(s_info[i].mod) % 1000),
 		      j + 7 - start, 60);
 	}
 }
@@ -385,7 +381,7 @@ void recalc_skills(bool init)
 /*
  * Recalc the skill value
  */
-void recalc_skills_theory(s16b *invest, s32b *base_val, u16b *base_mod, s32b *bonus)
+void recalc_skills_theory(s16b *invest, s32b *base_val, s32b *base_mod, s32b *bonus)
 {
 	int i, j;
 
@@ -397,9 +393,6 @@ void recalc_skills_theory(s16b *invest, s32b *base_val, u16b *base_mod, s32b *bo
 
 		/* It cannot exceed SKILL_MAX */
 		if (s_info[i].value > SKILL_MAX) s_info[i].value = SKILL_MAX;
-
-		/* It cannot go below 0 */
-		if (s_info[i].value < 0) s_info[i].value = 0;
 	}
 
 	/* Then we modify related skills */
@@ -425,9 +418,6 @@ void recalc_skills_theory(s16b *invest, s32b *base_val, u16b *base_mod, s32b *bo
 				/* Increase / decrease with a % */
 				s32b val = s_info[j].value + (invest[i] * s_info[j].mod * s_info[i].action[j] / 100);
 
-				/* Skill value cannot be negative */
-				if (val < 0) val = 0;
-
 				/* It cannot exceed SKILL_MAX */
 				if (val > SKILL_MAX) val = SKILL_MAX;
 
@@ -450,7 +440,7 @@ void do_cmd_skill()
 	int wid, hgt;
 	s16b skill_points_save;
 	s32b *skill_values_save;
-	u16b *skill_mods_save;
+	s32b *skill_mods_save;
 	s16b *skill_rates_save;
 	s16b *skill_invest;
 	s32b *skill_bonus;
@@ -462,7 +452,7 @@ void do_cmd_skill()
 
 	/* Allocate arrays to save skill values */
 	C_MAKE(skill_values_save, MAX_SKILLS, s32b);
-	C_MAKE(skill_mods_save, MAX_SKILLS, u16b);
+	C_MAKE(skill_mods_save, MAX_SKILLS, s32b);
 	C_MAKE(skill_rates_save, MAX_SKILLS, s16b);
 	C_MAKE(skill_invest, MAX_SKILLS, s16b);
 	C_MAKE(skill_bonus, MAX_SKILLS, s32b);
@@ -596,7 +586,7 @@ void do_cmd_skill()
 
 	/* Free arrays to save skill values */
 	C_FREE(skill_values_save, MAX_SKILLS, s32b);
-	C_FREE(skill_mods_save, MAX_SKILLS, u16b);
+	C_FREE(skill_mods_save, MAX_SKILLS, s32b);
 	C_FREE(skill_rates_save, MAX_SKILLS, s16b);
 	C_FREE(skill_invest, MAX_SKILLS, s16b);
 	C_FREE(skill_bonus, MAX_SKILLS, s32b);
@@ -645,7 +635,7 @@ s16b get_melee_skills()
 
 	for (i = 0; i < MAX_MELEE; i++)
 	{
-		if (s_info[melee_skills[i]].value && (!s_info[melee_skills[i]].hidden))
+		if ((s_info[melee_skills[i]].value > 0) && (!s_info[melee_skills[i]].hidden))
 		{
 			melee_bool[i] = TRUE;
 			j++;
@@ -660,6 +650,7 @@ s16b get_melee_skills()
 static void choose_melee()
 {
 	int i, j, z = 0;
+	int force_drop = FALSE, style_unchanged = FALSE;
 
 	character_icky = TRUE;
 	Term_save();
@@ -687,6 +678,13 @@ static void choose_melee()
 
 		for (i = 0, z = 0; z < A2I(c); i++)
 			if (melee_bool[i]) z++;
+
+		if (p_ptr->melee_style == melee_skills[melee_num[z]])
+		{
+			style_unchanged = TRUE;
+			break;
+		}
+
 		for (i = INVEN_WIELD; p_ptr->body_parts[i - INVEN_WIELD] == INVEN_WIELD; i++)
 		{
 			if (p_ptr->inventory[i].k_idx)
@@ -698,9 +696,9 @@ static void choose_melee()
 					msg_format("Hmmm, your %s seems to be cursed.", name);
 					break;
 				}
-				else
+				else if (INVEN_PACK == inven_takeoff(i, 255, force_drop))
 				{
-					inven_takeoff(i, 255, FALSE);
+					force_drop = TRUE;
 				}
 			}
 		}
@@ -720,6 +718,11 @@ static void choose_melee()
 
 	Term_load();
 	character_icky = FALSE;
+
+	if (style_unchanged)
+	{
+		msg_format("You are already using %s.", melee_names[melee_num[z]]);
+	}
 }
 
 void select_default_melee()
@@ -1265,7 +1268,7 @@ void compute_skills(s32b *v, s32b *m, int i)
 /*
  * Initialize a skill with given values
  */
-void init_skill(u32b value, s16b mod, int i)
+void init_skill(s32b value, s32b mod, int i)
 {
 	s_info[i].value = value;
 	s_info[i].mod = mod;
@@ -1280,7 +1283,7 @@ void do_get_new_skill()
 {
 	char *items[4];
 	int skl[4];
-	u32b val[4], mod[4];
+	s32b val[4], mod[4];
 	bool used[MAX_SKILLS];
 	int available_skills[MAX_SKILLS];
 	int max = 0, max_a = 0, res, i;
@@ -1318,7 +1321,7 @@ void do_get_new_skill()
 			i = rand_int(max_a);
 
 			/* Does it pass the check? */
-			if (!magik(s_info[i].random_gain_chance))
+			if (!magik(s_info[available_skills[i]].random_gain_chance))
 				continue;
 		}
 		while (used[available_skills[i]]);
@@ -1328,7 +1331,12 @@ void do_get_new_skill()
 
 		if (s_ptr->mod)
 		{
-			if (s_ptr->mod < 500)
+			if (s_ptr->mod < 300)
+			{
+				val[max] = 1000;
+				mod[max] = 300 - s_ptr->mod;
+			}
+			else if (s_ptr->mod < 500)
 			{
 				val[max] = s_ptr->mod * 1;
 				mod[max] = 100;
@@ -1404,11 +1412,11 @@ void do_get_new_skill()
 			}
 			else
 			{
-				msg_format("Your knowledge of the %s skill increase.",
+				msg_format("Your knowledge of the %s skill increases.",
 				           s_ptr->name + s_name);
 			}
+			break;
 		}
-		break;
 	}
 
 	/* Free them ! */

@@ -99,6 +99,9 @@ void do_cmd_inven(void)
 	{
 		/* Hack -- Use "display" mode */
 		command_see = TRUE;
+
+		/* Mega-Hack -- Don't disable keymaps for this key */
+		request_command_inven_mode = TRUE;
 	}
 }
 
@@ -161,6 +164,9 @@ void do_cmd_equip(void)
 	{
 		/* Enter "display" mode */
 		command_see = TRUE;
+
+		/* Mega-Hack -- Don't disable keymaps for this key */
+		request_command_inven_mode = TRUE;
 	}
 }
 
@@ -347,6 +353,19 @@ void do_cmd_wield(void)
 		}
 	}
 
+	/* Can we take off existing item */
+	if (slot != INVEN_AMMO)
+	{
+		if (p_ptr->inventory[slot].k_idx)
+			if (process_hooks(HOOK_TAKEOFF, "(d)", slot)) return;
+	}
+	else
+	{
+		if (p_ptr->inventory[slot].k_idx)
+			if (!object_similar(&p_ptr->inventory[slot], o_ptr))
+				if (process_hooks(HOOK_TAKEOFF, "(d)", slot)) return;
+	}
+
 	/* Take a turn */
 	energy_use = 100;
 
@@ -402,6 +421,7 @@ void do_cmd_wield(void)
 			}
 		}
 	}
+
 
 	/* Wear the new stuff */
 	object_copy(o_ptr, q_ptr);
@@ -689,8 +709,8 @@ void do_cmd_destroy(void)
 		}
 	}
 
-	/* Take a turn */
-	energy_use = 100;
+	/* Take no time, just like the automatizer */
+	energy_use = 0;
 
 	object_flags(o_ptr, &f1, &f2, &f3, &f4, &f5, &esp);
 
@@ -760,8 +780,8 @@ void do_cmd_destroy(void)
 	}
 #endif
 	/*
-	 * Hack -- If rods or wand are destroyed, the total maximum timeout or 
-	 * charges of the stack needs to be reduced, unless all the items are 
+	 * Hack -- If rods or wand are destroyed, the total maximum timeout or
+	 * charges of the stack needs to be reduced, unless all the items are
 	 * being destroyed. -LM-
 	 */
 	if ((o_ptr->tval == TV_WAND) && (amt < o_ptr->number))
@@ -2328,7 +2348,7 @@ void cli_add(cptr active, cptr trigger, cptr descr)
 	cli_ptr->descrip = string_make(descr);
 
 	/* Take description for the previous record if appropriate. */
-	if ((old_ptr->key == cli_ptr->key) && (cli_ptr->descrip == 0))
+	if ((cli_total > 0) && (old_ptr->key == cli_ptr->key) && (cli_ptr->descrip == 0))
 	{
 		cli_ptr->descrip = old_ptr->descrip;
 	}

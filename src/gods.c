@@ -17,8 +17,18 @@
  */
 void inc_piety(int god, s32b amt)
 {
+	s32b old = p_ptr->grace;
+
 	if ((god == GOD_ALL) || (god == p_ptr->pgod))
+	{
 		set_grace(p_ptr->grace + amt);
+	
+		if(amt > 0 && p_ptr->grace <= old)
+			set_grace(300000);
+
+		if(amt < 0 && p_ptr->grace >= old)
+			set_grace(-300000);
+	}
 }
 
 /*
@@ -41,12 +51,12 @@ void follow_god(int god, bool silent)
 	/* Poor unbelievers, i'm so mean ... BOUHAHAHA */
 	if (get_skill(SKILL_ANTIMAGIC))
 	{
-		msg_print("Don't be silly, you dont believe in gods.");
+		msg_print("Don't be silly; you don't believe in gods.");
 		return;
 	}
 
 	/* Are we allowed ? */
-	if (process_hooks(HOOK_FOLLOW_GOD, "(d,s)", "", god, "ask"))
+	if (process_hooks(HOOK_FOLLOW_GOD, "(d,s)", god, "ask"))
 		return;
 
 	if (p_ptr->pgod == GOD_NONE)
@@ -57,11 +67,11 @@ void follow_god(int god, bool silent)
 		GOD(GOD_MELKOR)
 		{
 			s_info[SKILL_UDUN].hidden = FALSE;
-			if (!silent) msg_print("You feel the dark powers of melkor in you, you can now use the Udun skill.");
+			if (!silent) msg_print("You feel the dark powers of Melkor in you.  You can now use the Udun skill.");
 		}
 
 		/* Anything to be done? */
-		process_hooks(HOOK_FOLLOW_GOD, "(d,s)", "", god, "done");
+		process_hooks(HOOK_FOLLOW_GOD, "(d,s)", god, "done");
 	}
 }
 

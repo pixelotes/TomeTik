@@ -63,7 +63,7 @@ bool quest_invasion_ai_hook(char *fmt)
 		{
 			delete_monster_idx(m_idx);
 
-			cmsg_print(TERM_YELLOW, "Maeglin found the way to Gondolin, all hope is lost now!");
+			cmsg_print(TERM_YELLOW, "Maeglin found the way to Gondolin! All hope is lost now!");
 			cquest.status = QUEST_STATUS_FAILED;
 			town_info[2].destroyed = TRUE;
 			return (FALSE);
@@ -99,8 +99,8 @@ bool quest_invasion_turn_hook(char *fmt)
 
 	/* Ok give the quest */
 	quick_messages = FALSE;
-	cmsg_print(TERM_YELLOW, "A Thunderlord jumps out of the between in front of you and says:");
-	cmsg_print(TERM_YELLOW, "'Hello noble hero, I am Liron, rider of Tolan. Turgon, King of Gondolin sent me.'");
+	cmsg_print(TERM_YELLOW, "A Thunderlord appears in front of you and says:");
+	cmsg_print(TERM_YELLOW, "'Hello, noble hero. I am Liron, rider of Tolan. Turgon, King of Gondolin sent me.'");
 	cmsg_print(TERM_YELLOW, "'Gondolin is being invaded; he needs your help now or everything will be lost.'");
 	cmsg_print(TERM_YELLOW, "'I can bring you to Gondolin, but we must go now.'");
 	/* This is SO important a question that flush pending inputs */
@@ -108,7 +108,7 @@ bool quest_invasion_turn_hook(char *fmt)
 
 	if (!get_check("Will you come?"))
 	{
-		cmsg_print(TERM_YELLOW, "'Turgon overestimated you ... Now Gondolin will fall.'");
+		cmsg_print(TERM_YELLOW, "'Turgon overestimated you... Now Gondolin will fall.'");
 		cmsg_print(TERM_YELLOW, "'I will return alone and die there. May you be doomed!'");
 
 		cquest.status = QUEST_STATUS_FAILED;
@@ -120,8 +120,8 @@ bool quest_invasion_turn_hook(char *fmt)
 		process_hooks_restart = TRUE;
 		return (FALSE);
 	}
-	cmsg_print(TERM_YELLOW, "'You made the right decision, quickly jump on Tolan!'");
-	cmsg_print(TERM_YELLOW, "'Here we are, Gondolin, you must speak with Turgon now.'");
+	cmsg_print(TERM_YELLOW, "'You made the right decision! Quickly, jump on Tolan!'");
+	cmsg_print(TERM_YELLOW, "'Here we are: Gondolin. You must speak with Turgon now.'");
 
 	p_ptr->wild_mode = FALSE;
 	p_ptr->wilderness_x = 49;
@@ -193,9 +193,9 @@ bool quest_invasion_stair_hook(char *fmt)
 		}
 		else if (cquest.status == QUEST_STATUS_COMPLETED)
 		{
-			cmsg_print(TERM_YELLOW, "Turgon appears before you and speak:");
-			cmsg_print(TERM_YELLOW, "I will never be able to thank you enough.");
-			cmsg_print(TERM_YELLOW, "My most powerful mages will cast a powerful spell for you, giving you 150 more life.");
+			cmsg_print(TERM_YELLOW, "Turgon appears before you and speaks:");
+			cmsg_print(TERM_YELLOW, "'I will never be able to thank you enough.'");
+			cmsg_print(TERM_YELLOW, "'My most powerful mages will cast a powerful spell for you, giving you extra life.'");
 
 			p_ptr->hp_mod += 150;
 			p_ptr->update |= (PU_HP);

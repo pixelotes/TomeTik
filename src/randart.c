@@ -26,7 +26,7 @@ static bool grab_one_power(int *ra_idx, object_type *o_ptr, bool good, s16b *max
 	int i = 0, j;
 	int *ok_ra, ok_num = 0;
 	bool ret = FALSE;
-	s32b f1, f2, f3, f4, f5, esp;
+	u32b f1, f2, f3, f4, f5, esp;
 
 	C_MAKE(ok_ra, max_ra_idx, int);
 
@@ -46,7 +46,7 @@ static bool grab_one_power(int *ra_idx, object_type *o_ptr, bool good, s16b *max
 
 			if (ok) break;
 		}
-		if ((ra_ptr->max_pval < o_ptr->pval)) ok = FALSE;
+		if ((0 < ra_ptr->max_pval) && (ra_ptr->max_pval < o_ptr->pval)) ok = FALSE;
 		if (!ok)
 		{
 			/* Doesnt count as a try*/
@@ -305,7 +305,7 @@ bool create_artifact(object_type *o_ptr, bool a_scroll, bool get_name)
 
 		ra_ptr = &ra_info[ra_idx];
 
-		if (wizard) msg_format("Additing randart power: %d", ra_idx);
+		if (wizard) msg_format("Adding randart power: %d", ra_idx);
 
 		total_power += ra_ptr->value;
 
@@ -363,23 +363,24 @@ bool create_artifact(object_type *o_ptr, bool a_scroll, bool get_name)
 		if (a_scroll)
 		{
 			char dummy_name[80];
+
+			/* Identify it fully */
+			object_aware(o_ptr);
+			object_known(o_ptr);
+			o_ptr->ident |= (IDENT_STOREB | IDENT_MENTAL);
+
 			strcpy(dummy_name, "");
 			object_out_desc(o_ptr, NULL, FALSE, TRUE);
-			o_ptr->ident |= IDENT_STOREB;  /* This will be used later on... */
-			if (!(get_string("What do you want to call the artifact? ", dummy_name, 80)))
-				sprintf(new_name, "of '%s'", player_name);
-			else
+
+			if (get_string("What do you want to call the artifact? ", dummy_name, 80))
 			{
 				strcpy(new_name, "called '");
 				strcat(new_name, dummy_name);
 				strcat(new_name, "'");
 			}
-			/* Identify it fully */
-			object_aware(o_ptr);
-			object_known(o_ptr);
-
-			/* Mark the item as fully known */
-			o_ptr->ident |= (IDENT_MENTAL);
+			else
+				/* Default name = of 'player name' */
+				sprintf(new_name, "of '%s'", player_name);
 		}
 		else
 		{
@@ -393,6 +394,18 @@ bool create_artifact(object_type *o_ptr, bool a_scroll, bool get_name)
 
 	/* Window stuff */
 	p_ptr->window |= (PW_INVEN | PW_EQUIP);
+
+	/* HACKS for ToME */
+	if (o_ptr->tval == TV_CLOAK && o_ptr->sval == SV_MIMIC_CLOAK)
+	{
+		s32b mimic;
+		call_lua("find_random_mimic_shape", "(d,d)", "d", 127, TRUE, &mimic);
+		o_ptr->pval2 = mimic;
+	}
+	else if (f5 & TR5_SPELL_CONTAIN)
+	{
+		o_ptr->pval2 = -1;
+	}
 
 	return TRUE;
 }

@@ -419,7 +419,7 @@ F:DONT_NOTICE_RUNNING
 N:64:explosive rune
 G:*:R
 F:FLOOR | CAN_LEVITATE | CAN_FLY | NOTICE | SUPPORT_LIGHT
-D:0:This rune seems instable.
+D:0:This rune seems unstable.
 
 N:65:Straight Road startpoint
 G:*:w
@@ -500,13 +500,13 @@ N:85:pool of deep lava
 G:.:R
 E:-1d2:1:FIRE
 F:FLOOR | CAN_LEVITATE | CAN_FLY | REMEMBER | SUPPORT_LIGHT
-D:0:The lava BURNS you.
+D:0:You move across the deep lava.
 
 N:86:stream of shallow lava
 G:.:r
 E:-1d1:1:FIRE
 F:FLOOR | CAN_LEVITATE | CAN_FLY | REMEMBER | SUPPORT_LIGHT
-D:0:The lava burns you.
+D:0:You move across the shallow lava.
 
 N:87:dark pit
 G:#:D
@@ -900,3 +900,34 @@ N:212:dead small tree
 G:#:D
 F:FLOOR | DONT_NOTICE_RUNNING | CAN_RUN | SUPPORT_LIGHT | REMEMBER
 F:NO_VISION
+
+
+# New features for the Maps of Lord Dimwit
+
+N:213:copper pillar
+G:#:u
+S:u:u:u:o:u:u:u
+F:WALL | NO_WALK | CAN_PASS | NO_VISION | NOTICE | SUPPORT_LIGHT
+F:DONT_NOTICE_RUNNING | ATTR_MULTI
+D:1:The copper is too tough to tunnel through.
+D:2:a copper pillar blocking your way
+
+N:214:ethereal wall
+G:.:w
+F:WALL | NO_WALK | PERMANENT | NOTICE | DONT_NOTICE_RUNNING
+D:1:You can't even see your obstruction!
+D:2:an unseen force blocking your way
+
+N:215:glacial wall
+G:#:B
+F:WALL | NO_WALK | CAN_PASS | NO_VISION | SUPPORT_LIGHT
+F:DONT_NOTICE_RUNNING | TUNNELABLE
+D:1:You tunnel into the glacial wall... #BOh chilly#w.
+D:2:a hard glacial wall blocking your way
+
+N:216:battlement
+G:#:w
+F:NO_WALK | CAN_PASS | NOTICE | SUPPORT_LIGHT
+F:DONT_NOTICE_RUNNING | TUNNELABLE
+D:1:You tunnel into the battlement.
+D:2:a hard stone battlement blocking your way

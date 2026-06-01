@@ -14,7 +14,7 @@
 
 #define IRC_SERVER "irc.worldirc.org"
 #define IRC_PORT "6667"
-#define IRC_CHANNEL "#angband"
+#define IRC_CHANNEL "#tome"
 
 /*
  * By the way, CTCP's for unique kills and artefact finds would be nice to
@@ -180,9 +180,9 @@ void irc_poll()
 				next++;
 				if (prefix(next, "ACTION"))
 				{
-					char tmp[90];
-					int i = 0, j = 0;
+					u32b i = 0, j = 0, max = (79 - strlen(nick) - 3);
 					bool nicked = FALSE;
+					char tmp[90];
 
 					next += 7;
 					if (strlen(next)) next[strlen(next) - 1] = '\0';
@@ -190,7 +190,7 @@ void irc_poll()
 					while (next[i])
 					{
 						tmp[j++] = next[i++];
-						if (j > 79 - strlen(nick) - 3)
+						if (j > max)
 						{
 							tmp[j] = '\0';
 							if (nicked)
@@ -236,14 +236,14 @@ void irc_poll()
 			}
 			else
 			{
-				char tmp[90];
-				int i = 0, j = 0;
+				u32b i = 0, j = 0, max = (79 - strlen(nick) - 3);
 				bool nicked = FALSE;
+				char tmp[90];
 
 				while (next[i])
 				{
 					tmp[j++] = next[i++];
-					if (j > 79 - strlen(nick) - 3)
+					if (j > max)
 					{
 						tmp[j] = '\0';
 						if (nicked)

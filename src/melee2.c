@@ -644,14 +644,14 @@ static void bolt(int m_idx, int typ, int dam_hp)
  */
 static bool spell_attack(byte spell)
 {
-	/* All RF4 spells hurt (except for shriek) */
-	if (spell < 128 && spell > 96) return (TRUE);
+	/* All RF4 spells hurt (except for shriek, multiply, summon animal) */
+	if (spell >= 96 + 3 && spell <= 96 + 31) return (TRUE);
 
 	/* Various "ball" spells */
 	if (spell >= 128 && spell <= 128 + 8) return (TRUE);
 
 	/* "Cause wounds" and "bolt" spells */
-	if (spell >= 128 + 12 && spell <= 128 + 27) return (TRUE);
+	if (spell >= 128 + 12 && spell <= 128 + 26) return (TRUE);
 
 	/* Hand of Doom */
 	if (spell == 160 + 1) return (TRUE);
@@ -670,7 +670,7 @@ static bool spell_escape(byte spell)
 	if (spell == 160 + 4 || spell == 160 + 5) return (TRUE);
 
 	/* Teleport the player away */
-	if (spell == 160 + 9 || spell == 160 + 10) return (TRUE);
+	if (spell == 160 + 7 || spell == 160 + 8) return (TRUE);
 
 	/* Isn't good for escaping */
 	return (FALSE);
@@ -691,7 +691,7 @@ static bool spell_annoy(byte spell)
 	if (spell >= 128 + 27 && spell <= 128 + 31) return (TRUE);
 
 	/* Teleport to */
-	if (spell == 160 + 8) return (TRUE);
+	if (spell == 160 + 6) return (TRUE);
 
 #if 0
 	/* Hand of Doom */
@@ -699,7 +699,7 @@ static bool spell_annoy(byte spell)
 #endif
 
 	/* Darkness, make traps, cause amnesia */
-	if (spell >= 160 + 12 && spell <= 160 + 14) return (TRUE);
+	if (spell >= 160 + 9 && spell <= 160 + 11) return (TRUE);
 
 	/* Doesn't annoy */
 	return (FALSE);
@@ -710,8 +710,10 @@ static bool spell_annoy(byte spell)
  */
 static bool spell_summon(byte spell)
 {
-	/* All summon spells */
-	if (spell >= 160 + 13) return (TRUE);
+	/* RF4_S_ANIMAL, RF6_S_ANIMALS */
+	if (spell == 96 + 2 || spell == 160 + 3) return (TRUE);
+	/* All other summon spells */
+	if (spell >= 160 + 13 && spell <= 160 + 31) return (TRUE);
 
 	/* Doesn't summon */
 	return (FALSE);
@@ -1159,7 +1161,7 @@ static bool monst_spell_monst(int m_idx)
 				break;
 			}
 
-			/* RF4_XXX2X4 */
+			/* RF4_MULTIPLY */
 		case 96 + 1:
 			{
 				break;
@@ -1182,7 +1184,7 @@ static bool monst_spell_monst(int m_idx)
 				break;
 			}
 
-			/* RF4_XXX4X4 */
+			/* RF4_ROCKET */
 		case 96 + 3:
 			{
 				if (disturb_other) disturb(1, 0);
@@ -1503,7 +1505,7 @@ static bool monst_spell_monst(int m_idx)
 				break;
 			}
 
-			/* RF4_XXX5X4 */
+			/* RF4_BA_NUKE */
 		case 96 + 28:
 			{
 				if (disturb_other) disturb(1, 0);
@@ -1516,7 +1518,7 @@ static bool monst_spell_monst(int m_idx)
 				break;
 			}
 
-			/* RF4_XXX6X4 */
+			/* RF4_BR_NUKE */
 		case 96 + 29:
 			{
 				if (disturb_other) disturb(1, 0);
@@ -1529,7 +1531,7 @@ static bool monst_spell_monst(int m_idx)
 				break;
 			}
 
-			/* RF4_XXX7X4 */
+			/* RF4_BA_CHAO */
 		case 96 + 30:
 			{
 				if (disturb_other) disturb(1, 0);
@@ -1542,7 +1544,7 @@ static bool monst_spell_monst(int m_idx)
 				break;
 			}
 
-			/* RF4_XXX8X4 -> Breathe Disintegration */
+			/* RF4_BR_DISI -> Breathe Disintegration */
 		case 96 + 31:
 			{
 				if (disturb_other) disturb(1, 0);
@@ -1882,7 +1884,7 @@ static bool monst_spell_monst(int m_idx)
 			{
 				if (disturb_other) disturb(1, 0);
 				if (blind || !see_m) monster_msg("%^s mumbles.", m_name);
-				else monster_msg("%^s casts a acid bolt at %s.", m_name, t_name);
+				else monster_msg("%^s casts an acid bolt at %s.", m_name, t_name);
 				monst_bolt_monst(m_idx, y, x, GF_ACID,
 				                 damroll(7, 8) + (rlev / 3));
 				break;
@@ -2589,7 +2591,7 @@ static bool monst_spell_monst(int m_idx)
 			{
 				if (disturb_other) disturb(1, 0);
 				if (blind || !see_m) monster_msg("%^s mumbles.", m_name);
-				else monster_msg("%^s magically summons a demon from the Courts of Chaos!", m_name);
+				else monster_msg("%^s magically summons a demon!", m_name);
 				for (k = 0; k < 1; k++)
 				{
 					if (friendly)
@@ -2780,7 +2782,8 @@ void curse_equipment(int chance, int heavy_chance)
 {
 	bool changed = FALSE;
 	u32b o1, o2, o3, o4, esp, o5;
-	object_type * o_ptr = &p_ptr->inventory[INVEN_WIELD - 1 + randint(12)];
+	object_type * o_ptr =
+		&p_ptr->inventory[rand_range(INVEN_WIELD, INVEN_TOTAL - 1)];
 
 	if (randint(100) > chance) return;
 
@@ -2835,7 +2838,8 @@ void curse_equipment_dg(int chance, int heavy_chance)
 {
 	bool changed = FALSE;
 	u32b o1, o2, o3, o4, esp, o5;
-	object_type * o_ptr = &p_ptr->inventory[INVEN_WIELD - 1 + randint(12)];
+	object_type * o_ptr =
+		&p_ptr->inventory[rand_range(INVEN_WIELD, INVEN_TOTAL - 1)];
 
 	if (randint(100) > chance) return;
 
@@ -2951,8 +2955,6 @@ bool make_attack_spell(int m_idx)
 	monster_type *m_ptr = &m_list[m_idx];
 	monster_race *r_ptr = race_inf(m_ptr);
 	char m_name[80];
-	char m_poss[80];
-	char ddesc[80];
 	bool no_inate = FALSE;
 	int x, y;
 
@@ -3001,7 +3003,6 @@ bool make_attack_spell(int m_idx)
 
 	/* Not allowed to cast spells */
 	if (!chance) return (FALSE);
-
 
 	if (stupid_monsters)
 	{
@@ -3123,12 +3124,6 @@ bool make_attack_spell(int m_idx)
 	/* Get the monster name (or "it") */
 	monster_desc(m_name, m_ptr, 0x00);
 
-	/* Get the monster possessive ("his"/"her"/"its") */
-	monster_desc(m_poss, m_ptr, 0x22);
-
-	/* Hack -- Get the "died from" name */
-	monster_desc(ddesc, m_ptr, 0x88);
-
 	if (stupid_monsters)
 	{
 		/* Choose a spell to cast */
@@ -3157,13 +3152,27 @@ bool make_attack_spell(int m_idx)
 		}
 	}
 
-	/* Can the player disrupt it's punny attempts ? */
+	/* Can the player disrupt its puny attempts? */
 	if ((p_ptr->antimagic_dis >= m_ptr->cdis) && (magik(p_ptr->antimagic)) && (thrown_spell >= 128))
 	{
-		msg_format("Your anti-magic field disrupts %^s spell.", m_name);
+		char m_poss[80];
+
+		/* Get monster's possessive noun form ("the Illusionist's") */
+		monster_desc(m_poss, m_ptr, 0x06);
+
+		msg_format("Your anti-magic field disrupts %s spell.", m_poss);
 	}
 	else
 	{
+		char m_poss[80];
+		char ddesc[80];
+
+		/* Get the monster possessive ("his"/"her"/"its") */
+		monster_desc(m_poss, m_ptr, 0x22);
+
+		/* Hack -- Get the "died from" name */
+		monster_desc(ddesc, m_ptr, 0x88);
+
 		/* Cast the spell. */
 		switch (thrown_spell)
 		{
@@ -3177,13 +3186,13 @@ bool make_attack_spell(int m_idx)
 				break;
 			}
 
-			/* RF4_XXX2X4 */
+			/* RF4_MULTIPLY */
 		case 96 + 1:
 			{
 				break;
 			}
 
-			/* RF6_S_ANIMALS */
+			/* RF4_S_ANIMAL */
 		case 96 + 2:
 			{
 				disturb(1, 0);
@@ -3197,7 +3206,7 @@ bool make_attack_spell(int m_idx)
 				break;
 			}
 
-			/* RF4_XXX4X4 */
+			/* RF4_ROCKET */
 		case 96 + 3:
 			{
 				disturb(1, 0);
@@ -3488,7 +3497,7 @@ bool make_attack_spell(int m_idx)
 				break;
 			}
 
-			/* RF4_XXX5X4 */
+			/* RF4_BA_NUKE */
 		case 96 + 28:
 			{
 				disturb(1, 0);
@@ -3499,7 +3508,7 @@ bool make_attack_spell(int m_idx)
 				break;
 			}
 
-			/* RF4_XXX6X4 */
+			/* RF4_BR_NUKE */
 		case 96 + 29:
 			{
 				disturb(1, 0);
@@ -3511,7 +3520,7 @@ bool make_attack_spell(int m_idx)
 				break;
 			}
 
-			/* RF4_XXX7X4 */
+			/* RF4_BA_CHAO */
 		case 96 + 30:
 			{
 				disturb(1, 0);
@@ -3522,7 +3531,7 @@ bool make_attack_spell(int m_idx)
 				break;
 			}
 
-			/* RF4_XXX8X4 -> Disintegration breath! */
+			/* RF4_BR_DISI -> Disintegration breath! */
 		case 96 + 31:
 			{
 				disturb(1, 0);
@@ -4511,7 +4520,7 @@ bool make_attack_spell(int m_idx)
 			{
 				disturb(1, 0);
 				if (blind) msg_format("%^s mumbles.", m_name);
-				else msg_format("%^s magically summons a demon from the Courts of Chaos!", m_name);
+				else msg_format("%^s magically summons a demon!", m_name);
 				for (k = 0; k < 1; k++)
 				{
 					count += summon_specific(y, x, rlev, SUMMON_DEMON);
@@ -5112,7 +5121,7 @@ void find_corpse(monster_type *m_ptr, int *y, int *x)
 
 		if (last != -1)
 		{
-			rt2_ptr = &r_info[o_list[last].pval];
+			rt2_ptr = &r_info[o_list[last].pval2];
 			if (rt_ptr->level > rt2_ptr->level) last = k;
 			else continue;
 		}
@@ -7162,9 +7171,15 @@ static void process_monster(int m_idx, bool is_frien)
 
 			/* Kill weaker monsters */
 			if ((r_ptr->flags2 & RF2_KILL_BODY) &&
-			                (r_ptr->mexp > z_ptr->mexp) && (cave_floor_bold(ny, nx)) &&
-			                !((is_friend(m_ptr) > 0) && (is_friend(m2_ptr) > 0)))
-				/* Friends don't kill friends... */
+			    (r_ptr->mexp > z_ptr->mexp) && (cave_floor_bold(ny, nx)) &&
+			    /* Friends don't kill friends... */
+			    !((is_friend(m_ptr) > 0) && (is_friend(m2_ptr) > 0)) &&
+			    /* Uniques aren't faceless monsters in a crowd */
+			    !(z_ptr->flags1 & RF1_UNIQUE) &&
+			    /* Don't wreck quests */
+			    !(m2_ptr->mflag & (MFLAG_QUEST | MFLAG_QUEST2)) &&
+			    /* Don't punish summoners for relying on their friends */
+			    (is_friend(m2_ptr) <= 0))
 			{
 				/* Allow movement */
 				do_move = TRUE;
@@ -7534,7 +7549,7 @@ void summon_maint(int m_idx)
 	monster_type *m_ptr = &m_list[m_idx];
 
 	/* Can you pay? */
-	if ((p_ptr->maintain_sum / 100) > p_ptr->csp)
+	if ((s32b)(p_ptr->maintain_sum / 10000) > p_ptr->csp)
 	{
 		char m_name[80];
 
@@ -7547,11 +7562,23 @@ void summon_maint(int m_idx)
 	}
 	else
 	{
-		int s = get_skill(SKILL_SUMMON);
+		s32b cl, ml, floor, cost;
 
-		s = (!s) ? 1 : s;
+		cl = get_skill_scale(SKILL_SUMMON, 100);
+		ml = m_ptr->level * 10000;
+
+		/* Floor = 19 * ml / 990 + 8 / 199
+		   This gives a floor of 0.1 at level 1 and a floor of 2 at level 100
+
+		   Since ml is multiplied by 10000 already, we multiply the 8/199 too
+		   */
+		floor = ml * 19 / 990 + 80000 / 199;
+		cost = (ml / cl - 10000) / 4;
+		if(cost < floor)
+			cost = floor;
+
 		/* Well, then I'll take my wages from you. */
-		p_ptr->maintain_sum += (m_ptr->level * 100 / s);
+		p_ptr->maintain_sum += cost;
 	}
 	return;
 }
@@ -7625,7 +7652,6 @@ void process_monsters(void)
 	/* Memorize old race */
 	old_monster_race_idx = monster_race_idx;
 	old_monster_ego_idx = monster_ego_idx;
-	p_ptr->maintain_sum = 0;
 
 	/* Acquire knowledge */
 	if (monster_race_idx)
@@ -7723,6 +7749,10 @@ void process_monsters(void)
 			test = TRUE;
 		}
 
+		/* No free upkeep on partial summons just because they're out
+		 * of line of sight. */
+		else if (m_ptr->mflag & MFLAG_PARTIAL) test = TRUE;
+
 		/* Handle "sensing radius" */
 		else if (m_ptr->cdis <= r_ptr->aaf)
 		{
@@ -7769,6 +7799,7 @@ void process_monsters(void)
 		/* Hack -- notice death or departure */
 		if (!alive || death) break;
 
+		/* If it's still alive and friendly, charge upkeep. */
 		if (m_ptr->mflag & MFLAG_PARTIAL) summon_maint(i);
 
 		/* Notice leaving */

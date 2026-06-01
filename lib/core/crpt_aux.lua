@@ -195,25 +195,17 @@ are unable to resist these powers, they become corrupted. Corruptions can
 change their physical or mental abilities, some of which can be good, and
 some bad. Most corruptions will affect you permanently, although some only 
 operate when they are activated (whether by player choice or as a random 
-event). You can check which corruptions do you have in the knowledge screen 
-6 (accessed through the '~' menu) or in a character dump.
+event). You can check which corruptions you have in the knowledge screen 6
+(accessed through the '~' menu) or in a character dump.
 
-#####GGaining and losing corruptions
-There are many ways how to gain or lose corruptions.
-
-You can select the *****rm_corru.txt*0[corrupted race] on birth. Such foul
-adventurers will gain and lose corruptions as they gain experience and
-levels. There is a 1 in 3 chance to lose a corruption instead
-of gaining it on these occasions.
+#####GGaining and (not) losing corruptions
+There are several ways that you can become corrupted.
 
 You can become corrupted by quaffing a Potion of Corruption or by drinking
-from Fountain of Corruption. Also some strange items can be activated
+from a Fountain of Corruption. Also some strange items can be activated
 for corruption.
 
-There is 1 in 3 chance you will get corrupted when hit by a chaos attack 
-while lacking a source of chaos resistance.
-
-You can also gain and lose corruptions when polymorphing yourself.
+Corruptions are permanent. Once you have one, you have it for life.
 
 ]])
 	local i, e

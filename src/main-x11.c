@@ -110,6 +110,8 @@
 #include <dirent.h>
 #include <limits.h>
 
+#include <sys/time.h>
+
 /* /me pffts Solaris */
 #ifndef NAME_MAX
 #define	NAME_MAX	_POSIX_NAME_MAX
@@ -450,6 +452,22 @@ static infofnt *Infofnt = (infofnt*)(NULL);
 /**** Generic code ****/
 
 /*
+ * Simple routine to save the state of the game when the display connection
+ * is broken. Remember, you cannot do anything in this function that will
+ * generate X protocol requests.
+ */
+int x_io_error_handler(Display *d)
+{
+	/* We have nothing to save */
+	if (!character_generated) return 0;
+
+	save_dungeon();
+	save_player();
+
+	return 0;
+}
+
+/*
  * Calculate how much space there is in the key queue for the current term.
  */
 int Term_queue_space(void)
@@ -550,6 +568,7 @@ static errr Metadpy_init_2(Display *dpy, cptr name)
 		m->nuke = 0;
 	}
 
+	XSetIOErrorHandler(x_io_error_handler);
 
 	/*** Save some information ***/
 
@@ -915,19 +934,6 @@ static errr Infowin_impell(int x, int y)
 {
 	/* Execute the request */
 	XMoveWindow(Metadpy->dpy, Infowin->win, x, y);
-
-	/* Success */
-	return (0);
-}
-
-
-/*
- * Resize an infowin
- */
-static errr Infowin_resize(int w, int h)
-{
-	/* Execute the request */
-	XResizeWindow(Metadpy->dpy, Infowin->win, w, h);
 
 	/* Success */
 	return (0);
@@ -1993,7 +1999,7 @@ static void paste_x11_send(XSelectionRequestEvent *rq)
 
 			/* Send the (non-empty) string. */
 			XChangeProperty(DPY, rq->requestor, rq->property, rq->target, 8,
-			                PropModeAppend, buf, l);
+			                PropModeAppend, (unsigned char*)buf, l);
 		}
 	}
 	else
@@ -2017,7 +2023,8 @@ extern errr type_string(char *str, uint len);
  */
 static void paste_x11_accept(const XSelectionEvent *ptr)
 {
-	long offset, left;
+	long offset;
+	unsigned long left;
 
 	/* Failure. */
 	if (ptr->property == None)
@@ -2054,7 +2061,7 @@ static void paste_x11_accept(const XSelectionEvent *ptr)
 		                != Success) break;
 
 		/* Paste the text. */
-		err = type_string(data, nitems);
+		err = type_string((char*)data, (uint)nitems);
 
 		/* Free the data pasted. */
 		XFree(data);
@@ -2316,15 +2323,6 @@ static errr CheckEvent(bool wait)
 
 			/* Resize the Term (if needed) */
 			Term_resize(cols, rows);
-
-			/* Resize the windows if any "change" is needed */
-			if ((Infowin->w != wid) || (Infowin->h != hgt))
-			{
-				/* Resize window */
-				Infowin_set(td->win);
-				Infowin_resize(wid, hgt);
-			}
-
 			break;
 		}
 	}

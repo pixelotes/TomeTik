@@ -341,7 +341,7 @@ static void corpse_effect(object_type *o_ptr, bool cutting)
 					do_dec_stat(A_DEX, STAT_DEC_NORMAL);
 					do_dec_stat(A_CON, STAT_DEC_NORMAL);
 					do_dec_stat(A_CHR, STAT_DEC_NORMAL);
-					o_ptr->pval = 0;
+					o_ptr->pval = 1;
 
 					break;
 				}
@@ -380,7 +380,7 @@ static void corpse_effect(object_type *o_ptr, bool cutting)
 						}
 					}
 
-					o_ptr->pval = 0;
+					o_ptr->pval = 1;
 
 					break;
 				}
@@ -410,7 +410,7 @@ static void corpse_effect(object_type *o_ptr, bool cutting)
 						}
 					}
 
-					o_ptr->pval = 0;
+					o_ptr->pval = 1;
 
 					break;
 				}
@@ -440,7 +440,7 @@ static void corpse_effect(object_type *o_ptr, bool cutting)
 						}
 					}
 
-					o_ptr->pval = 0;
+					o_ptr->pval = 1;
 
 					break;
 				}
@@ -470,7 +470,7 @@ static void corpse_effect(object_type *o_ptr, bool cutting)
 						}
 					}
 
-					o_ptr->pval = 0;
+					o_ptr->pval = 1;
 
 					break;
 				}
@@ -500,7 +500,7 @@ static void corpse_effect(object_type *o_ptr, bool cutting)
 			acid_dam(brdam, "a gush of acid");
 			harmful = TRUE;
 		}
-		o_ptr->pval = 0;
+		o_ptr->pval = 1;
 	}
 	else if (r_ptr->flags4 & RF4_BR_ACID)
 	{
@@ -543,7 +543,7 @@ static void corpse_effect(object_type *o_ptr, bool cutting)
 			fire_dam(brdam, "an explosion");
 			harmful = TRUE;
 		}
-		o_ptr->pval = 0;
+		o_ptr->pval = 1;
 	}
 	else if (r_ptr->flags4 & RF4_BR_FIRE)
 	{
@@ -688,7 +688,7 @@ static void corpse_effect(object_type *o_ptr, bool cutting)
 
 		/* Take damage */
 		take_hit(brdam, "chaotic forces");
-		o_ptr->pval = 0;
+		o_ptr->pval = 1;
 	}
 
 	/* Disenchantment */
@@ -710,7 +710,7 @@ static void corpse_effect(object_type *o_ptr, bool cutting)
 
 		/* Take damage */
 		take_hit(brdam, "raw mana");
-		o_ptr->pval = 0;
+		o_ptr->pval = 1;
 	}
 
 	/* Plasma */
@@ -732,7 +732,7 @@ static void corpse_effect(object_type *o_ptr, bool cutting)
 		/* Take damage */
 		take_hit(brdam, "an explosion");
 		harmful = TRUE;
-		o_ptr->pval = 0;
+		o_ptr->pval = 1;
 	}
 
 	/* Hack -- Jellies are immune to acid only if they are already acidic */
@@ -836,7 +836,7 @@ static void corpse_effect(object_type *o_ptr, bool cutting)
 		{
 			summon_specific_friendly(p_ptr->py, p_ptr->px, dun_level, SUMMON_DEMON, FALSE);
 		}
-		if (r_ptr->flags6 & RF6_S_DEMON)
+		if (r_ptr->flags6 & RF6_S_KIN)
 		{
 			summon_specific_friendly(p_ptr->py, p_ptr->px, dun_level, SUMMON_KIN, FALSE);
 		}
@@ -2400,7 +2400,7 @@ static bool quaff_potion(int tval, int sval, int pval, int pval2)
 
 		case SV_POTION_MUTATION:
 			{
-				msg_print("You feel the dark corruptions of Morgoth coming over you !");
+				msg_print("You feel the dark corruptions of Morgoth coming over you!");
 				gain_random_corruption(0);
 				ident = TRUE;
 				break;
@@ -2961,7 +2961,7 @@ void do_cmd_read_scroll(void)
 
 	if (no_lite())
 	{
-		msg_print("You have no light to read by.");
+		msg_print("You have no light by which to read.");
 		return;
 	}
 
@@ -3091,7 +3091,7 @@ void do_cmd_read_scroll(void)
 					if (!fates[i].fate) continue;
 					if (fates[i].know) continue;
 
-					msg_print("A massage appeared on the scroll. It says:");
+					msg_print("A message appears on the scroll. It says:");
 					msg_print(NULL);
 
 					fate_desc(buf, i);
@@ -3122,7 +3122,7 @@ void do_cmd_read_scroll(void)
 
 		case SV_SCROLL_AGGRAVATE_MONSTER:
 			{
-				msg_print("There is a high pitched humming noise.");
+				msg_print("There is a high-pitched humming noise.");
 				aggravate_monsters(1);
 
 				ident = TRUE;
@@ -3216,9 +3216,16 @@ void do_cmd_read_scroll(void)
 
 		case SV_SCROLL_WORD_OF_RECALL:
 			{
-				recall_player(21, 15);
+				if ((dungeon_flags2 & DF2_ASK_LEAVE) && !get_check("Leave this unique level forever? "))
+				{
+					used_up = FALSE;
+				}
+				else
+				{
+					recall_player(21, 15);
 
-				ident = TRUE;
+					ident = TRUE;
+				}
 
 				break;
 			}
@@ -3605,9 +3612,9 @@ void do_cmd_read_scroll(void)
 
 		case SV_SCROLL_ARTIFACT:
 			{
-				(void)artifact_scroll();
-
 				ident = TRUE;
+
+				if (!artifact_scroll()) used_up = FALSE;
 
 				break;
 			}
@@ -4456,9 +4463,16 @@ void do_cmd_zap_rod(void)
 
 	case SV_ROD_RECALL:
 		{
-			recall_player(21, 15);
+			if ((dungeon_flags2 & DF2_ASK_LEAVE) && !get_check("Leave this unique level forever? "))
+			{
+				use_charge = FALSE;
+			}
+			else
+			{
+				recall_player(21, 15);
 
-			ident = TRUE;
+				ident = TRUE;
+			}
 
 			break;
 		}
@@ -4820,7 +4834,7 @@ int ring_of_power()
 
 		if (rand_int(3) == 0)
 		{
-			msg_print("You call the fire of the Mount Doom!");
+			msg_print("You call the fire of Mount Doom!");
 			fire_ball(GF_METEOR, dir, 600, 4);
 		}
 		else
@@ -5014,25 +5028,13 @@ void do_cmd_activate(void)
 		/* Monster eggs */
 		else if (o_ptr->tval == TV_EGG)
 		{
-			msg_print("You resume the development of the egg...");
+			msg_print("You resume the development of the egg.");
 			o_ptr->timeout = 0;
 
 			/* Window stuff */
 			p_ptr->window |= (PW_INVEN | PW_EQUIP);
 
 			/* Success */
-			return;
-		}
-
-		/* Musical instruments */
-		else if (o_ptr->tval == TV_INSTRUMENT)
-		{
-			if (p_ptr->music < 255)
-				msg_print("Your instrument stop playing...");
-			else
-				msg_print("Your instrument remains mute...");
-
-			p_ptr->music = 255;
 			return;
 		}
 
@@ -5097,7 +5099,7 @@ void do_cmd_activate(void)
 			/* Still need to check timeouts because there is another counter */
 			if (o_ptr->timeout)
 			{
-				msg_print("The spell 1 is still charging !");
+				msg_print("The first spell is still charging!");
 				return;
 			}
 
@@ -5109,7 +5111,7 @@ void do_cmd_activate(void)
 			/* Still need to check timeouts because there is another counter */
 			if (o_ptr->xtra2)
 			{
-				msg_print("The spell 2 is still charging !");
+				msg_print("The second spell is still charging!");
 				return;
 			}
 
@@ -5128,7 +5130,7 @@ void do_cmd_activate(void)
 	if (o_ptr->tval == TV_EGG)
 	{
 		msg_print("You stop the development of the egg.");
-		o_ptr->timeout = 1;
+		o_ptr->timeout = -1;
 
 		/* Window stuff */
 		p_ptr->window |= (PW_INVEN | PW_EQUIP);
@@ -5143,22 +5145,11 @@ void do_cmd_activate(void)
 		/* Horns */
 		if (o_ptr->sval == SV_HORN)
 		{
-			msg_format("Your instrument emits a loud sound...");
+			msg_format("Your instrument emits a loud sound!");
 
 			aggravate_monsters(1);
 
 			o_ptr->timeout = 100;
-		}
-
-		/* Everything else */
-		else
-		{
-			msg_format("Your instrument starts %s",
-			           music_info[o_ptr->pval2].desc);
-
-			p_ptr->music = o_ptr->pval2;
-
-			o_ptr->timeout = music_info[p_ptr->music].init_recharge;
 		}
 
 		/* Success */
@@ -5177,11 +5168,13 @@ const char *activation_aux(object_type * o_ptr, bool doit, int item)
 
 	int i = 0, ii = 0, ij = 0, k, dir, dummy = 0;
 	int chance;
+	bool is_junkart = (o_ptr->tval == TV_RANDART);
 
 	int spell = 0;
 
 	/* Junkarts */
-	if (o_ptr->tval == TV_RANDART) spell = activation_info[o_ptr->pval2].spell;
+	if (is_junkart)
+		spell = activation_info[o_ptr->pval2].spell;
 
 	/* True Actifacts */
 	if (!spell && o_ptr->name1)
@@ -5354,9 +5347,9 @@ const char *activation_aux(object_type * o_ptr, bool doit, int item)
 				r_ptr->r_flags4 = r_ptr->flags4;
 				r_ptr->r_flags5 = r_ptr->flags5;
 				r_ptr->r_flags6 = r_ptr->flags6;
-				r_ptr->r_flags4 = r_ptr->flags7;
-				r_ptr->r_flags5 = r_ptr->flags8;
-				r_ptr->r_flags6 = r_ptr->flags9;
+				r_ptr->r_flags7 = r_ptr->flags7;
+				r_ptr->r_flags8 = r_ptr->flags8;
+				r_ptr->r_flags9 = r_ptr->flags9;
 
 				o_ptr->timeout = rand_int(200) + 500;
 
@@ -5827,7 +5820,7 @@ const char *activation_aux(object_type * o_ptr, bool doit, int item)
 					if (summon_specific_friendly(p_ptr->py, p_ptr->px, ((plev * 3) / 2),
 					                             SUMMON_THUNDERLORD, (bool)(plev == 50 ? TRUE : FALSE)))
 					{
-						msg_print("A Thunderlord comes from the thin air!");
+						msg_print("A Thunderlord comes from thin air!");
 						msg_print("'I will help you in your difficult task.'");
 					}
 				}
@@ -5847,43 +5840,6 @@ const char *activation_aux(object_type * o_ptr, bool doit, int item)
 				(void)detect_stairs(DEFAULT_RADIUS);
 
 				o_ptr->timeout = rand_int(100) + 100;
-
-				break;
-			}
-
-		case ACT_MAGLOR:
-			{
-				if (!doit) return music_info[3].desc;
-				msg_format("Your instrument starts %s", music_info[3].desc);
-
-				/* Full ID */
-				p_ptr->music = 3;
-
-				o_ptr->timeout = music_info[p_ptr->music].init_recharge;
-
-				break;
-			}
-
-		case ACT_SKY:
-			{
-				if (!doit) return music_info[9].desc;
-				msg_format("Your instrument starts %s", music_info[9].desc);
-
-				p_ptr->music = 9;
-
-				o_ptr->timeout = music_info[p_ptr->music].init_recharge;
-
-				break;
-			}
-
-		case ACT_DAERON:
-			{
-				if (!doit) return music_info[10].desc;
-				msg_format("Your instrument starts %s", music_info[10].desc);
-
-				p_ptr->music = 10;
-
-				o_ptr->timeout = music_info[p_ptr->music].init_recharge;
 
 				break;
 			}
@@ -5921,7 +5877,7 @@ const char *activation_aux(object_type * o_ptr, bool doit, int item)
 
 		case ACT_ROHAN:
 			{
-				if (!doit) return "heroism, berserker, haste every 250 turns";
+				if (!doit) return "heroism, berserker, and haste every 250 turns";
 				msg_print("Your horn glows deep red.");
 				set_afraid(0);
 				set_shero(p_ptr->shero + damroll(5, 10) + 30);
@@ -6631,7 +6587,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_CURE_LW:
 			{
-				if (!doit) return "remove fear & heal 30 hp every 10 turns";
+				if (!doit) return format("cure light wounds every %d turns", (is_junkart ? 50 : 10));
 				(void)set_afraid(0);
 				(void)hp_player(30);
 
@@ -6642,7 +6598,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_CURE_MW:
 			{
-				if (!doit) return "heal 4d8 & wounds every 3+d3 turns";
+				if (!doit) return format("cure serious wounds every %s turns", (is_junkart? "75" : "3+d3"));
 				msg_print("It radiates deep purple...");
 				hp_player(damroll(4, 8));
 				(void)set_cut((p_ptr->cut / 2) - 50);
@@ -6677,7 +6633,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_REST_ALL:
 			{
-				if (!doit) return "restore stats and life levels every 750 turns";
+				if (!doit) return format("restore stats and life levels every %d turns", (is_junkart ? 200 : 750));
 				msg_print("It glows a deep green...");
 				(void)do_res_stat(A_STR, TRUE);
 				(void)do_res_stat(A_INT, TRUE);
@@ -6694,7 +6650,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_CURE_700:
 			{
-				if (!doit) return "heal 700 hit points every 250 turns";
+				if (!doit) return format("heal 700 hit points every %d turns", (is_junkart ? 100 : 250));
 				msg_print("It glows deep blue...");
 				msg_print("You feel a warm tingling inside...");
 				(void)hp_player(700);
@@ -6741,7 +6697,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_PROT_EVIL:
 			{
-				if (!doit) return "protect evil (dur level*3 + d25) every 225+d225 turns";
+				if (!doit) return "protection from evil (dur level*3 + d25) every 225+d225 turns";
 				msg_print("It lets out a shrill wail...");
 				k = 3 * p_ptr->lev;
 				(void)set_protevil(p_ptr->protevil + randint(25) + k);
@@ -6826,7 +6782,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_LIGHT:
 			{
-				if (!doit) return "light area (dam 2d15) every 10+d10 turns";
+				if (!doit) return format("light area (dam 2d15) every %s turns", (is_junkart ? "100" : "10+d10"));
 				msg_print("It wells with clear light...");
 				lite_area(damroll(2, 15), 3);
 
@@ -7004,7 +6960,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_TELEPORT:
 			{
-				if (!doit) return "teleport (range 100) every 45 turns";
+				if (!doit) return format("teleport (range 100) every %d turns", (is_junkart? 100 : 45));
 				msg_print("It twists space around you...");
 				teleport_player(100);
 
@@ -7015,27 +6971,14 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_RECALL:
 			{
-				if (!doit) return "word of recall every 200 turns";
-				if (dun_level && (max_dlv[dungeon_type] > dun_level))
+				if (!(dungeon_flags2 & DF2_ASK_LEAVE) || ((dungeon_flags2 & DF2_ASK_LEAVE) && !get_check("Leave this unique level forever? ")))
 				{
-					if (get_check("Reset recall depth? "))
-						max_dlv[dungeon_type] = dun_level;
-				}
+					if (!doit) return "word of recall every 200 turns";
+					msg_print("It glows soft white...");
+					recall_player(20,15);
 
-				msg_print("It glows soft white...");
-
-				if (!p_ptr->word_recall)
-				{
-					p_ptr->word_recall = randint(20) + 15;
-					msg_print("The air about you becomes charged...");
+					o_ptr->timeout = 200;
 				}
-				else
-				{
-					p_ptr->word_recall = 0;
-					msg_print("A tension leaves the air around you...");
-				}
-
-				o_ptr->timeout = 200;
 
 				break;
 			}
@@ -7070,7 +7013,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_DESTRUC:
 			{
-				if (!doit) return "Destruction";
+				if (!doit) return "Destruction every 100 turns";
 				earthquake(p_ptr->py, p_ptr->px, 12);
 
 				/* Timeout is set before return */
@@ -7210,7 +7153,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_HALLU:
 			{
-				if (!doit) return "hallucination";
+				if (!doit) return "hallucination every 10 turns";
 				set_image(p_ptr->image + 20 + randint(10));
 
 				/* Timeout is set before return */
@@ -7290,7 +7233,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_PET_SUMMON:
 			{
-				if (!doit) return "summon pet";
+				if (!doit) return "summon pet every 101 turns";
 				summon_specific_friendly(p_ptr->py, p_ptr->px, max_dlv[dungeon_type], 0, FALSE);
 
 				/* Timeout is set before return */
@@ -7301,7 +7244,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_CURE_PARA:
 			{
-				if (!doit) return "cure confusion";
+				if (!doit) return "cure confusion every 500 turns";
 				set_confused(0);
 
 				/* Timeout is set before return */
@@ -7311,7 +7254,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_CURE_HALLU:
 			{
-				if (!doit) return "cure hallucination";
+				if (!doit) return "cure hallucination every 100 turns";
 				set_image(0);
 
 				/* Timeout is set before return */
@@ -7321,7 +7264,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_CURE_POIS:
 			{
-				if (!doit) return "cure poison";
+				if (!doit) return "cure poison every 100 turns";
 				set_poisoned(0);
 
 				/* Timeout is set before return */
@@ -7331,7 +7274,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_CURE_HUNGER:
 			{
-				if (!doit) return "satisfy hunger";
+				if (!doit) return "satisfy hunger every 100 turns";
 				(void)set_food(PY_FOOD_MAX - 1);
 
 				/* Timeout is set before return */
@@ -7341,7 +7284,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_CURE_STUN:
 			{
-				if (!doit) return "cure stun";
+				if (!doit) return "cure stun every 100 turns";
 				set_stun(0);
 
 				/* Timeout is set before return */
@@ -7351,7 +7294,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_CURE_CUTS:
 			{
-				if (!doit) return "cure cuts";
+				if (!doit) return "cure cuts every 100 turns";
 				set_cut(0);
 
 				/* Timeout is set before return */
@@ -7361,7 +7304,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_CURE_FEAR:
 			{
-				if (!doit) return "cure fear";
+				if (!doit) return "cure fear every 100 turns";
 				set_afraid(0);
 
 				/* Timeout is set before return */
@@ -7371,7 +7314,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_CURE_CONF:
 			{
-				if (!doit) return "cure confusion";
+				if (!doit) return "cure confusion every 100 turns";
 				set_confused(0);
 
 				/* Timeout is set before return */
@@ -7381,7 +7324,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_CURE_BLIND:
 			{
-				if (!doit) return "cure blindness";
+				if (!doit) return "cure blindness every 100 turns";
 				set_blind(0);
 
 				/* Timeout is set before return */
@@ -7391,7 +7334,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_CURING:
 			{
-				if (!doit) return "curing";
+				if (!doit) return "curing every 110 turns";
 				set_blind(0);
 				set_poisoned(0);
 				set_confused(0);
@@ -7416,7 +7359,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_LEV_TELE:
 			{
-				if (!doit) return "teleport level";
+				if (!doit) return "teleport level every 50 turns";
 				teleport_player_level();
 
 				/* Timeout is set before return */
@@ -7426,7 +7369,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_ACQUIREMENT:
 			{
-				if (!doit) return "acquirement";
+				if (!doit) return "acquirement every 3000 turns";
 				acquirement(p_ptr->py, p_ptr->px, 1, FALSE, FALSE);
 
 				/* Timeout is set before return */
@@ -7436,7 +7379,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_WEIRD:
 			{
-				if (!doit) return "something weird";
+				if (!doit) return "something weird every 5 turns";
 				/* It doesn't do anything */
 
 				/* Timeout is set before return */
@@ -7456,7 +7399,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_MUT:
 			{
-				if (!doit) return "gain corruption";
+				if (!doit) return "gain corruption every 10 turns";
 				gain_random_corruption(0);
 				/* Timeout is set before return */
 
@@ -7465,7 +7408,7 @@ turn_monsters(40 + p_ptr->lev);
 
 		case ACT_CURE_INSANITY:
 			{
-				if (!doit) return "cure insanity";
+				if (!doit) return "cure insanity every 200 turns";
 				heal_insanity(damroll(10, 10));
 
 				/* Timeout is set before return */
@@ -7489,7 +7432,7 @@ turn_monsters(40 + p_ptr->lev);
 				int y, x, light = 0, dir;
 				cave_type *c_ptr;
 
-				if (!doit) return "light absorption";
+				if (!doit) return "light absorption every 80 turns";
 
 				for (y = p_ptr->py - 6; y <= p_ptr->py + 6; y++)
 				{
@@ -7960,11 +7903,11 @@ turn_monsters(40 + p_ptr->lev);
 		}
 	}
 
-	/* Set timeout */
-	/* Note that I still need to set the timeouts for other
-	(non-random) artifacts above 
-	*/
-	if (o_ptr->tval == TV_RANDART && doit)
+	/* Set timeout for junkarts
+	 * Note that I still need to set the timeouts for other
+	 * (non-random) artifacts above 
+	 */
+	if (is_junkart && doit)
 		o_ptr->timeout = activation_info[o_ptr->pval2].cost / 10;
 
 	return NULL;

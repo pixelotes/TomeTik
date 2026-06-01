@@ -131,7 +131,7 @@ DOOM_SHIELD = add_spell
 	end,
 	["desc"] =      {
 			"Raises a mirror of pain around you, doing very high damage to your foes",
-			"that dare hit you, but greatly reduces your armor",
+			"that dare hit you, but greatly reduces your armour class",
 	}
 }
 
@@ -224,7 +224,12 @@ DEMON_SUMMON = add_spell
 			if level < minlevel then level=minlevel end
 			summon_specific_level = 5 + get_level(DEMON_SUMMON, 100)
 			if get_level(DEMON_SUMMON) >= 35 then type = SUMMON_HI_DEMON end
-			return summon_monster(player.py, player.px, level, TRUE, type)
+			if summon_monster(player.py, player.px, level, TRUE, type) == TRUE then
+				return TRUE
+			else
+				msg_print("Something blocks your summoning!")
+				return FALSE
+			end
 	end,
 	["info"] =      function()
 			return "level "..(5 + get_level(DEMON_SUMMON, 100))

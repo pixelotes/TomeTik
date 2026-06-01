@@ -999,7 +999,7 @@ X:8:30:19:38
 D:%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 D:%.........XXXXXXXXX+XXXXXXXXX........%
 D:%......XXXX^^^^^^^^^^^^^^^^^XXXX.....%
-D:%...XXXX^^^^^XXXXXXXXXXXXX^^^^^XXXX..%ÿ
+D:%...XXXX^^^^^XXXXXXXXXXXXX^^^^^XXXX..%
 D:%..XX^^^^^XXXX^^^^^^^^^^^XXXX^^^^^XX.%
 D:%.XX^^^^XXX^^^^XXXXXXXXX^^^^XXX^^^^XX%
 D:%.X^^^^XX^^^^XXX,^^^^^,XXX^^^^XX^^^^X%
@@ -1801,7 +1801,7 @@ D:%%%%%%%%%%%%%%%%%%%%%
 
 # XXX
 
-N:82:L.ss.r vault (checker.oard)
+N:82:Lesser vault (checker.oard)
 X:7:5:13:21
 D:%%%%%%%%%%%%%%%%%%%%%
 D:%XXXXXXXXXXXXXXXXXXX%
@@ -1977,7 +1977,7 @@ D:%.XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX.%
 D:%..........................................................%
 D:%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-N:91:Rounda.out Three
+N:91:Roundabout Three
 X:8:30:20:97
 D:%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 D:%XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX#XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX%
@@ -2056,7 +2056,7 @@ D:%..###..%
 D:%.......%
 D:%%%%%%%%%
 
-N:96:Minor .oss Vault
+N:96:Minor Boss Vault
 X:7:3:10:10
 D:%%%%%%%%%%
 D:%........%
@@ -2069,7 +2069,7 @@ D:%..X++X..%
 D:%........%
 D:%%%%%%%%%%
 
-N:97:(Lesser) Major .oss Vault
+N:97:(Lesser) Major Boss Vault
 X:7:20:10:10
 D:%%%%%%%%%%
 D:%........%
@@ -2082,7 +2082,7 @@ D:%..X++X..%
 D:%........%
 D:%%%%%%%%%%
 
-N:98:(Greater) Majorly .ossy Vault
+N:98:(Greater) Majorly Bossy Vault
 X:8:37:10:10
 D:%%%%%%%%%%
 D:%........%
@@ -2096,7 +2096,7 @@ D:%........%
 D:%%%%%%%%%%
 
 N:99:Bubbles
-X:8:35:25:40
+X:8:35:25:41
 D:%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 D:%XXX#XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX%
 D:%X8X#X8XXX8XXX8XXX8XXX8XXX8XXX8XXX8XXX8X%
@@ -2107,11 +2107,11 @@ D:%X8XXX8X#X8X#X8X#X8X#X8X#X8X#X8X#X8X#X8X%
 D:%XX#.XX#.XX#.XX#.XX#.XX#.XX#.XX#.XX#.#XX%
 D:%XX.9.#.9.X.9.X.9.#.9.X.9.#.9.X.9.X.9..X%
 D:%XXX.XXX.XXX.XXX.XXX.XXX.XXX.XXX.XXX.XXX%
-D:%X8X#X8XXX8X#X8XXX8XXX8XXX8XXX8XXX8XXX8X%
+D:%X8X#X8XXX8X#X8XXX8XXX8XXX8XXX8XXX8X#X8X%
 D:%XX#.XX#.XX#.XX#.XX#.XX#.XX#.XX#.XX#.#XX%
 D:%XX.9.X.9.#.9.X.9.#.9.#.9.#.9.#.9.X.9.XX%
 D:%XXX.XXX.XXX.XXX.XXX.XXX.XXX.XXX.XXX.XXX%
-D:%X8X#X8X#X8X#X8XXX8XXX8XXX8XXX8X#X8XXX8X%
+D:%X8X#X8X#X8X#X8XXX8XXX8XXX8XXX8X#X8X#X8X%
 D:%XX#.XX#.XX#.XX#.XX#.XX#.XX#.XX#.XX#.#XX%
 D:%XX.9.#.9.X.9.#.9.#.9.#.9.#.9.#.9.X.9.XX%
 D:%XXX.XXX.XXX.XXX.XXX.XXX.XXX.XXX.XXX.XXX%
@@ -2216,7 +2216,7 @@ D:%XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX%
 D:%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 N:104:The Bank from Hell
-X:8:30:20:30
+X:8:30:20:31
 D:%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 D:%XXXXXXXXXXXXXX+XXXXXXXXXXXXXX%
 D:%X.&.&.&.&.&.#...#.&.&.&.&.&.X%

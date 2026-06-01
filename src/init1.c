@@ -1287,8 +1287,8 @@ static const char *activation_names[] =
 	"GANDALF",              /*  76*/
 	"MARDA",                /*  77*/
 	"PALANTIR",             /*  78*/
-	"MAGLOR",               /*  79*/
-	"SKY",                  /*  80*/
+	"XXX79",
+	"XXX80",
 	"CURE_LW",              /*  81*/
 	"CURE_MW",              /*  82*/
 	"CURE_POISON",          /*  83*/
@@ -1296,7 +1296,7 @@ static const char *activation_names[] =
 	"REST_ALL",             /*  85*/
 	"CURE_700",             /*  86*/
 	"CURE_1000",            /*  87*/
-	"DAERON",               /*  88*/
+	"XXX88",
 	"EREBOR",               /*  89*/
 	"DRUEDAIN",             /*  90*/
 	"ESP",                  /*  91*/
@@ -1586,7 +1586,7 @@ static int my_fgets_dostack(char *buf, int len)
  * Grab one race flag from a textual string
  */
 static bool unknown_shut_up = FALSE;
-static errr grab_one_class_flag(s32b *choice, cptr what)
+static errr grab_one_class_flag(u32b *choice, cptr what)
 {
 	int i;
 	cptr s;
@@ -1607,7 +1607,7 @@ static errr grab_one_class_flag(s32b *choice, cptr what)
 	/* Failure */
 	return (1);
 }
-static errr grab_one_race_allow_flag(s32b *choice, cptr what)
+static errr grab_one_race_allow_flag(u32b *choice, cptr what)
 {
 	int i;
 	cptr s;
@@ -1632,7 +1632,7 @@ static errr grab_one_race_allow_flag(s32b *choice, cptr what)
 /*
  * Grab one flag from a textual string
  */
-static errr grab_one_skill_flag(s32b *f1, cptr what)
+static errr grab_one_skill_flag(u32b *f1, cptr what)
 {
 	int i;
 
@@ -1655,7 +1655,7 @@ static errr grab_one_skill_flag(s32b *f1, cptr what)
 /*
  * Grab one flag from a textual string
  */
-static errr grab_one_player_race_flag(s32b *f1, s32b *f2, cptr what)
+static errr grab_one_player_race_flag(u32b *f1, u32b *f2, cptr what)
 {
 	int i;
 
@@ -1701,7 +1701,7 @@ int get_activation(char *activation)
 /*
  * Grab one flag in an object_kind from a textual string
  */
-static errr grab_one_race_kind_flag(s32b *f1, s32b *f2, s32b *f3, s32b *f4, s32b *f5, s32b *esp, cptr what)
+static errr grab_one_race_kind_flag(u32b *f1, u32b *f2, u32b *f3, u32b *f4, u32b *f5, u32b *esp, cptr what)
 {
 	int i;
 
@@ -2693,7 +2693,7 @@ errr init_player_info_txt(FILE *fp, char *buf)
 		/* Process 'C' for "Class choice flags" (multiple lines) */
 		if ((buf[0] == 'S') && (buf[2] == 'C'))
 		{
-			s32b choice[2] = {0, 0}, z;
+			u32b choice[2] = {0, 0}, z;
 
 			/* Parse every entry */
 			for (s = buf + 6; *s; )
@@ -5256,6 +5256,16 @@ errr init_a_info_txt(FILE *fp, char *buf)
 			/* Advance and Save the text index */
 			if (!a_ptr->text) a_ptr->text = ++a_head->text_size;
 
+			/* Append a space at the end of the line, if needed */
+			else if (a_text[a_head->text_size - 1] != ' ')
+			{
+				/* Append the space */
+				strcpy(a_text + a_head->text_size, " ");
+
+				/* Advance the index */
+				a_head->text_size += 1;
+			}
+
 			/* Append chars to the name */
 			strcpy(a_text + a_head->text_size, s);
 
@@ -7118,7 +7128,7 @@ errr init_e_info_txt(FILE *fp, char *buf)
 static bool grab_one_randart_item_flag(randart_part_type *ra_ptr, cptr what, char c)
 {
 	int i;
-	s32b *f1, *f2, *f3, *f4, *f5, *esp;
+	u32b *f1, *f2, *f3, *f4, *f5, *esp;
 
 	if (c == 'F')
 	{
@@ -9259,7 +9269,7 @@ errr init_d_info_txt(FILE *fp, char *buf)
 {
 	int i, j;
 
-	byte rule_num = 0;
+	s16b rule_num = 0;
 
 	byte r_char_number = 0;
 
@@ -11375,8 +11385,20 @@ static errr process_dungeon_file_aux(char *buf, int *yval, int *xval, int xvalst
 
 				a_allow_special[artifact_index] = FALSE;
 
+				/* It's amazing that this "creating objects anywhere"
+				   junk ever worked.
+				   Let's just HACK around one observed bug: Shadow Cloak
+				   of Luthien [Globe of Light] */
+				{
+					u32b f1, f2, f3, f4, f5, esp;
+					object_flags(q_ptr, &f1, &f2, &f3, &f4, &f5, &esp);
+					if (f5 & TR5_SPELL_CONTAIN)
+						q_ptr->pval2 = -1;
+				}
+
 				/* Drop the artifact */
 				drop_near(q_ptr, -1, y, x);
+
 			}
 
 			/* Terrain special */

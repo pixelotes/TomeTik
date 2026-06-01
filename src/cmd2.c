@@ -19,7 +19,7 @@ void do_cmd_immovable_special(void);
  */
 static bool do_cmd_bash_altar(int y, int x)
 {
-	msg_print("Are you mad ? You want to anger the gods ?");
+	msg_print("Are you mad? You want to anger the gods?");
 	return (FALSE);
 }
 
@@ -89,8 +89,6 @@ void do_cmd_go_up(void)
 
 	cave_type *c_ptr;
 
-	char i;
-
 	int oldl = dun_level;
 
 	dungeon_info_type *d_ptr = &d_info[dungeon_type];
@@ -98,16 +96,6 @@ void do_cmd_go_up(void)
 
 	/* Player grid */
 	c_ptr = &cave[p_ptr->py][p_ptr->px];
-
-	/* test if on special level */
-	if ((dungeon_flags2 & DF2_ASK_LEAVE))
-	{
-		prt("Leave this unique level forever (y/n) ? ", 0, 0);
-		flush();
-		i = inkey();
-		prt("", 0, 0);
-		if (i != 'y') return;
-	}
 
 	/* Can we ? */
 	if (process_hooks(HOOK_STAIR, "(s)", "up")) return;
@@ -119,17 +107,17 @@ void do_cmd_go_up(void)
 		{
 			go_up = TRUE;
 		}
+		else if ((dungeon_flags2 & DF2_ASK_LEAVE))
+		{
+			go_up = get_check("Leave this unique level forever? ");
+		}
+		else if (confirm_stairs)
+		{
+			go_up = get_check("Really leave the level? ");
+		}
 		else
 		{
-			if (confirm_stairs)
-			{
-				if (get_check("Really leave the level? "))
-					go_up = TRUE;
-			}
-			else
-			{
-				go_up = TRUE;
-			}
+			go_up = TRUE;
 		}
 	}
 
@@ -140,17 +128,17 @@ void do_cmd_go_up(void)
 		{
 			go_up = TRUE;
 		}
+		else if ((dungeon_flags2 & DF2_ASK_LEAVE))
+		{
+			go_up = get_check("Leave this unique level forever? ");
+		}
+		else if (confirm_stairs)
+		{
+			go_up_many = get_check("Really leave the level? ");
+		}
 		else
 		{
-			if (confirm_stairs)
-			{
-				if (get_check("Really leave the level? "))
-					go_up_many = TRUE;
-			}
-			else
-			{
-				go_up_many = TRUE;
-			}
+			go_up_many = TRUE;
 		}
 	}
 
@@ -158,6 +146,10 @@ void do_cmd_go_up(void)
 	else if (c_ptr->feat == FEAT_QUEST_EXIT)
 	{
 		leaving_quest = p_ptr->inside_quest;
+
+		if ((dungeon_flags2 & DF2_ASK_LEAVE) &&
+				!get_check("Leave this unique level forever? "))
+			return;
 
 		p_ptr->inside_quest = c_ptr->special;
 		dun_level = 0;
@@ -176,7 +168,7 @@ void do_cmd_go_up(void)
 
 		if (dungeon_flags2 & DF2_NO_EASY_MOVE)
 		{
-			msg_print("Some powerfull force prevents your from teleporting.");
+			msg_print("Some powerful force prevents your from teleporting.");
 			return;
 		}
 
@@ -2358,8 +2350,8 @@ static bool do_cmd_bash_aux(int y, int x, int dir)
 		/* Sound */
 		sound(SOUND_OPENDOOR);
 
-		/* Hack -- Fall through the door */
-		move_player(dir, always_pickup);
+		/* Hack -- Fall through the door. Can't disarm while falling. */
+		move_player_aux(dir, always_pickup, 0, FALSE);
 
 		/* Update some things */
 		p_ptr->update |= (PU_VIEW | PU_MON_LITE);
@@ -2697,7 +2689,7 @@ void do_cmd_spike(void)
 }
 
 
-void do_cmd_walk_jump(int pickup)
+static void do_cmd_walk_jump(int pickup, bool disarm)
 {
 	int dir;
 
@@ -2724,7 +2716,7 @@ void do_cmd_walk_jump(int pickup)
 		energy_use = 100;
 
 		/* Actually move the character */
-		move_player(dir, pickup);
+		move_player(dir, pickup, disarm);
 
 		/* Allow more walking */
 		more = TRUE;
@@ -2749,7 +2741,7 @@ void do_cmd_walk_jump(int pickup)
 		p_ptr->oldpy = MAX_HGT / 2;
 
 		/* Inform the player of his horrible fate :=) */
-		msg_print("You are ambushed !");
+		msg_print("You are ambushed!");
 	}
 
 	/* Cancel repeat unless we may continue */
@@ -2760,7 +2752,7 @@ void do_cmd_walk_jump(int pickup)
 /*
  * Support code for the "Walk" and "Jump" commands
  */
-void do_cmd_walk(int pickup)
+void do_cmd_walk(int pickup, bool disarm)
 {
 	/* Move (usually pickup) */
 
@@ -2770,7 +2762,7 @@ void do_cmd_walk(int pickup)
 	}
 	else
 	{
-		do_cmd_walk_jump(pickup);
+		do_cmd_walk_jump(pickup, disarm);
 	}
 }
 
@@ -3111,7 +3103,7 @@ void do_cmd_fire(void)
 
 	int j, y, x, ny, nx, ty, tx, by, bx;
 
-	int tdam, tdis, thits, tmul;
+	int oldtdam, tdam, tdis, thits, tmul;
 
 	int bonus, chance;
 
@@ -3148,7 +3140,7 @@ void do_cmd_fire(void)
 	/* Require a launcher */
 	if (!j_ptr->tval)
 	{
-		msg_print("You have nothing to fire with.");
+		msg_print("You have nothing with which to fire.");
 		return;
 	}
 
@@ -3326,8 +3318,12 @@ void do_cmd_fire(void)
 	/* Hack -- Handle stuff */
 	handle_stuff();
 
+	oldtdam = tdam;
 	while (TRUE)
 	{
+		/* Reset after a piercing shot */
+		tdam = oldtdam;
+
 		/* Travel until stopped */
 		for (cur_dis = 0; cur_dis <= tdis; )
 		{
@@ -3452,7 +3448,7 @@ void do_cmd_fire(void)
 
 					/* Apply special damage XXX XXX XXX */
 					tdam = tot_dam_aux(q_ptr, tdam, m_ptr, &special);
-					tdam = critical_shot(q_ptr->weight, q_ptr->to_h, tdam);
+					tdam = critical_shot(q_ptr->weight, q_ptr->to_h, tdam, SKILL_ARCHERY);
 
 					/* No negative damage */
 					if (tdam < 0) tdam = 0;
@@ -3866,7 +3862,7 @@ void do_cmd_throw(void)
 
 				/* Apply special damage XXX XXX XXX */
 				tdam = tot_dam_aux(q_ptr, tdam, m_ptr, &special);
-				tdam = critical_shot(q_ptr->weight, q_ptr->to_h, tdam);
+				tdam = critical_shot(q_ptr->weight, q_ptr->to_h, tdam, o_ptr->sval == SV_BOULDER ? SKILL_BOULDER : SKILL_ARCHERY);
 
 				/* No negative damage */
 				if (tdam < 0) tdam = 0;
@@ -4196,7 +4192,7 @@ void do_cmd_boomerang(void)
 
 				/* Apply special damage XXX XXX XXX */
 				tdam = tot_dam_aux(q_ptr, tdam, m_ptr, &special);
-				tdam = critical_shot(q_ptr->weight, q_ptr->to_h, tdam);
+				tdam = critical_shot(q_ptr->weight, q_ptr->to_h, tdam, SKILL_ARCHERY);
 
 				/* No negative damage */
 				if (tdam < 0) tdam = 0;
@@ -4467,7 +4463,7 @@ void do_cmd_unwalk()
 	else if (((feat >= FEAT_QUEST_ENTER) && (feat <= FEAT_QUEST_UP)) ||
 	                ((feat >= FEAT_LESS) && (feat <= FEAT_MORE)))
 	{
-		move_player(dir, always_pickup);
+		move_player(dir, always_pickup, TRUE);
 		more = FALSE;
 	}
 
@@ -4484,7 +4480,7 @@ void do_cmd_unwalk()
 			while (dir == 5);
 		}
 
-		move_player(dir, always_pickup);
+		move_player(dir, always_pickup, TRUE);
 	}
 
 	/* Walking semantics */
@@ -4784,7 +4780,7 @@ void do_cmd_sacrifice(void)
 
 						p_ptr->hp_mod -= 10;
 						take_hit(10, "self sacrifice to Melkor");
-						msg_print("Your life slips away, Melkor seems happier.");
+						msg_print("Your life slips away, and Melkor seems happier.");
 						inc_piety(GOD_MELKOR, x * 300);
 						p_ptr->update |= (PU_HP);
 					}
@@ -4792,7 +4788,7 @@ void do_cmd_sacrifice(void)
 					else
 					{
 						take_hit(10, "self sacrifice to Melkor");
-						msg_print("Your life slips away, your arms grow stronger.");
+						msg_print("Your life slips away, and your arms grow stronger.");
 						p_ptr->melkor_sacrifice++;
 						p_ptr->update |= (PU_BONUS | PU_HP);
 					}
@@ -4829,9 +4825,11 @@ void do_cmd_sacrifice(void)
 					inven_item_optimize(item);
 				}
 			}
+			else
+			{
+				process_hooks(HOOK_SACRIFICE_GOD, "()", "");
+			}
 		}
-		else
-			process_hooks(HOOK_SACRIFICE_GOD, "()", "");
 	}
 }
 
@@ -5122,7 +5120,7 @@ void do_cmd_steal()
 
 			screen_load();
 
-			msg_print("Oops ! The monster is now really *ANGRY*.");
+			msg_print("Oops! The monster is now really *ANGRY*!");
 
 			return;
 		}

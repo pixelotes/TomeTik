@@ -17,7 +17,7 @@ bool quest_between_move_hook(char *fmt)
 	if ((c_ptr->feat == FEAT_SHOP) && (c_ptr->special == 27))
 	{
 		cmsg_print(TERM_YELLOW, "Turgon is there.");
-		cmsg_print(TERM_YELLOW, "'Ah, thank you noble hero, now please return to Minas Anor to finish the link.'");
+		cmsg_print(TERM_YELLOW, "'Ah, thank you, noble hero! Now please return to Minas Anor to finish the link.'");
 
 		cquest.status = QUEST_STATUS_COMPLETED;
 
@@ -43,8 +43,8 @@ bool quest_between_move_hook(char *fmt)
 	p_ptr->inside_quest = QUEST_BETWEEN;
 	p_ptr->leaving = TRUE;
 
-	cmsg_print(TERM_YELLOW, "Looks like a full wing of thunderlords ambushes you !");
-	cmsg_print(TERM_YELLOW, "Trone steps forth and speak: 'The secret of the Void Jumpgates");
+	cmsg_print(TERM_YELLOW, "Looks like a full wing of thunderlords ambushes you!");
+	cmsg_print(TERM_YELLOW, "Trone steps forth and speaks: 'The secret of the Void Jumpgates");
 	cmsg_print(TERM_YELLOW, "will not be used by any but the thunderlords!'");
 
 	return FALSE;
@@ -98,14 +98,14 @@ bool quest_between_finish_hook(char *fmt)
 	c_put_str(TERM_YELLOW, "As a reward you can freely use the Void Jumpgates for quick travel.", 9, 0);
 	c_put_str(TERM_YELLOW, "Oh and take that horn, it shall serve you well.", 10, 0);
 
-	/* The sling of farmer maggot */
+	/* prepare the reward */
 	q_ptr = &forge;
 	object_prep(q_ptr, test_item_name("& Golden Horn~ of the Thunderlords"));
 	q_ptr->found = OBJ_FOUND_REWARD;
 	q_ptr->number = 1;
 
 
-	/* Mega-Hack -- Actually create "the one ring" */
+	/* Mega-Hack -- Actually create the Golden Horn of the Thunderlords */
 	k_allow_special[test_item_name("& Golden Horn~ of the Thunderlords")] = TRUE;
 	apply_magic(q_ptr, -1, TRUE, TRUE, TRUE);
 	k_allow_special[test_item_name("& Golden Horn~ of the Thunderlords")] = FALSE;
@@ -144,6 +144,7 @@ bool quest_between_death_hook(char *fmt)
 	{
 		cmsg_print(TERM_YELLOW, "You can escape now.");
 		cave_set_feat(p_ptr->py, p_ptr->px, FEAT_LESS);
+		cave[p_ptr->py][p_ptr->px].special = 0;
 
 		return FALSE;
 	}

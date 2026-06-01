@@ -76,7 +76,7 @@ bool quest_hobbit_give_hook(char *fmt)
 
 	if ((o_ptr->tval != TV_SCROLL) || (o_ptr->sval != SV_SCROLL_WORD_OF_RECALL)) return (FALSE);
 
-	msg_print("Oh thank you noble one!");
+	msg_print("'Oh, thank you, noble one!'");
 	msg_print("Merton Proudfoot reads the scroll and is recalled to the safety of his home.");
 
 	delete_monster_idx(m_idx);
@@ -131,8 +131,8 @@ bool quest_hobbit_chat_hook(char *fmt)
 		object_type forge, *q_ptr;
 
 		msg_print("My Merton is back! You saved him, hero.");
-		msg_print("Take this as a proof of my gratitude, it was given to my family.");
-		msg_print("by a famed wizard, but it should serves you better than me.");
+		msg_print("Take this as a proof of my gratitude.  It was given to my family");
+		msg_print("by a famed wizard, but it should serve you better than me.");
 
 		q_ptr = &forge;
 		object_prep(q_ptr, lookup_kind(TV_ROD, SV_ROD_RECALL));

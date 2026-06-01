@@ -1020,8 +1020,8 @@ struct owner_type
 
 	byte insult_max;                /* Insult limit */
 
-	s32b races[2][2];                  /* Liked/hated races */
-	s32b classes[2][2];                /* Liked/hated classes */
+	u32b races[2][2];                  /* Liked/hated races */
+	u32b classes[2][2];                /* Liked/hated classes */
 
 	s16b costs[3];                  /* Costs for liked people */
 };
@@ -1610,7 +1610,8 @@ struct player_type
 	s16b disrupt_shield;/* Timed disruption shield */
 	s16b parasite;      /* Timed parasite */
 	s16b parasite_r_idx;/* Timed parasite monster */
-	u32b loan, loan_time;/* Timer -- loan */
+	s32b loan;			/* Amount of loan */
+	s32b loan_time;		/* Timer -- time to payback loan */
 	s16b absorb_soul;   /* Timed soul absordtion */
 	s16b tim_magic_breath;      /* Magical breathing -- can breath anywhere */
 	s16b tim_water_breath;      /* Water breathing -- can breath underwater */
@@ -1814,10 +1815,8 @@ struct player_type
 
 	cptr mimic_name;
 
-	byte music;             /* Current music */
-
 	char tactic;                  /* from 128-4 extremely coward to */
-				      /* 128+4 berserker */
+	                              /* 128+4 berserker */
 	char movement;                /* base movement way */
 
 	s16b companion_killed;  /* Number of companion death */
@@ -2450,10 +2449,10 @@ struct skill_type
 	s16b action_mkey;                       /* Action do to */
 
 	s32b i_value;                           /* Actual value */
-	u16b i_mod;                             /* Modifier(1 skill point = modifier skill) */
+	s32b i_mod;                             /* Modifier(1 skill point = modifier skill) */
 
 	s32b value;                             /* Actual value */
-	u16b mod;                               /* Modifier(1 skill point = modifier skill) */
+	s32b mod;                               /* Modifier(1 skill point = modifier skill) */
 	s16b rate;                              /* Modifier decreasing rate */
 
 	u32b uses;                             	/* Number of times used */

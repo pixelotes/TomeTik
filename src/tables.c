@@ -1654,7 +1654,7 @@ option_type option_info[] =
 	  "special_lvls", "Allow the use of special, unique, levels" },
 #endif
 	{ &permanent_levels, FALSE, 6, 5,
-	  "permanent_levels", "Generate persistent dungeons" },
+	  "permanent_levels", "Generate persistent dungeons [EXPERIMENTAL]" },
 
 	{ &ironman_rooms, FALSE, 6, 6,
 	  "ironman_rooms", "Always generate very unusual rooms" },
@@ -1671,16 +1671,6 @@ option_type option_info[] =
 #endif
 	{ &fast_autoroller, FALSE, 6, 10,
 	  "fast_autoroller", "Fast autoroller(NOT on multiuser systems)" },
-
-	{ &cth_monsters, FALSE, 6, 11,
-	  "cth_monsters", "Allow use of lovecraftian monsters" },
-
-#if 0
-	{ &pern_monsters, TRUE, 6, 12,
-	  "pern_monsters", "Allow use of some Pern related monsters" },
-#endif
-	{ &zang_monsters, FALSE, 6, 13,
-	  "zang_monsters", "Allow use of 'Zangbandish' monsters" },
 
 	{ &joke_monsters, FALSE, 6, 14,
 	  "joke_monsters", "Allow use of some 'joke' monsters" },
@@ -2928,7 +2918,7 @@ activation activation_info[MAX_T_ACT] =
 	{ "pet summoning", 1010, ACT_PET_SUMMON },
 	{ "cure paralyzation", 5000, ACT_CURE_PARA },
 	{ "cure hallucination", 1000, ACT_CURE_HALLU },
-	{ "cure poison", 1000, ACT_CURE_POISON },
+	{ "cure poison", 1000, ACT_CURE_POIS },
 	{ "cure hunger", 1000, ACT_CURE_HUNGER },
 	{ "cure stun", 1000, ACT_CURE_STUN },
 	{ "cure cut", 1000, ACT_CURE_CUTS },
@@ -2955,24 +2945,6 @@ activation activation_info[MAX_T_ACT] =
 #if 0 /* No more for the time being, ehehhe evil I am :> */
 	{ "cure corruption", 2000, ACT_CURE_MUT },
 #endif
-};
-
-/*
- * Possible Musics.
- */
-music music_info[MAX_MUSICS] =
-{
-	{"singing a song of freedom", MUSIC_BETWEEN, 10, 40, 10, 1, 10},
-	{"singing a charming song", MUSIC_CHARME, 6, 60, 20, 1, 15},
-	{"singing a knowledge song", MUSIC_ID, 6, 50, 5, 2, 10},
-	{"singing a *knowledge* song", MUSIC_STAR_ID, 2, 100, 50, 4, 100},   /* Never random, only for the Harp of Maglor */
-	{"singing a beautiful song", MUSIC_NONE, 0, 0, 0, 1, 1},
-	{"singing a hiding song", MUSIC_HIDE, 20, 50, 8, 3, 6},
-	{"singing a song of brightness", MUSIC_LITE, 60, 20, 4, 1, 5},
-	{"singing a immaterial song", MUSIC_SHADOW, 30, 50, 2, 5, 15},
-	{"singing a godness song", MUSIC_HOLY, 20, 100, 20, 6, 15},
-	{"singing a *godness* song", MUSIC_HOLY, 30, 100, 20, 5, 100},   /* Never random, only for the Drum of the sky */
-	{"singing a *charming* song", MUSIC_CHARME, 20, 100, 20, 1, 100},   /* Never random, only for the Flute of Daeron */
 };
 
 /*
@@ -3311,8 +3283,8 @@ power_type powers_type_init[POWER_MAX_INIT] =
 	{
 		"detect curses",
 		"You can feel the danger of evil magic.",
-		"You can feel evil magics.",
-		"You can no longer feel evil magics.",
+		"You can feel evil magic.",
+		"You can no longer feel evil magic.",
 		7, 14, A_WIS, 14,
 	},
 	{
@@ -3330,7 +3302,7 @@ power_type powers_type_init[POWER_MAX_INIT] =
 		18, 20, A_CON, 18,
 	},
 	{
-		"midas touch",
+		"Midas touch",
 		"You can turn ordinary items to gold.",
 		"You gain the Midas touch.",
 		"You lose the Midas touch.",
@@ -3437,15 +3409,15 @@ power_type powers_type_init[POWER_MAX_INIT] =
 	{
 		"detect doors and traps",
 		"You can detect hidden doors and traps.",
-		"You grow an affinity for traps.",
+		"You develop an affinity for traps.",
 		"You no longer can detect hidden doors and traps.",
-		5, 5, A_WIS, 10,
+		5, 3, A_WIS, 10,
 	},
 	{
 		"create food",
 		"You can create food.",
-		"Your cooking skills greatly improves.",
-		"Your cooking skills returns to a normal level.",
+		"Your cooking skills greatly improve.",
+		"Your cooking skills return to a normal level.",
 		15, 10, A_INT, 10,
 	},
 	{
@@ -3465,7 +3437,7 @@ power_type powers_type_init[POWER_MAX_INIT] =
 	{
 		"stone to mud",
 		"You can destroy walls.",
-		"You could destroy walls.",
+		"You can destroy walls.",
 		"You cannot destroy walls anymore.",
 		20, 10, A_STR, 12,
 	},
@@ -3480,7 +3452,7 @@ power_type powers_type_init[POWER_MAX_INIT] =
 		"magic missile",
 		"You can cast magic missiles.",
 		"You suddenly understand the basics of magic.",
-		"You forgot the basics of magic.",
+		"You forget the basics of magic.",
 		2, 2, A_INT, 9,
 	},
 	{
@@ -3599,7 +3571,7 @@ power_type powers_type_init[POWER_MAX_INIT] =
 		"lay trap",
 		"You can lay monster traps.",
 		"You suddenly understand how rogues work.",
-		"You no longer suddenly understand how rogues work.",
+		"You no longer understand how rogues work.",
 		1, 1, A_DEX, 1,
 	},
 	{
@@ -3619,7 +3591,7 @@ power_type powers_type_init[POWER_MAX_INIT] =
 	{
 		"turn into a bear",
 		"You can turn into a bear.",
-		"You suddenly gain beornings powers.",
+		"You suddenly gain beorning powers.",
 		"You can no longer shapeshift into a bear.",
 		2, 5, A_CON, 5,
 	},
@@ -3722,7 +3694,7 @@ quest_type quest_init_tome[MAX_Q_IDX_INIT] =
 		"Morgoth",
 		{
 			"Your final quest is the ultimate quest that has always been",
-			"required of you. You must enter the last level of Angband, where",
+			"required of you. You must enter the fetid depths of Angband, where",
 			"Morgoth is waiting. Travel deep, and defeat this source of all our",
 			"problems.  Be prepared, be patient, and good luck. May the light",
 			"shine on you.",
@@ -3822,9 +3794,9 @@ quest_type quest_init_tome[MAX_Q_IDX_INIT] =
 		FALSE,
 		"The Dark Horseman",
 		{
-			"A dark cloaked horseman has been spotted several time in town.",
-			"He carries an aura of fear with him and people seems to get sick",
-			"where he goes.  Please do something, but be careful...",
+			"A dark-cloaked horseman has been spotted several times in town.",
+			"He carries an aura of fear with him and people seem to get sick",
+			"wherever he goes.  Please do something, but be careful...",
 			"",
 			"",
 			"",
@@ -4069,11 +4041,11 @@ quest_type quest_init_tome[MAX_Q_IDX_INIT] =
 		FALSE,
 		"The One Ring",
 		{
-			"Find the One Ring, then bring it to Mount Doom, in Mordor to drop",
+			"Find the One Ring, then bring it to Mount Doom, in Mordor, to drop",
 			"it in the Great Fire where it was once forged.",
-			"But beware, *NEVER* use it, or you will be corrupted.",
-			"Once destroyed you will be able to permanently defeat Sauron.",
-			"The ring must be cast back into the fires of Mount Doom !",
+			"But beware: *NEVER* use it, or you will be corrupted.",
+			"Once it is destroyed you will be able to permanently defeat Sauron.",
+			"The ring must be cast back into the fires of Mount Doom!",
 			"",
 			"",
 			"",
@@ -4195,7 +4167,7 @@ quest_type quest_init_tome[MAX_Q_IDX_INIT] =
 		"Wolves!",
 		{
 			"There are wolves pestering my people! They gather in a hut",
-			"on the edge of down and menace everyone nearby. Your task",
+			"on the edge of town and menace everyone nearby. Your task",
 			"is to go in there and clear them out.",
 			"",
 			"",
@@ -4220,8 +4192,8 @@ quest_type quest_init_tome[MAX_Q_IDX_INIT] =
 		"Dragons!",
 		{
 			"There are dragons pestering my people! They gather in a",
-			"building on the edge of down and menace everyone nearby.",
-			"Your task is to go into the buildng and clear them out.",
+			"building on the edge of town and menace everyone nearby.",
+			"Your task is to go into the building and clear them out.",
 			"",
 			"",
 			"",
@@ -4245,8 +4217,8 @@ quest_type quest_init_tome[MAX_Q_IDX_INIT] =
 		"Haunted House!",
 		{
 			"There are undead pestering my people! They gather in a hut",
-			"on the edge of down and menace everyone nearby. Your task",
-			"is to go into the buildng and clear out the beasts.",
+			"on the edge of town and menace everyone nearby. Your task",
+			"is to go into the building and clear out the beasts.",
 			"",
 			"",
 			"",
@@ -4431,9 +4403,8 @@ tval_desc tval_descs[] =
 	},
 	{
 		TV_INSTRUMENT,
-		"All instruments have a special magical song in them.  "
-		"Activate them to play it.  Harpers can use them to have "
-		"two songs at a time."
+		"Musical instruments can be used with the Music skill to play "
+		"magical songs. Some of them can also be activated."
 	},
 	{
 		TV_BOOMERANG,
@@ -4443,18 +4414,18 @@ tval_desc tval_descs[] =
 	{
 		TV_SHOT,
 		"Shots are small, hard balls.  They are the standard ammunition "
-		"for slings.  You can wear them in your quiver if you have a sling "
+		"for slings.  You can carry them in your quiver if you have a sling "
 		"equipped."
 	},
 	{
 		TV_ARROW,
-		"Arrows are the standard ammunition for bows.  You can wear "
-		"them in your quiver if your have a bow equipped."
+		"Arrows are the standard ammunition for bows.  You can carry "
+		"them in your quiver if you have a bow equipped."
 	},
 	{
 		TV_BOLT,
 		"Bolts are the standard ammunition for crossbows.  You can "
-		"wear them in your quiver if your have a crossbow equipped."
+		"carry them in your quiver if you have a crossbow equipped."
 	},
 	{
 		TV_BOW,
@@ -4491,8 +4462,8 @@ tval_desc tval_descs[] =
 	},
 	{
 		TV_LITE,
-		"Lights are allow you to read things and see from afar. Some of "
-		"them need to be refilled, some do not."
+		"Lights allow you to read things and see from afar. Some of "
+		"them need to be fueled but some do not."
 	},
 	{
 		TV_AMULET,
@@ -4506,7 +4477,7 @@ tval_desc tval_descs[] =
 	},
 	{
 		TV_TRAPKIT,
-		"Trapping kits are used with the trapping skill to set "
+		"Trapping kits are used with the trapping ability to set "
 		"deadly monster traps."
 	},
 	{
@@ -4571,7 +4542,7 @@ tval_desc tval_descs[] =
 	},
 	{
 		TV_RUNE2,
-		"Runes are used with the Runecraft skill  to create brand new spells."
+		"Runes are used with the Runecraft skill to create brand new spells."
 	},
 	{
 		TV_JUNK,
@@ -4638,7 +4609,7 @@ tval_desc tval_descs[] =
 	},
 	{
 		TV_MUSIC_BOOK,
-		"This song book is used by harpers to play songs."
+		"This song book is used by bards to play songs."
 	},
 	{
 		TV_DRUID_BOOK,

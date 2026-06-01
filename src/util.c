@@ -98,7 +98,7 @@ int	*no_fds = NULL;
 	return 0;
 }
 
-# endif 
+# endif
 
 
 /*
@@ -219,6 +219,14 @@ errr path_parse(char *buf, int max, cptr file)
 	/* Hack -- no long user names */
 	if (s && (s >= u + sizeof(user))) return (1);
 
+#ifdef GETLOGIN_BROKEN
+	/* Ask the environment for the home directory */
+	u = getenv("HOME");
+
+	if (!u) return (1);
+
+	(void)strcpy(buf, u);
+#else
 	/* Extract a user name */
 	if (s)
 	{
@@ -240,6 +248,7 @@ errr path_parse(char *buf, int max, cptr file)
 
 	/* Make use of the info */
 	(void)strcpy(buf, pw->pw_dir);
+#endif
 
 	/* Append the rest of the filename, if any */
 	if (s) (void)strcat(buf, s);
@@ -278,6 +287,19 @@ errr path_parse(char *buf, int max, cptr file)
 */
 errr path_temp(char *buf, int max)
 {
+#ifdef WINDOWS
+	static u32b tmp_counter;
+	static char valid_characters[] =
+			"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+	char rand_ext[4];
+
+	rand_ext[0] = valid_characters[rand_int(sizeof (valid_characters))];
+	rand_ext[1] = valid_characters[rand_int(sizeof (valid_characters))];
+	rand_ext[2] = valid_characters[rand_int(sizeof (valid_characters))];
+	rand_ext[3] = '\0';
+	strnfmt(buf, max, "%s/t_%ud.%s", ANGBAND_DIR_XTRA, tmp_counter, rand_ext);
+	tmp_counter++;
+#else 
 	cptr s;
 
 	/* Temp file */
@@ -288,7 +310,7 @@ errr path_temp(char *buf, int max)
 
 	/* Format to length */
 	strnfmt(buf, max, "%s", s);
-
+#endif
 	/* Success */
 	return (0);
 }
@@ -509,48 +531,61 @@ errr my_fgets(FILE *fff, char *buf, huge n)
 {
 	huge i = 0;
 
-	char *s;
-
-	char tmp[1024];
-
-	/* Read a line */
-	if (fgets(tmp, 1024, fff))
+	while (TRUE)
 	{
-		/* Convert weirdness */
-		for (s = tmp; *s; s++)
+		int c = fgetc(fff);
+
+		if (c == EOF)
 		{
-			/* Handle newline */
-			if (*s == '\n')
-			{
-				/* Terminate */
-				buf[i] = '\0';
+			/* Terminate */
+			buf[i] = '\0';
 
-				/* Success */
-				return (0);
-			}
+			/* Success (0) if some characters were read */
+			return (i == 0);
+		}
 
-			/* Handle tabs */
-			else if (*s == '\t')
-			{
-				/* Hack -- require room */
-				if (i + 8 >= n) break;
+		/* Handle newline -- DOS (\015\012), Mac (\015), UNIX (\012) */
+		else if (c == '\r')
+		{
+			c = fgetc(fff);
+			if (c != '\n') ungetc(c, fff);
 
-				/* Append a space */
-				buf[i++] = ' ';
+			/* Terminate */
+			buf[i] = '\0';
 
-				/* Append some more spaces */
-				while (!(i % 8)) buf[i++] = ' ';
-			}
+			/* Success */
+			return (0);
+		}
+		else if (c == '\n')
+		{
+			c = fgetc(fff);
+			if (c != '\r') ungetc(c, fff);
 
-			/* Handle printables */
-			else if (isprint(*s))
-			{
-				/* Copy */
-				buf[i++] = *s;
+			/* Terminate */
+			buf[i] = '\0';
 
-				/* Check length */
-				if (i >= n) break;
-			}
+			/* Success */
+			return (0);
+		}
+
+		/* Handle tabs */
+		else if (c == '\t')
+		{
+			/* Hack -- require room */
+			if (i + 8 >= n) break;
+
+			/* Append 1-8 spaces */
+			do { buf[i++] = ' '; } while (i % 8);
+		}
+
+		/* Handle printables */
+		else if (isprint(c))
+		{
+			/* Copy */
+			buf[i++] = c;
+
+			/* Check length */
+			if (i >= n) break;
 		}
 	}
 
@@ -818,7 +853,7 @@ errr fd_lock(int fd, int what)
 		if (lockf(fd, F_LOCK, 0) != 0) return (1);
 	}
 
-# endif 
+# endif
 
 # else
 
@@ -838,9 +873,9 @@ errr fd_lock(int fd, int what)
 		if (flock(fd, LOCK_EX) != 0) return (1);
 	}
 
-# endif 
+# endif
 
-# endif 
+# endif
 
 #endif
 
@@ -854,7 +889,7 @@ errr fd_lock(int fd, int what)
 */
 errr fd_seek(int fd, huge n)
 {
-	huge p;
+	s32b p;
 
 	/* Verify fd */
 	if (fd < 0) return ( -1);
@@ -866,7 +901,7 @@ errr fd_seek(int fd, huge n)
 	if (p < 0) return (1);
 
 	/* Failure */
-	if (p != n) return (1);
+	if ((huge)p != n) return (1);
 
 	/* Success */
 	return (0);
@@ -920,7 +955,7 @@ errr fd_read(int fd, char *buf, huge n)
 #endif
 
 	/* Read the final piece */
-	if (read(fd, buf, n) != n) return (1);
+	if ((huge)read(fd, buf, n) != n) return (1);
 
 	/* Success */
 	return (0);
@@ -953,7 +988,7 @@ errr fd_write(int fd, cptr buf, huge n)
 #endif
 
 	/* Write the final piece */
-	if (write(fd, buf, n) != n) return (1);
+	if ((huge)write(fd, buf, n) != n) return (1);
 
 	/* Success */
 	return (0);
@@ -3646,6 +3681,19 @@ void pause_line(int row)
 */
 static char request_command_buffer[256];
 
+/*
+* Mega-Hack -- characters for which keymaps should be ignored in
+* request_command().  This MUST have at least twice as many characters as
+* there are building actions in the actions[] array in store_info_type.
+*/
+#define MAX_IGNORE_KEYMAPS 12
+char request_command_ignore_keymaps[MAX_IGNORE_KEYMAPS];
+
+/*
+* Mega-Hack -- flag set by do_cmd_{inven,equip}() to allow keymaps in
+* auto-command mode.
+*/
+bool request_command_inven_mode = FALSE;
 
 
 /*
@@ -3717,8 +3765,14 @@ void request_command(int shopping)
 			/* Forget it */
 			command_new = 0;
 
-			/* Hack - bypass keymaps. Does this break inven/equip? */
-			if (!inkey_next) inkey_next = "";
+			/* Hack - bypass keymaps, unless asked not to */
+			if (!inkey_next && !request_command_inven_mode)
+			{
+				inkey_next = "";
+			}
+
+			/* Mega-Hack -- turn off this flag immediately */
+			request_command_inven_mode = FALSE;
 		}
 
 		/* Get a keypress in "command" mode */
@@ -3860,6 +3914,17 @@ void request_command(int shopping)
 		/* Look up applicable keymap */
 		act = keymap_act[mode][(byte)(cmd)];
 
+		/* Mega-Hack -- Ignore certain keymaps */
+		if (shopping && cmd > 0)
+		{
+			for (i = 0; i < MAX_IGNORE_KEYMAPS; i++)
+				if (cmd == request_command_ignore_keymaps[i])
+				{
+					act = NULL;
+					break;
+				}
+		}
+
 		/* Apply keymap if not inside a keymap already */
 		if (act && !inkey_next)
 		{
@@ -3895,10 +3960,6 @@ void request_command(int shopping)
 			command_arg = 99;
 		}
 	}
-
-	/* Shopping */
-	if (shopping == 1)
-	{}
 
 	/* Hack -- Scan equipment */
 	for (i = INVEN_WIELD; i < INVEN_TOTAL; i++)
@@ -4219,7 +4280,7 @@ u32b get_number(u32b def, u32b max, int y, int x, char *cmd)
 				bell();
 
 				/* Limit */
-				res = (max + 1 == 0) ? 0 - 1 : max;
+				res = (max + 1 == 0) ? (u32b)(0 - 1) : max;
 			}
 
 			/* Stop count at maximum */
@@ -4299,19 +4360,17 @@ byte count_bits(u32b array)
 /* Return the lowered string */
 void strlower(char *buf)
 {
-	byte i = 0;
+	u16b i;
 
-	while ((buf[i] != 0) && (i < 256))
+	for (i = 0; (buf[i] != 0) && (i < 256) ;i++)
 	{
 		if (isupper(buf[i])) buf[i] = tolower(buf[i]);
-
-		i++;
 	}
 }
 
 /*
  * Given monster name as string, return the index in r_info array. Name
- * must exactly match (look out for commas and the like!), or else 0 is 
+ * must exactly match (look out for commas and the like!), or else 0 is
  * returned. Case doesn't matter. -GSN-
  */
 
@@ -4348,7 +4407,7 @@ int test_mego_name(cptr name)
 
 /*
  * Given item name as string, return the index in k_info array. Name
- * must exactly match (look out for commas and the like!), or else 0 is 
+ * must exactly match (look out for commas and the like!), or else 0 is
  * returned. Case doesn't matter. -DG-
  */
 
@@ -4731,10 +4790,10 @@ void display_list(int y, int x, int h, int w, cptr title, cptr *list, int max, i
  */
 bool input_box(cptr text, int y, int x, char *buf, int max)
 {
-	int smax;
+	int smax = strlen(text);
 
-	if (max < strlen(text)) smax = strlen(text) + 1;
-	else smax = max + 1;
+	if (max > smax) smax = max;
+	smax++;
 
 	draw_box(y - 1, x - (smax / 2), 3, smax);
 	c_put_str(TERM_WHITE, text, y, x - (strlen(text) / 2));
@@ -4742,6 +4801,7 @@ bool input_box(cptr text, int y, int x, char *buf, int max)
 	Term_gotoxy(x - (smax / 2) + 1, y + 1);
 	return askfor_aux(buf, max);
 }
+
 /*
  * Creates a msg bbox and ask a question
  */

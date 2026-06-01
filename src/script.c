@@ -12,10 +12,15 @@
 
 #include "angband.h"
 
-#include "lua.h"
-#include "lualib.h"
+#include "lua/lua.h"
+#include "lua/lualib.h"
 #include "lauxlib.h"
 #include "tolua.h"
+
+#ifdef RISCOS
+extern char *riscosify_name(const char *path);
+#endif
+
 
 int tolua_monster_open (lua_State *L);
 int tolua_player_open (lua_State *L);
@@ -358,7 +363,15 @@ bool tome_dofile(char *file)
 		}
 	}
 
+#ifdef RISCOS
+	{
+		char *realname = riscosify_name(buf);
+		lua_dofile(L, realname);
+	}
+#else /* RISCOS */
 	lua_dofile(L, buf);
+#endif /* RISCOS */
+
 	lua_settop(L, oldtop);
 
 	return (TRUE);
@@ -389,7 +402,15 @@ bool tome_dofile_anywhere(cptr dir, char *file, bool test_exist)
 		}
 	}
 
+#ifdef RISCOS
+	{
+		char *realname = riscosify_name(buf);
+		lua_dofile(L, realname);
+	}
+#else /* RISCOS */
 	lua_dofile(L, buf);
+#endif /* RISCOS */
+
 	lua_settop(L, oldtop);
 
 	return (TRUE);

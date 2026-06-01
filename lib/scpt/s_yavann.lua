@@ -46,7 +46,7 @@ YAVANNA_GROW_GRASS = add_spell
 			return "rad "..(get_level(YAVANNA_GROW_GRASS, 4))
 	end,
 	["desc"] =      {
-			"Create a floor of grass around you. While a grass and praying",
+			"Create a floor of grass around you. While on grass and praying",
 			"a worshipper of Yavanna will know a greater regeneration rate"
 	}
 }
@@ -70,9 +70,9 @@ YAVANNA_TREE_ROOTS = add_spell
 			return "dur "..(10 + get_level(YAVANNA_TREE_ROOTS, 30)).." AC "..(10 + get_level(YAVANNA_TREE_ROOTS, 60)).." dam "..(10 + get_level(YAVANNA_TREE_ROOTS, 20))
 	end,
 	["desc"] =      {
-			"Creates roots deep in the floor from your feet making you more stable and able to",
-			"do better attacks but prevents any movement(even teleportation)",
-			"It also makes you recover from stunning almost immediately"
+			"Creates roots deep in the floor from your feet, making you more stable and able",
+			"to make stronger attacks, but prevents any movement (even teleportation).",
+			"It also makes you recover from stunning almost immediately."
 	}
 }
 
@@ -96,12 +96,12 @@ YAVANNA_WATER_BITE = add_spell
 
 			return set_project(randint(30) + 30 + get_level(YAVANNA_WATER_BITE, 150),
 				    GF_WATER,
-				    10 + get_level(YAVANNA_WATER_BITE, 10),
+				    10 + get_level(YAVANNA_WATER_BITE),
 				    rad,
 				    bor(PROJECT_STOP, PROJECT_KILL))
 	end,
 	["info"] =      function()
-			return "dur "..(30 + get_level(YAVANNA_WATER_BITE, 150)).."+d30 dam "..(10 + get_level(YAVANNA_WATER_BITE, 10)).."/blow"
+			return "dur "..(30 + get_level(YAVANNA_WATER_BITE, 150)).."+d30 dam "..(10 + get_level(YAVANNA_WATER_BITE)).."/blow"
 	end,
 	["desc"] =      {
 			"Imbues your melee weapon with a natural stream of water",
@@ -149,7 +149,7 @@ YAVANNA_UPROOT = add_spell
 			return TRUE
 	end,
 	["info"] =      function()
-			return ""
+			return "lev "..(30 + get_level(YAVANNA_UPROOT, 70))
 	end,
 	["desc"] =      {
 			"Awakes a tree to help you battle the forces of Morgoth",

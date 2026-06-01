@@ -35,18 +35,6 @@ SCHOOL_FIRE = add_school
 	["skill"] = SKILL_FIRE,
 	["spell_power"] = TRUE,
 	["sorcery"] = TRUE,
-	["hooks"] =
-	{
-		[HOOK_CALC_BONUS] = function()
-			if get_skill(SKILL_FIRE) >= 35 then
-			end
-		end,
-		[HOOK_CALC_POWERS] = function()
-			if get_skill(SKILL_FIRE) >= 50 then
---				player.add_power(PWR_FIRE_SHAPE)
-			end
-		end,
-	},
 }
 SCHOOL_AIR = add_school
 {
@@ -59,11 +47,6 @@ SCHOOL_AIR = add_school
 		[HOOK_CALC_BONUS] = function()
 			if get_skill(SKILL_AIR) >= 50 then
 				player.magical_breath = TRUE
-			end
-		end,
-		[HOOK_CALC_POWERS] = function()
-			if get_skill(SKILL_AIR) >= 50 then
---				player.add_powe(PWR_AIR_SHAPE)
 			end
 		end,
 	},
@@ -91,11 +74,6 @@ SCHOOL_WATER = add_school
 				player.water_breath = TRUE
 			end
 		end,
-		[HOOK_CALC_POWERS] = function()
-			if get_skill(SKILL_WATER) >= 50 then
---				player.add_powe(PWR_WATER_SHAPE)
-			end
-		end,
 	},
 	["gods"] =
 	{
@@ -114,14 +92,6 @@ SCHOOL_EARTH = add_school
 	["skill"] = SKILL_EARTH,
 	["spell_power"] = TRUE,
 	["sorcery"] = TRUE,
-	["hooks"] =
-	{
-		[HOOK_CALC_POWERS] = function()
-			if get_skill(SKILL_EARTH) >= 50 then
---				player.add_powe(PWR_EARTH_SHAPE)
-			end
-		end,
-	},
 	["gods"] =
 	{
 		-- Tulkas provides the Earth school at 4/5 the prayer skill
@@ -131,7 +101,7 @@ SCHOOL_EARTH = add_school
 			["mul"] = 4,
 			["div"] = 5,
 		},
-		-- Yavanna Kementari provides the Water school at 1/2 the prayer skill
+		-- Yavanna Kementari provides the Earth school at 1/2 the prayer skill
 		[GOD_YAVANNA] =
 		{
 			["skill"] = SKILL_PRAY,
@@ -216,7 +186,7 @@ SCHOOL_NATURE = add_school
 	["sorcery"] = TRUE,
 	["gods"] =
 	{
-		-- Yavanna Kementari provides the Water school at 1/2 the prayer skill
+		-- Yavanna Kementari provides the Nature school at 1/2 the prayer skill
 		[GOD_YAVANNA] =
 		{
 			["skill"] = SKILL_PRAY,
@@ -257,7 +227,7 @@ SCHOOL_MIND = add_school
 			["mul"] = 1,
 			["div"] = 3,
 		},
-		-- Melkor Bauglir provides the Mind school at full prayer skill
+		-- Melkor Bauglir provides the Mind school at 1/3 the prayer skill
 		[GOD_MELKOR] =
 		{
 			["skill"] = SKILL_PRAY,
@@ -377,7 +347,7 @@ school_book[1] = {
 
 -- The book of the blowing winds
 school_book[2] = {
-	NOXIOUSCLOUD, POISONBLOOD, INVISIBILITY, AIRWINGS, THUNDERSTORM,
+	NOXIOUSCLOUD, POISONBLOOD, INVISIBILITY, STERILIZE, AIRWINGS, THUNDERSTORM,
 }
 
 -- The book of the impenetrable earth
@@ -392,7 +362,7 @@ school_book[4] = {
 
 -- Create the book of translocation
 school_book[5] = {
-	DISARM, BLINK, TELEPORT, TELEAWAY, RECALL, PROBABILITY_TRAVEL,
+	BLINK, DISARM, TELEPORT, TELEAWAY, RECALL, PROBABILITY_TRAVEL,
 }
 
 -- Create the book of the tree
@@ -412,7 +382,7 @@ school_book[8] = {
 
 -- Create the book of meta spells
 school_book[9] = {
-	RECHARGE, DISPERSEMAGIC, SPELLBINDER, TRACKER,
+	RECHARGE, DISPERSEMAGIC, SPELLBINDER, TRACKER, INERTIA_CONTROL,
 }
 
 -- Create the book of the mind

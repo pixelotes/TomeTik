@@ -7,8 +7,8 @@ Possessors are unusual; they aren't good fighters, and they can't cast
 magic. Their special ability is that of being able to leave their 
 bodies and inhabit corpses. While "in" a corpse, the Possessor gains 
 the abilities of the monster, and their hit points and the monster's 
-are averaged. While in the incorporeal form between bodies, they have 
-only one hitpoint. 
+are averaged. (Most monsters have no, or very few, spell points.)  While
+in the incorporeal form between bodies, they have only one hitpoint.
 
 #####GStarting Stat Modifiers
 Strength         +1
@@ -17,8 +17,8 @@ Wisdom           +1
 Dexterity        +1
 Constitution     +0
 Charisma         +1
-Bonus Blows       0
 Hit Die          +d8
+Spell Points     +0%
 Exp Penalty      40%
 
 #####GStarting Skills:
@@ -39,10 +39,10 @@ Monster-lore            1.000           [1.100]
   Possession            1.000           [0.800]
 
 #####GStarting Equipment
-A possessor begins the game with:
-    a potion of healing
-    a short sword
-    hard leather armor
+A Possessor begins the game with:
+    a Potion of Healing
+    a Short Sword
+    a Hard Leather Armour
 
 ~~~~~03|Possessor|Possessor powers 
 ~~~~~04|Skills|Possession - Possessor powers 

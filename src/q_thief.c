@@ -33,6 +33,7 @@ bool quest_thieves_gen_hook(char *fmt)
 
 	init_flags = INIT_CREATE_DUNGEON;
 	process_dungeon_file(NULL, "thieves.map", &ystart, &xstart, cur_hgt, cur_wid, TRUE);
+	dungeon_flags2 |= DF2_NO_GENO;
 
 	/* Rip the inventory from the player */
 	cmsg_print(TERM_YELLOW, "You feel a vicious blow on your head.");
@@ -101,6 +102,7 @@ bool quest_thieves_hook(char *fmt)
 	{
 		msg_print("The magic hiding the stairs is now gone.");
 		cave_set_feat(23, 4, FEAT_LESS);
+		cave[23][4].special = 0;
 
 		quest[p_ptr->inside_quest].status = QUEST_STATUS_COMPLETED;
 		del_hook(HOOK_END_TURN, quest_thieves_hook);
@@ -110,7 +112,7 @@ bool quest_thieves_hook(char *fmt)
 		return (FALSE);
 	}
 	return FALSE;
-};
+}
 bool quest_thieves_finish_hook(char *fmt)
 {
 	s32b q_idx;
@@ -119,7 +121,7 @@ bool quest_thieves_finish_hook(char *fmt)
 
 	if (q_idx != QUEST_THIEVES) return FALSE;
 
-	c_put_str(TERM_YELLOW, "Thank you for killing the band of thieves!.", 8, 0);
+	c_put_str(TERM_YELLOW, "Thank you for killing the band of thieves!", 8, 0);
 	c_put_str(TERM_YELLOW, "You can use the hideout as your house as a reward.", 9, 0);
 
 	/* Continue the plot */

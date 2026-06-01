@@ -421,7 +421,7 @@ bool do_control_magic(void)
 
 	if (!p_ptr->control) return FALSE;
 
-	if (get_check("Do you want to abandon the golem?"))
+	if (get_check("Do you want to abandon the creature?"))
 	{
 		if (get_check("Abandon it permanently?"))
 			delete_monster_idx(p_ptr->control);
@@ -647,7 +647,7 @@ void do_cmd_companion()
 
 	if (!can_create_companion())
 	{
-		msg_print("You cannot get anymore companion.");
+		msg_print("You cannot have any more companions.");
 		return;
 	}
 

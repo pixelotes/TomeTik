@@ -4,7 +4,7 @@
 god_quest = {}
 
 -- increase this number to make god quests more common, to a max value of 100
-god_quest.CHANCE_OF_GOD_QUEST = 20
+god_quest.CHANCE_OF_GOD_QUEST = 21
 
 -- increase this number to make more quests
 god_quest.MAX_NUM_GOD_QUESTS = 5
@@ -17,18 +17,25 @@ add_quest
 	["global"] =    "GOD_QUEST",
 	["name"] =      "God quest",
 	["desc"] =      function()
-			local home, home_axis
 
 			if quest(GOD_QUEST).status == QUEST_STATUS_TAKEN then
 
 				-- get the direction that the dungeon lies from lothlorien/angband
-				player_axis, home, home_axis = get_god_quest_axes()
+				local home, home_axis, home_distance, home2, home2_axis, home2_distance = get_god_quest_axes()
 
-				print_hook("#####yGod quest!\n")
+				print_hook("#####yGod quest "..god_quest.quests_given.."!\n")
 				print_hook("Thou art to find the lost temple of thy God and\n");
 				print_hook("to retrieve the lost part of the relic for thy God! \n")
-				print_hook("The temple lies to the "..home_axis.." of "..home.." \n")
-				print_hook("and to the "..player_axis.." of thy position when thou were given the quest. \n")
+				if home_axis ~= "close" then
+					print_hook("The temple lies "..home_distance.." to the "..home_axis.." of "..home..", \n")
+				else
+					print_hook("The temple lies very close to "..home..", \n")
+				end
+				if home2_axis ~= "close" then
+					print_hook( "and "..home2_distance.." to the "..home2_axis.." of "..home2..".\n")
+				else
+					print_hook("and very close to "..home2..".\n")
+				end					
 				print_hook("\n")
 			end
 	end,
@@ -36,10 +43,10 @@ add_quest
 	["data"] =      {
 		["god_quest.relic_num"] = 1,
 		["god_quest.quests_given"] = 0,
-		["god_quest.relics_identified"] = 0,
+		["god_quest.relics_found"] = 0,
 		["god_quest.dun_mindepth"] = 1,
 		["god_quest.dun_maxdepth"] = 4,
-		["god_quest.dun_minplev"] = 1,
+		["god_quest.dun_minplev"] = 0,
 		["god_quest.relic_gen_tries"] = 0,
 		["god_quest.relic_generated"] = FALSE,
 		["god_quest.dung_x"] = 1,
@@ -55,10 +62,10 @@ add_quest
 			-- initialise save-file stored variables when new character is created
 			god_quest.relic_num = 1
 			god_quest.quests_given = 0
-			god_quest.relics_identified = 0
+			god_quest.relics_found = 0
 			god_quest.dun_mindepth = 1
 			god_quest.dun_maxdepth = 4
-			god_quest.dun_minplev = 1
+			god_quest.dun_minplev = 0
 			god_quest.relic_gen_tries = 0
 			god_quest.relic_generated = FALSE
 		end,
@@ -70,9 +77,14 @@ add_quest
 				local give_god_quest = magik(god_quest.CHANCE_OF_GOD_QUEST)
 
 				-- check player is worshipping a god, not already on a god quest.
-				if (player.astral ~= FALSE) or (player.pgod <= 0) or (quest(GOD_QUEST).status == QUEST_STATUS_TAKEN)
+				if (player.astral ~= FALSE) or (player.pgod <= 0) 
+				or (quest(GOD_QUEST).status == QUEST_STATUS_TAKEN) or (quest(GOD_QUEST).status == QUEST_STATUS_FAILED)
 				or (god_quest.quests_given >= god_quest.MAX_NUM_GOD_QUESTS) or (give_god_quest == FALSE)
-				or ((current_dungeon_idx == god_quest.DUNGEON_GOD) and (dun_level > 0)) then
+				or ((current_dungeon_idx == god_quest.DUNGEON_GOD) and (dun_level > 0)) or (player.lev <= god_quest.dun_minplev) then
+					-- Don't let a player get quests with trickery
+					if player.lev > god_quest.dun_minplev then
+						god_quest.dun_minplev = player.lev
+					end
 					return
 				else
 					-- each god has different characteristics, so the quests are differnet depending on your god
@@ -100,25 +112,33 @@ add_quest
 					god_quest.player_y, god_quest.player_x = player.get_wild_coord()
 
 					-- establish direction of player and 'home' from dungeon
-					local player_axis, home, home_axis, distance = get_god_quest_axes()
+					local home, home_axis, home_distance, home2, home2_axis, home2_distance = get_god_quest_axes()
 
 					-- God issues instructions
 					cmsg_print(TERM_L_BLUE, "The voice of "..deity(player.pgod).name.." booms in your head:")
 
 					cmsg_print(TERM_YELLOW, "'I have a task for thee.")
 					cmsg_print(TERM_YELLOW, "Centuries ago an ancient relic of mine was broken apart.")
-					cmsg_print(TERM_YELLOW, "The pieces of it hath been lost in fallen temples.")
+					cmsg_print(TERM_YELLOW, "The pieces of it have been lost in fallen temples.")
 					cmsg_print(TERM_YELLOW, "Thou art to find my lost temple and retrieve a piece of the relic.")
 					cmsg_print(TERM_YELLOW, "When thy task is done, thou art to lift it in the air and call upon my name.")
 					cmsg_print(TERM_YELLOW, "I shall then come to reclaim what is mine!")
-					cmsg_print(TERM_YELLOW, "The temple lies "..distance.." to the "..player_axis.." of thy current position,")
-					cmsg_print(TERM_YELLOW, "and to the "..home_axis.." of "..home..", I can feel it.'")
+					if home_axis ~= "close" then
+						cmsg_print(TERM_YELLOW, "The temple lies "..home_distance.." to the "..home_axis.." of "..home..", ")
+					else
+						cmsg_print(TERM_YELLOW, "The temple lies very close to "..home..",")
+					end
+
+					if home2_axis ~= "close" then
+						cmsg_print(TERM_YELLOW, "and "..home2_distance.." to the "..home2_axis.." of "..home2..", I can feel it.'")
+					else
+						cmsg_print(TERM_YELLOW, "and very close to "..home2..", I can feel it.'")
+					end
 
 					-- Prepare depth of dungeon. If this was generated in set_god_dungeon_attributes(),
 					-- then we'd have trouble if someone levelled up in the dungeon!
 					god_quest.dun_mindepth = player.lev*2/3
 					god_quest.dun_maxdepth = god_quest.dun_mindepth + 4
-					god_quest.dun_minplev = player.lev
 				end
 			end
 		end,
@@ -126,9 +146,23 @@ add_quest
 			local chance
 
 			-- Check for dungeon
-			if (current_dungeon_idx ~= god_quest.DUNGEON_GOD) or (quest(GOD_QUEST).status == QUEST_STATUS_UNTAKEN)
-			or (god_quest.relic_generated == TRUE) then
+			if (current_dungeon_idx ~= god_quest.DUNGEON_GOD) or (quest(GOD_QUEST).status == QUEST_STATUS_UNTAKEN) then
 				return
+			-- if the relic has been created at this point, then it was created on the *PREVIOUS* call of HOOK_LEVEL_END_GEN, and 
+			-- therefore the player has caused another level generation in the temple and hence failed the quest.
+			elseif (god_quest.relic_generated == TRUE) and quest(GOD_QUEST).status ~= QUEST_STATUS_FAILED then 
+				
+					-- fail the quest, don't give another one, don't give this message again
+					quest(GOD_QUEST).status = QUEST_STATUS_FAILED
+					-- God issues instructions
+					cmsg_print(TERM_L_BLUE, "The voice of "..deity(player.pgod).name.." booms in your head:")
+
+					cmsg_print(TERM_YELLOW, "'Thou art a fool!")
+					cmsg_print(TERM_YELLOW, "I told thee to look carefully for the relic. It appears thou hast missed the")
+					cmsg_print(TERM_YELLOW, "opportunity to claim it in my name, as I sense that those monsters who ")
+					cmsg_print(TERM_YELLOW, "have overrun my temple have destroyed it themselves.")
+					cmsg_print(TERM_YELLOW, "I shall not ask thee to do such a thing again, as thou hast failed me in this")
+					cmsg_print(TERM_YELLOW, "simple task!'")					
 			else
 				-- Force relic generation on 5th attempt if others have been unsuccessful.
 				if (god_quest.relic_gen_tries == 4) and (god_quest.relic_generated == FALSE) then
@@ -171,7 +205,7 @@ add_quest
 		[HOOK_GET] = function(o_ptr, item)
 				-- Is it the relic, and check to make sure the relic hasn't already been identified
 			if (quest(GOD_QUEST).status == QUEST_STATUS_TAKEN) and (o_ptr.tval == TV_JUNK) and (o_ptr.sval == god_quest.relic_num)
-			and (o_ptr.pval ~= TRUE)  and (god_quest.relics_identified < god_quest.quests_given) then
+			and (o_ptr.pval ~= TRUE)  and (god_quest.relics_found < god_quest.quests_given) then
 
 				-- more God talky-talky
 				cmsg_print(TERM_L_BLUE, deity(player.pgod).name.." speaks to you:")
@@ -203,11 +237,33 @@ add_quest
 
 				-- relic piece has been identified
 				o_ptr.pval = TRUE
-				god_quest.relics_identified = god_quest.relics_identified + 1
+				god_quest.relics_found = god_quest.relics_found + 1
 
 				-- Make sure quests can be given again if neccesary
 				quest(GOD_QUEST).status = QUEST_STATUS_UNTAKEN
 				return TRUE
+			end
+		end,
+		[HOOK_CHAR_DUMP] = function()
+
+			if (god_quest.quests_given > 0) then
+
+				local relics = god_quest.relics_found
+				local append_text = ""
+				if (god_quest.relics_found == god_quest.MAX_NUM_GOD_QUESTS) then
+					relics = "all"
+					append_text = " and pleased your god"
+				else
+					if (god_quest.relics_found == 0) then
+						relics = "none"
+					end
+					if (quest(GOD_QUEST).status == QUEST_STATUS_FAILED) then
+						append_text = " and failed in your quest"
+					end
+				end
+
+				print_hook("\n You found "..(relics).." of the relic pieces"..(append_text)..".")
+
 			end
 		end,
 	},
@@ -218,7 +274,12 @@ function place_rand_dung()
 	local tries, grid
 
 	-- erase old dungeon
-	if (god_quest.quests_given > 0) then place_dungeon(god_quest.dung_y, god_quest.dung_x) end
+		if (god_quest.quests_given > 0) then 
+		place_dungeon(god_quest.dung_y, god_quest.dung_x)
+		
+		-- erase old recall level
+		max_dlv[god_quest.DUNGEON_GOD + 1] = 0
+	end
 
 	-- initialise tries variable
 	tries = 1000
@@ -259,39 +320,47 @@ end
 
 -- this function generates the relic at a randomly determined place in the temple.
 function generate_relic()
-	local tries, grid, relic
+	local tries, grid, x, y, relic
 
 	-- initialise tries variable
-	tries = 0
+	tries = 1000
 
-	while (tries == 0) do
+	while (tries > 0) do
 
+		tries = tries - 1
 		-- get grid coordinates from current height/width, minus one to prevent relic being generated in outside wall. (would crash the game)
 		y = randint(cur_hgt-1)
 		x = randint(cur_wid-1)
 		grid = cave(y, x)
 
-		-- are the coordinates in a wall, ?
-		if (cave_is(grid, FF1_FLOOR) == 0) then
+		-- are the coordinates on a floor, not on a permanent feature (eg stairs), and not on a trap ?
+		if (cave_is(grid, FF1_FLOOR) == TRUE) and (cave_is(grid, FF1_PERMANENT) == FALSE) and (grid.t_idx == 0) then break end
 
-			-- try again
-			tries = 0
-
-		else
-			-- neither player, nor wall, then stop this 'while'
-			tries = 1
-
-		end
-	end
-
+	end 
+	
 	-- create relic
 	relic = create_object(TV_JUNK, god_quest.relic_num)
 
 	-- inscribe it to prevent automatizer 'accidents'
 	relic.note = quark_add("quest")
 
-	-- drop it
-	drop_near(relic, -1, y, x)
+	-- If no safe co-ords were found, put it in the players backpack
+	if tries == 0 then
+
+		-- explain it
+		msg_print(TERM_L_BLUE, "You luckily stumble across the relic on the stairs!")
+
+		if (inven_carry_okay(relic)) then
+			inven_carry(relic, FALSE)
+		else
+		-- no place found, drop it on the stairs
+			drop_near(relic, -1, player.py, player.px)
+		end
+
+	else
+		-- drop it
+		drop_near(relic, -1, y, x)
+	end
 
 	-- Only generate once!
 	god_quest.relic_generated = TRUE
@@ -539,27 +608,33 @@ end
 -- Calling this function returns the direction the dungeon is in from the players position at the time
 -- the quest was given, and also the direction from angband (if the player is worshipping Melkor) or lothlorien.
 function get_god_quest_axes()
-	local play_y_coord, play_x_coord, y_axis, x_axis, player_axis, home_axis, mydistance
-
-	player_axis = compass(god_quest.player_y, god_quest.player_x, god_quest.dung_y, god_quest.dung_x)
+	local home, home_y_coord, home_x_coord, home_axis, home2, home2_y_coord, home2_x_coord, home2_axis, mydistance
 
 	-- different values for different gods...
 	if player.pgod ~= GOD_MELKOR then
 
-		-- one of the valar, "home" is lothlorien
-		home = "Lothlorien"
-		home_y_coord = 34
-		home_x_coord = 50
+		-- one of the valar, "home" is lothlorien, home2 is Minas Arnor
+		home = "Bree"
+		home_y_coord = 21
+		home_x_coord = 34
+		home2 = "Minas Anor"
+		home2_y_coord = 56
+		home2_x_coord = 60
 	else
-		-- Melkor, "home" is angband
+		-- Melkor, "home" is angband, home2 is Barad-dur
 		home = "the Pits of Angband"
 		home_y_coord = 7
 		home_x_coord = 34
+		home2 = "the Land of Mordor"
+		home2_y_coord = 58
+		home2_x_coord = 65	
 	end
 
 	home_axis = compass(home_y_coord, home_x_coord, god_quest.dung_y, god_quest.dung_x)
+	home2_axis = compass(home2_y_coord, home2_x_coord, god_quest.dung_y, god_quest.dung_x)
 
-	mydistance = approximate_distance(god_quest.player_y, god_quest.player_x, god_quest.dung_y, god_quest.dung_x)
+	home_distance = approximate_distance(home_y_coord, home_x_coord, god_quest.dung_y, god_quest.dung_x)
+	home2_distance = approximate_distance(home2_y_coord, home2_x_coord, god_quest.dung_y, god_quest.dung_x)
 
-	return player_axis, home, home_axis, mydistance
+	return home, home_axis, home_distance, home2, home2_axis, home2_distance
 end

@@ -12,6 +12,25 @@
 
 #include "angband.h"
 
+#ifdef PRIVATE_USER_PATH
+
+static void module_reset_dir_aux(cptr *dir, cptr new_path)
+{
+	char buf[1024];
+
+	/* Build the new path */
+	strnfmt(buf, sizeof (buf), "%s%s%s", dir, PATH_SEP, new_path);
+
+	string_free(*dir);
+	*dir = string_make(buf);
+
+	/* Make it if needed */
+	if (!private_check_user_directory(*dir))
+		quit(format("Unable to create module dir %s\n", *dir));
+}
+
+#endif
+
 void module_reset_dir(cptr dir, cptr new_path)
 {
 	cptr *d = 0;
@@ -19,7 +38,6 @@ void module_reset_dir(cptr dir, cptr new_path)
 
 	if (!strcmp(dir, "apex")) d = &ANGBAND_DIR_APEX;
 	if (!strcmp(dir, "bone")) d = &ANGBAND_DIR_BONE;
-	if (!strcmp(dir, "cmov")) d = &ANGBAND_DIR_CMOV;
 	if (!strcmp(dir, "core")) d = &ANGBAND_DIR_CORE;
 	if (!strcmp(dir, "dngn")) d = &ANGBAND_DIR_DNGN;
 	if (!strcmp(dir, "data")) d = &ANGBAND_DIR_DATA;
@@ -27,19 +45,54 @@ void module_reset_dir(cptr dir, cptr new_path)
 	if (!strcmp(dir, "file")) d = &ANGBAND_DIR_FILE;
 	if (!strcmp(dir, "help")) d = &ANGBAND_DIR_HELP;
 	if (!strcmp(dir, "info")) d = &ANGBAND_DIR_INFO;
-	if (!strcmp(dir, "note")) d = &ANGBAND_DIR_NOTE;
-	if (!strcmp(dir, "save")) d = &ANGBAND_DIR_SAVE;
 	if (!strcmp(dir, "scpt")) d = &ANGBAND_DIR_SCPT;
 	if (!strcmp(dir, "patch")) d = &ANGBAND_DIR_PATCH;
 	if (!strcmp(dir, "pref")) d = &ANGBAND_DIR_PREF;
-	if (!strcmp(dir, "user")) d = &ANGBAND_DIR_USER;
 	if (!strcmp(dir, "xtra")) d = &ANGBAND_DIR_XTRA;
+	if (!strcmp(dir, "user")) d = &ANGBAND_DIR_USER;
+	if (!strcmp(dir, "note")) d = &ANGBAND_DIR_NOTE;
+	if (!strcmp(dir, "cmov")) d = &ANGBAND_DIR_CMOV;
+#ifndef PRIVATE_USER_PATH
+	if (!strcmp(dir, "save")) d = &ANGBAND_DIR_SAVE;
+#else /* PRIVATE_USER_PATH */
+	if (
+#ifdef PRIVATE_USER_PATH_APEX
+	    !strcmp(dir, "apex") ||
+#endif
+	    !strcmp(dir, "user") ||
+	    !strcmp(dir, "note") ||
+	    !strcmp(dir, "cmov"))
+	{
+		char user_path[1024];
+		/* copied from init_file_paths */
+		path_parse(user_path, 1024, PRIVATE_USER_PATH);
+		strcat(user_path, USER_PATH_VERSION);
+		strnfmt(buf, 1024, "%s%s%s", user_path, PATH_SEP, new_path);
+		string_free(*d);
+		*d = string_make(buf);
+	}
+#ifdef PRIVATE_USER_PATH_DATA
+	else if (!strcmp(dir, "data"))
+	{
+		module_reset_dir_aux(&ANGBAND_DIR_DATA, new_path);
+	}
+#endif
+	else if (!strcmp(dir, "save"))
+	{
+		module_reset_dir_aux(&ANGBAND_DIR_SAVE, new_path);
 
-	/* Build the new path */
-	strnfmt(buf, 1024, "%s%s%s%s%s", ANGBAND_DIR_MODULES, PATH_SEP, new_path, PATH_SEP, dir);
+		/* Tell the savefile code that we must not use setuid */
+		savefile_setuid = FALSE;
+	}
+	else
+#endif /* PRIVATE_USER_PATH */
+	{
+		/* Build the new path */
+		strnfmt(buf, 1024, "%s%s%s%s%s", ANGBAND_DIR_MODULES, PATH_SEP, new_path, PATH_SEP, dir);
 
-	string_free(*d);
-	*d = string_make(buf);
+		string_free(*d);
+		*d = string_make(buf);
+	}
 }
 
 static void dump_modules(int sel, int max)
@@ -92,6 +145,10 @@ static void activate_module()
 	call_lua("get_module_info", "(s)", "d", "max_plev", &max_plev);
 	call_lua("get_module_info", "(s)", "d", "death_dungeon", &DUNGEON_DEATH);
 
+	call_lua("get_module_info", "(s)", "d", "random_artifact_weapon_chance", &RANDART_WEAPON);
+	call_lua("get_module_info", "(s)", "d", "random_artifact_armor_chance", &RANDART_ARMOR);
+	call_lua("get_module_info", "(s)", "d", "random_artifact_jewelry_chance", &RANDART_JEWEL);
+
 	call_lua("get_module_info", "(s,d)", "d", "version", 1, &VERSION_MAJOR);
 	call_lua("get_module_info", "(s,d)", "d", "version", 2, &VERSION_MINOR);
 	call_lua("get_module_info", "(s,d)", "d", "version", 3, &VERSION_PATCH);
@@ -123,8 +180,13 @@ bool select_module()
 
 	/* Init some lua */
 	init_lua();
-	tome_dofile_anywhere(ANGBAND_DIR_MODULES, "mods_aux.lua", TRUE);
-	tome_dofile_anywhere(ANGBAND_DIR_MODULES, "modules.lua", TRUE);
+
+	/* Some ports need to separate the module scripts from the installed mods,
+	   so we need to check for these in two different places */
+	if(!tome_dofile_anywhere(ANGBAND_DIR_CORE, "mods_aux.lua", FALSE))
+		tome_dofile_anywhere(ANGBAND_DIR_MODULES, "mods_aux.lua", TRUE);
+	if(!tome_dofile_anywhere(ANGBAND_DIR_CORE, "modules.lua", FALSE))
+		tome_dofile_anywhere(ANGBAND_DIR_MODULES, "modules.lua", TRUE);
 
 	/* Grab the savefiles */
 	call_lua("max_modules", "()", "d", &max);

@@ -3293,9 +3293,9 @@ static bool project_f(int who, int r, int y, int x, int dam, int typ)
 			if ((f_info[c_ptr->feat].flags1 & FF1_PERMANENT)) break;
 
 			if (((c_ptr->feat == FEAT_TREES) ||
-			                (c_ptr->feat == FEAT_SMALL_TREES) ||
-			                (f_info[c_ptr->feat].flags1 & FF1_FLOOR)) &&
-			                (rand_int(100) < 30))
+			     (c_ptr->feat == FEAT_SMALL_TREES) ||
+			     (f_info[c_ptr->feat].flags1 & FF1_FLOOR)) &&
+			    (rand_int(100) < 30))
 			{
 				/* Flow change */
 				if (c_ptr->feat == FEAT_TREES) p_ptr->update |= (PU_FLOW);
@@ -3303,7 +3303,8 @@ static bool project_f(int who, int r, int y, int x, int dam, int typ)
 				cave_set_feat(y, x, FEAT_ASH);
 
 				/* Silly thing to destroy trees when a yavanna worshipper */
-				inc_piety(GOD_YAVANNA, -50);
+				if (c_ptr->feat == FEAT_TREES || c_ptr->feat == FEAT_SMALL_TREES)
+					inc_piety(GOD_YAVANNA, -50);
 
 				/* Visibility change */
 				p_ptr->update |= (PU_VIEW | PU_MONSTERS | PU_MON_LITE);
@@ -4185,7 +4186,7 @@ static bool project_o(int who, int r, int y, int x, int dam, int typ)
 					int ego = raise_ego[rand_int(MAX_RAISE)];
 
 					if (place_monster_one(y, x, o_ptr->pval2, ego, FALSE, (!who) ? MSTATUS_PET : MSTATUS_ENEMY))
-						msg_print("A monster raises from the grave!");
+						msg_print("A monster rises from the grave!");
 					do_kill = TRUE;
 				}
 				break;
@@ -4213,7 +4214,7 @@ static bool project_o(int who, int r, int y, int x, int dam, int typ)
 					else name = "Nycadaemon";
 
 					if (place_monster_one(y, x, test_monster_name(name), 0, FALSE, (!who) ? MSTATUS_PET : MSTATUS_ENEMY))
-						msg_print("A demon emerges from the hell!");
+						msg_print("A demon emerges from Hell!");
 				}
 
 				do_kill = TRUE;
@@ -4515,6 +4516,7 @@ bool project_m(int who, int r, int y, int x, int dam, int typ)
 				get_angry = TRUE;
 			break;
 		case GF_DISP_LIVING:
+		case GF_UNBREATH:
 			if (!(r_ptr->flags3 & (RF3_UNDEAD)) &&
 			                !(r_ptr->flags3 & (RF3_NONLIVING)))
 				get_angry = TRUE;
@@ -9225,6 +9227,7 @@ void generate_spell(int plev)
 	int dice, sides, chance, mana, power;
 	bool destruc_gen = FALSE;
 	bool simple_gen = TRUE;
+	bool ball_desc = FALSE;
 
 	if (spell_num == MAX_SPELLS) return;
 
@@ -9280,6 +9283,7 @@ void generate_spell(int plev)
 		rspell->radius = dice;
 		rspell->dam_dice = sides;
 		rspell->dam_sides = 1;
+		ball_desc = TRUE;
 	}
 	else if (chance < 83)
 	{
@@ -9335,7 +9339,17 @@ void generate_spell(int plev)
 
 	/* Give the spell a name. */
 	name_spell(rspell);
-	sprintf(rspell->desc, "Damage: %dd%d, Power: %d", dice, sides, power);
+	if (ball_desc)
+	{
+		/* 30 character limit on the string! */
+		sprintf(rspell->desc, "Dam: %d, Rad: %d, Pow: %d",
+			sides, dice, power);
+	}
+	else
+	{
+		sprintf(rspell->desc, "Damage: %dd%d, Power: %d",
+			dice, sides, power);
+	}
 
 	spell_num++;
 }
@@ -9387,6 +9401,8 @@ s16b do_poly_monster(int y, int x)
 
 		/* "Kill" the "old" monster */
 		delete_monster_idx(old_m_idx);
+
+		p_ptr->redraw |= (PR_MAP);
 	}
 
 	/* Giga-Hack -- restore saved monster XXX XXX XXX */
