@@ -56,13 +56,14 @@ jobs:
 
           run_build gtk2
           cp tome dist/tome-gtk2
-          cp tome tome.gtk2            # respaldo para la imagen runtime
 
           run_build windows
           cp tometik.exe dist/tometik.exe
 
-          # La imagen runtime necesita el binario gtk2 como ./tome en la raíz.
-          cp tome.gtk2 tome
+          # (En 2.2.2 no se genera la imagen noVNC, así que no hace falta dejar
+          #  el binario gtk2 como ./tome en la raíz — eso solo lo usaba la
+          #  Dockerfile.runtime, y 'cp ... tome' fallaba: el contenedor corre
+          #  como root y deja /work/tome sin permiso de escritura para el runner.)
 
       - name: Empaquetar artefactos (Linux + Windows)
         run: bash docker/package-release.sh "${{ steps.ver.outputs.version }}"
