@@ -164,6 +164,7 @@ extern s32b turn;
 extern s32b old_turn;
 extern bool wizard;
 extern bool use_sound;
+extern bool use_music;
 extern bool use_graphics;
 extern bool use_bigtile;
 	/*

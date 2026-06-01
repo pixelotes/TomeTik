@@ -105,6 +105,11 @@
 #include <unistd.h>
 #include <dirent.h>
 
+#ifdef USE_SOUND
+# include <SDL.h>
+# include <SDL_mixer.h>
+#endif /* USE_SOUND */
+
 /* /me pffts Solaris */
 #ifndef NAME_MAX
 #define	NAME_MAX	_POSIX_NAME_MAX
@@ -4097,11 +4102,179 @@ static void iso_refresh_overlay(term_data *td)
 	iso_present(td, ox, oy);
 }
 
+
+#ifdef USE_SOUND
+
+/* --- TomeTik: audio (SDL2_mixer). Sonido por eventos (Sound.cfg) y música. --- */
+#define GTK_SND_MAX 12               /* samples por evento como mucho */
+static Mix_Chunk *snd_chunk[SOUND_MAX][GTK_SND_MAX];
+static int snd_count[SOUND_MAX];
+static bool sdl_audio_ready = FALSE; /* Mix_OpenAudio hecho */
+static bool snd_loaded = FALSE;      /* Sound.cfg cargado */
+static Mix_Music *cur_music = NULL;
+
+/* Carpeta lib/xtra/sound (ANGBAND_DIR_XTRA + "sound"). */
+static void gtk_sound_dir(char *buf, int len)
+{
+	path_build(buf, len, ANGBAND_DIR_XTRA, "sound");
+}
+
+/* Abre el dispositivo de audio (perezoso, solo al activar sonido/música). */
+static bool gtk_audio_open(void)
+{
+	if (sdl_audio_ready) return TRUE;
+
+	if (SDL_Init(SDL_INIT_AUDIO) < 0)
+	{
+		plog_fmt("SDL audio init: %s", SDL_GetError());
+		return FALSE;
+	}
+	if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 1024) < 0)
+	{
+		plog_fmt("Mix_OpenAudio: %s", Mix_GetError());
+		return FALSE;
+	}
+	Mix_AllocateChannels(16);
+	sdl_audio_ready = TRUE;
+	return TRUE;
+}
+
+/* Carga los samples de cada evento desde lib/xtra/sound/Sound.cfg (mismo formato
+ * que usa el GDI): "evento = a.wav b.wav ...". */
+static void gtk_sound_load(void)
+{
+	char dir[1024], path[1024], line[1024];
+	FILE *fp;
+
+	if (snd_loaded) return;
+	snd_loaded = TRUE;
+
+	gtk_sound_dir(dir, sizeof(dir));
+	path_build(path, sizeof(path), dir, "Sound.cfg");
+
+	fp = my_fopen(path, "r");
+	if (!fp) { plog_fmt("sonido: no pude abrir %s", path); return; }
+
+	while (fgets(line, sizeof(line), fp))
+	{
+		char *eq, *name, *p, *tok;
+		int idx = -1, i;
+
+		/* saltar comentarios / secciones / vacías */
+		p = line;
+		while (*p == ' ' || *p == '\t') p++;
+		if (*p == '#' || *p == '[' || *p == '\n' || *p == '\r' || *p == '\0') continue;
+
+		eq = strchr(p, '=');
+		if (!eq) continue;
+		*eq = '\0';
+
+		/* nombre del evento (sin espacios al final) */
+		name = p;
+		{ char *e = eq - 1; while (e > name && (*e == ' ' || *e == '\t')) *e-- = '\0'; }
+
+		/* índice del evento en angband_sound_name[] */
+		for (i = 1; i < SOUND_MAX; i++)
+			if (streq(name, angband_sound_name[i])) { idx = i; break; }
+		if (idx < 0) continue;
+
+		/* cargar cada wav listado */
+		tok = strtok(eq + 1, " \t\r\n");
+		while (tok && snd_count[idx] < GTK_SND_MAX)
+		{
+			char wpath[1024];
+			Mix_Chunk *c;
+			path_build(wpath, sizeof(wpath), dir, tok);
+			c = Mix_LoadWAV(wpath);
+			if (c) snd_chunk[idx][snd_count[idx]++] = c;
+			tok = strtok(NULL, " \t\r\n");
+		}
+	}
+	my_fclose(fp);
+}
+
+/* Reproduce un sample (aleatorio) del evento v, si hay sonido activo. */
+static void gtk_play_sound(int v)
+{
+	if (!use_sound || !sdl_audio_ready) return;
+	if (v <= 0 || v >= SOUND_MAX) return;
+	if (snd_count[v] <= 0) return;
+	Mix_PlayChannel(-1, snd_chunk[v][rand_int(snd_count[v])], 0);
+}
+
+/* Activa/desactiva el sonido (carga perezosa de samples al activar). */
+static void gtk_sound_enable(bool on)
+{
+	use_sound = on;
+	if (on)
+	{
+		if (!gtk_audio_open()) { use_sound = FALSE; return; }
+		gtk_sound_load();
+	}
+}
+
+/* Arranca/para la música. Busca el primer fichero en lib/xtra/music/
+ * (ogg/mp3/mod/it/xm/s3m/wav). Sin ficheros, es un no-op (aún no hay música). */
+static void gtk_music_update(void)
+{
+	char mdir[1024], mpath[1024];
+	DIR *d;
+	struct dirent *ent;
+	char found[256];
+
+	if (!use_music)
+	{
+		if (cur_music) { Mix_HaltMusic(); Mix_FreeMusic(cur_music); cur_music = NULL; }
+		return;
+	}
+
+	if (!gtk_audio_open()) { use_music = FALSE; return; }
+	if (cur_music) return;   /* ya sonando */
+
+	path_build(mdir, sizeof(mdir), ANGBAND_DIR_XTRA, "music");
+	found[0] = '\0';
+	d = opendir(mdir);
+	if (d)
+	{
+		while ((ent = readdir(d)))
+		{
+			cptr e = strrchr(ent->d_name, '.');
+			if (!e) continue;
+			if (!strcmp(e, ".ogg") || !strcmp(e, ".mp3") || !strcmp(e, ".mod") ||
+			    !strcmp(e, ".it") || !strcmp(e, ".xm") || !strcmp(e, ".s3m") ||
+			    !strcmp(e, ".wav"))
+			{
+				strnfmt(found, sizeof(found), "%s", ent->d_name);
+				break;
+			}
+		}
+		closedir(d);
+	}
+
+	if (!found[0]) return;   /* todavía no hay música instalada */
+
+	path_build(mpath, sizeof(mpath), mdir, found);
+	cur_music = Mix_LoadMUS(mpath);
+	if (cur_music) Mix_PlayMusic(cur_music, -1);   /* loop infinito */
+}
+
+#endif /* USE_SOUND */
+
+
 static errr Term_xtra_gtk(int n, int v)
 {
 	/* Handle a subset of the legal requests */
 	switch (n)
 	{
+#ifdef USE_SOUND
+		/* Play a sound (engine ya filtró por use_sound en sound()) */
+	case TERM_XTRA_SOUND:
+		{
+			gtk_play_sound(v);
+			return (0);
+		}
+#endif /* USE_SOUND */
+
 		/* Make a noise */
 	case TERM_XTRA_NOISE:
 		{
@@ -5608,6 +5781,27 @@ static void action_event_handler(
 }
 
 
+/* TomeTik: menú Audio -- activar/desactivar sonido y música (CheckItems). */
+static void toggle_sound_event_handler(
+        GtkButton *was_clicked,
+        gpointer user_data)
+{
+#ifdef USE_SOUND
+	gtk_sound_enable(!use_sound);
+#endif
+}
+
+static void toggle_music_event_handler(
+        GtkButton *was_clicked,
+        gpointer user_data)
+{
+#ifdef USE_SOUND
+	use_music = !use_music;
+	gtk_music_update();
+#endif
+}
+
+
 /*
  * Neater menu code with GtkItemFactory.
  *
@@ -5678,6 +5872,11 @@ static GtkItemFactoryEntry main_menu_items[] =
 
 	{ "/Action/sep1", NULL, NULL, 0, "<Separator>" },
 	{ "/Action/Take note (:)", NULL, action_event_handler, ':', NULL },
+
+	/* "Audio" menu (TomeTik): sonido y música, desactivados por defecto. */
+	{ "/Audio", NULL, NULL, 0, "<Branch>" },
+	{ "/Audio/Sound", NULL, toggle_sound_event_handler, 0, "<CheckItem>" },
+	{ "/Audio/Music", NULL, toggle_music_event_handler, 0, "<CheckItem>" },
 
 	/* "Terms" menu */
 	{ "/Terms", NULL,

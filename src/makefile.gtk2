@@ -158,11 +158,11 @@ CC = gcc
 # Mismas notas que makefile.std: -std=gnu89 -fcommon -DL64. USE_GRAPHICS activa
 # el código de tiles. gtk+-2.0 vía pkg-config (libgtk2.0-dev en la imagen).
 COPTS = -O1 -pipe -g -std=gnu89 -fcommon -fno-strict-aliasing -w
-INCLUDES = -I/usr/include $(shell pkg-config --cflags gtk+-2.0)
+INCLUDES = -I/usr/include $(shell pkg-config --cflags gtk+-2.0) $(shell sdl2-config --cflags)
 DEFINES = -DUSE_GTK2 -DUSE_X11 -DUSE_GCU -DUSE_GRAPHICS -DL64 \
 	-DUSE_EGO_GRAPHICS -DUSE_TRANSPARENCY -DSUPPORT_GAMMA \
-	-DUSE_PRECISE_CMOVIE -DUSE_UNIXSOCK
-LIBS = $(shell pkg-config --libs gtk+-2.0) -lX11 -lncurses
+	-DUSE_PRECISE_CMOVIE -DUSE_UNIXSOCK -DUSE_SOUND
+LIBS = $(shell pkg-config --libs gtk+-2.0) $(shell sdl2-config --libs) -lSDL2_mixer -lX11 -lncurses
 
 
 
