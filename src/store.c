@@ -327,6 +327,13 @@ static void purchase_analyze(s32b price, s32b value, s32b guess)
 static int cur_store_num = 7;
 
 /*
+ * TomeTik: TRUE mientras se muestra la pantalla de tienda. El frontend iso
+ * (main-gtk2.c) lo consulta para NO repintar la escena isométrica encima del
+ * texto de la tienda. Es específico de tienda, así que nunca afecta al town.
+ */
+bool iso_in_store = FALSE;
+
+/*
  * We store the current "store page" here so everyone can access it
  */
 static int store_top = 0;
@@ -1722,6 +1729,15 @@ void display_store(void)
 
 	/* Draw in the inventory */
 	display_inventory();
+
+	/* TomeTik: forzar el repintado de la pantalla de tienda AHORA. Si no, el
+	 * dibujado queda pendiente hasta el siguiente Term_fresh(), que ocurre
+	 * dentro de request_command()->inkey()... pero inkey() NO hace fresh si ya
+	 * hay una tecla en cola (typeahead, o la propia tecla que te metió en la
+	 * entrada). De ahí que ~2 de cada 10 veces la UI de la tienda no apareciera
+	 * hasta pulsar otra tecla. Más notorio en iso (la ventana mostraba la escena
+	 * iso anterior). */
+	Term_fresh();
 }
 
 
@@ -3854,6 +3870,7 @@ void do_cmd_store(void)
 
 	/* Hack -- Character is in "icky" mode */
 	character_icky = TRUE;
+	iso_in_store = TRUE;
 
 
 	/* No command argument */
@@ -3944,6 +3961,7 @@ void do_cmd_store(void)
 
 		/* Hack -- Character is still in "icky" mode */
 		character_icky = TRUE;
+	iso_in_store = TRUE;
 
 		/* Notice stuff */
 		notice_stuff();
@@ -4046,6 +4064,7 @@ void do_cmd_store(void)
 
 	/* Hack -- Character is no longer in "icky" mode */
 	character_icky = FALSE;
+	iso_in_store = FALSE;
 
 
 	/* Hack -- Cancel automatic command */
@@ -4336,6 +4355,7 @@ void do_cmd_home_trump(void)
 
 	/* Hack -- Character is in "icky" mode */
 	character_icky = TRUE;
+	iso_in_store = TRUE;
 
 
 	/* No command argument */
@@ -4441,6 +4461,7 @@ void do_cmd_home_trump(void)
 
 		/* Hack -- Character is still in "icky" mode */
 		character_icky = TRUE;
+	iso_in_store = TRUE;
 
 		/* Notice stuff */
 		notice_stuff();
@@ -4531,6 +4552,7 @@ void do_cmd_home_trump(void)
 
 	/* Hack -- Character is no longer in "icky" mode */
 	character_icky = FALSE;
+	iso_in_store = FALSE;
 
 
 	/* Hack -- Cancel automatic command */

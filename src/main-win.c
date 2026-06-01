@@ -197,6 +197,7 @@
 	 * End TomeTik 0.3
 	 */
 #define IDM_OPTIONS_SOUND		402
+#define IDM_AUDIO_MUSIC			405	/* TomeTik: toggle de música (menú Audio) */
 	/*
 	 * Start TomeTik 0.3
 	 */
@@ -287,6 +288,7 @@
  */
 #include <mmsystem.h>
 #include <commdlg.h>
+#include <commctrl.h>   /* TomeTik: tooltip de casilla (tracking tooltip) */
 
 /*
  * Include the support for loading bitmaps
@@ -3016,8 +3018,11 @@ static void setup_menus(void)
 	               MF_BYCOMMAND | MF_DISABLED | MF_GRAYED);
 	EnableMenuItem(hm, IDM_OPTIONS_BIGTILE,
 	               MF_BYCOMMAND | MF_DISABLED | MF_GRAYED);
+	/* TomeTik: sonido y música activables desde el menú Audio. */
 	EnableMenuItem(hm, IDM_OPTIONS_SOUND,
-	               MF_BYCOMMAND | MF_DISABLED | MF_GRAYED);
+	               MF_BYCOMMAND | MF_ENABLED);
+	EnableMenuItem(hm, IDM_AUDIO_MUSIC,
+	               MF_BYCOMMAND | MF_ENABLED);
 	EnableMenuItem(hm, IDM_OPTIONS_UNUSED,
 	               MF_BYCOMMAND | MF_DISABLED | MF_GRAYED);
 	EnableMenuItem(hm, IDM_OPTIONS_SAVER,
@@ -3038,6 +3043,8 @@ static void setup_menus(void)
 	              (arg_bigtile ? MF_CHECKED : MF_UNCHECKED));
 	CheckMenuItem(hm, IDM_OPTIONS_SOUND,
 	              (arg_sound ? MF_CHECKED : MF_UNCHECKED));
+	CheckMenuItem(hm, IDM_AUDIO_MUSIC,
+	              (use_music ? MF_CHECKED : MF_UNCHECKED));
 	CheckMenuItem(hm, IDM_OPTIONS_UNUSED,
 	              (0 ? MF_CHECKED : MF_UNCHECKED));
 	CheckMenuItem(hm, IDM_OPTIONS_SAVER,
@@ -3122,6 +3129,15 @@ static void process_menus(WORD wCmd)
 	term_data *td;
 
 	OPENFILENAME ofn;
+
+	/* TomeTik: menú "Action" -- el ID codifica la tecla del comando (2000+tecla).
+	 * Manda la tecla al term si el juego espera un comando (inkey_flag), igual
+	 * que el menú Action de GTK2/OmnibandTk. */
+	if ((wCmd >= 2000) && (wCmd < 2256))
+	{
+		if (character_generated && inkey_flag) Term_keypress(wCmd - 2000);
+		return;
+	}
 
 	/* Analyze */
 	switch (wCmd)
@@ -3728,6 +3744,13 @@ ofn.lStructSize = sizeof(OPENFILENAME);
 			break;
 		}
 
+		/* TomeTik: toggle de música (sin reproducción aún en GDI). */
+	case IDM_AUDIO_MUSIC:
+		{
+			use_music = !use_music;
+			break;
+		}
+
 	case IDM_OPTIONS_UNUSED:
 		{
 			/* Unused for now XXX XXX XXX */
@@ -3805,6 +3828,142 @@ ofn.lStructSize = sizeof(OPENFILENAME);
 			break;
 		}
 	}
+}
+
+
+
+/*
+ * TomeTik: tooltip de casilla al pasar el ratón por el mapa (frontend GDI).
+ *
+ * El texto lo genera el motor con describe_grid() -- el mismo "qué hay aquí"
+ * del comando look -- y se muestra con un "tracking tooltip" nativo de Win32
+ * (comctl32) que sigue al cursor. Funciona con tiles 2D, ASCII y con bigtile o
+ * zoom (el inverso de panel_col_of()/panel_row_of()).
+ */
+static HWND hwndTooltip = NULL;       /* tracking tooltip (creado en caliente) */
+static int tip_cy = -1, tip_cx = -1;  /* última celda descrita */
+static bool tip_track_armed = FALSE;  /* TrackMouseEvent (WM_MOUSELEAVE) armado */
+static char tip_pending[256];         /* texto a mostrar cuando salte el timer */
+static int tip_px = 0, tip_py = 0;    /* posición (pantalla) donde mostrarlo */
+#define TIP_TIMER_ID  1001            /* id del SetTimer del retardo del tooltip */
+#define TIP_DELAY_MS  250             /* espera antes de mostrar el tooltip */
+
+/* Inverso de panel_col_of()/panel_row_of(): píxel cliente -> celda del cave.
+ * Devuelve FALSE si el píxel cae fuera del área de mapa (bordes / sidebar). */
+static bool win_map_pixel_to_cave(term_data *td, int px, int py, int *cy, int *cx)
+{
+	int term_col, term_row, col, row;
+
+	if (px < (int)td->size_ow1 || py < (int)td->size_oh1) return FALSE;
+
+	term_col = (px - td->size_ow1) / td->tile_wid;
+	term_row = (py - td->size_oh1) / td->tile_hgt;
+
+	col = term_col - COL_MAP;
+	row = term_row - ROW_MAP;
+	if (col < 0 || row < 0) return FALSE;
+
+	if (use_bigtile) col /= 2;
+	if (use_zoom) { col /= arg_zoom; row /= arg_zoom; }
+
+	*cx = col + panel_col_min;
+	*cy = row + panel_row_min;
+	return TRUE;
+}
+
+/* Crea el tooltip la primera vez, asociado a la ventana del mapa. */
+static void win_tooltip_ensure(HWND hwndParent)
+{
+	TOOLINFO ti;
+
+	if (hwndTooltip) return;
+
+	InitCommonControls();
+
+	hwndTooltip = CreateWindowEx(
+	        WS_EX_TOPMOST, TOOLTIPS_CLASS, NULL,
+	        WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,
+	        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+	        hwndParent, NULL, hInstance, NULL);
+	if (!hwndTooltip) return;
+
+	memset(&ti, 0, sizeof(ti));
+	ti.cbSize = sizeof(ti);
+	ti.uFlags = TTF_TRACK | TTF_ABSOLUTE;
+	ti.hwnd = hwndParent;
+	ti.uId = 1;
+	ti.lpszText = (LPSTR)"";
+	SendMessage(hwndTooltip, TTM_ADDTOOL, 0, (LPARAM)&ti);
+
+	/* Un ancho máximo > 0 habilita el tooltip multilínea (respeta \r\n). */
+	SendMessage(hwndTooltip, TTM_SETMAXTIPWIDTH, 0, (LPARAM)400);
+}
+
+/* Muestra/actualiza el tooltip con 'text' en la posición de pantalla (sx,sy).
+ * describe_grid() usa '\n' como separador; Win32 quiere '\r\n'. */
+static void win_tooltip_show(HWND hwndParent, cptr text, int sx, int sy)
+{
+	TOOLINFO ti;
+	char ml[512];
+	int i = 0, j = 0;
+
+	win_tooltip_ensure(hwndParent);
+	if (!hwndTooltip) return;
+
+	/* Reescribir \n -> \r\n para los saltos de línea del tooltip nativo. */
+	while (text[i] && (j < (int)sizeof(ml) - 2))
+	{
+		if (text[i] == '\n') { ml[j++] = '\r'; ml[j++] = '\n'; }
+		else ml[j++] = text[i];
+		i++;
+	}
+	ml[j] = '\0';
+
+	memset(&ti, 0, sizeof(ti));
+	ti.cbSize = sizeof(ti);
+	ti.hwnd = hwndParent;
+	ti.uId = 1;
+	ti.lpszText = (LPSTR)ml;
+	SendMessage(hwndTooltip, TTM_UPDATETIPTEXT, 0, (LPARAM)&ti);
+	SendMessage(hwndTooltip, TTM_TRACKPOSITION, 0,
+	            (LPARAM)MAKELONG(sx + 14, sy + 14));
+	SendMessage(hwndTooltip, TTM_TRACKACTIVATE, (WPARAM)TRUE, (LPARAM)&ti);
+}
+
+/* Programa el tooltip para 'text' en (sx,sy) tras TIP_DELAY_MS (no instantáneo).
+ * Oculta el que pudiera estar visible: reaparecerá con el texto nuevo. */
+static void win_tooltip_arm(HWND hwndParent, cptr text, int sx, int sy)
+{
+	if (hwndTooltip)
+	{
+		TOOLINFO ti;
+		memset(&ti, 0, sizeof(ti));
+		ti.cbSize = sizeof(ti);
+		ti.hwnd = hwndParent;
+		ti.uId = 1;
+		SendMessage(hwndTooltip, TTM_TRACKACTIVATE, (WPARAM)FALSE, (LPARAM)&ti);
+	}
+
+	lstrcpyn(tip_pending, text, sizeof(tip_pending));
+	tip_px = sx;
+	tip_py = sy;
+	SetTimer(hwndParent, TIP_TIMER_ID, TIP_DELAY_MS, NULL);
+}
+
+/* Oculta el tooltip, cancela el retardo pendiente y olvida la celda mostrada. */
+static void win_tooltip_hide(HWND hwndParent)
+{
+	TOOLINFO ti;
+
+	tip_cy = tip_cx = -1;
+	KillTimer(hwndParent, TIP_TIMER_ID);
+	if (!hwndTooltip) return;
+
+	memset(&ti, 0, sizeof(ti));
+	ti.cbSize = sizeof(ti);
+	ti.hwnd = hwndParent;
+	ti.uId = 1;
+	SendMessage(hwndTooltip, TTM_TRACKACTIVATE, (WPARAM)FALSE, (LPARAM)&ti);
 }
 
 
@@ -4070,6 +4229,107 @@ LRESULT FAR PASCAL AngbandWndProc(HWND hWnd, UINT uMsg,
 			ReleaseDC(hWnd, hdc);
 
 			return 0;
+		}
+
+		/* TomeTik: clic izquierdo en el mapa -> "go to" (click-to-walk) */
+	case WM_LBUTTONDOWN:
+		{
+			int cx = 0, cy = 0;
+			int px = (int)(short)LOWORD(lParam);
+			int py = (int)(short)HIWORD(lParam);
+
+			/* Solo con partida en curso y fuera de menús/tiendas. */
+			if (!td || !character_generated || character_icky) break;
+
+			if (!win_map_pixel_to_cave(td, px, py, &cy, &cx)) break;
+
+			/* Clic: atacar/intercambiar si hay monstruo adyacente, o viajar. El
+			 * ESCAPE desbloquea el inkey() y el bucle de turnos lo ejecuta. */
+			if (do_cmd_click(cy, cx))
+			{
+				win_tooltip_hide(hWnd);
+				Term_keypress(ESCAPE);
+			}
+			break;
+		}
+
+		/* TomeTik: tooltip de casilla al pasar el ratón por el mapa */
+	case WM_MOUSEMOVE:
+		{
+			int cx = 0, cy = 0;
+			char buf[256];
+			POINT pt;
+
+			/* Solo con una partida en curso */
+			if (!td || !character_generated)
+			{
+				win_tooltip_hide(hWnd);
+				break;
+			}
+
+			pt.x = (int)(short)LOWORD(lParam);
+			pt.y = (int)(short)HIWORD(lParam);
+
+			if (!win_map_pixel_to_cave(td, pt.x, pt.y, &cy, &cx))
+			{
+				win_tooltip_hide(hWnd);
+				break;
+			}
+
+			/* Pedir que nos avisen cuando el ratón salga de la ventana */
+			if (!tip_track_armed)
+			{
+				TRACKMOUSEEVENT tme;
+				tme.cbSize = sizeof(tme);
+				tme.dwFlags = TME_LEAVE;
+				tme.hwndTrack = hWnd;
+				tme.dwHoverTime = 0;
+				TrackMouseEvent(&tme);
+				tip_track_armed = TRUE;
+			}
+
+			/* Pasar a coordenadas de pantalla para el tooltip */
+			ClientToScreen(hWnd, &pt);
+
+			/* Misma celda: solo reposicionar */
+			if (cy == tip_cy && cx == tip_cx)
+			{
+				if (hwndTooltip)
+					SendMessage(hwndTooltip, TTM_TRACKPOSITION, 0,
+					            (LPARAM)MAKELONG(pt.x + 14, pt.y + 14));
+				break;
+			}
+
+			/* Texto del motor (vacío => nada que mostrar) */
+			describe_grid(cy, cx, buf);
+			if (buf[0] == '\0')
+			{
+				win_tooltip_hide(hWnd);
+				break;
+			}
+
+			tip_cy = cy;
+			tip_cx = cx;
+			win_tooltip_arm(hWnd, buf, pt.x, pt.y);
+			break;
+		}
+
+	case WM_TIMER:
+		{
+			if (wParam == TIP_TIMER_ID)
+			{
+				KillTimer(hWnd, TIP_TIMER_ID);
+				win_tooltip_show(hWnd, tip_pending, tip_px, tip_py);
+				return 0;
+			}
+			break;
+		}
+
+		case WM_MOUSELEAVE:
+		{
+			tip_track_armed = FALSE;
+			win_tooltip_hide(hWnd);
+			break;
 		}
 
 	case WM_ACTIVATE:

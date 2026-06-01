@@ -5233,8 +5233,11 @@ static void show_info(void)
 		/* Return means "show on screen" */
 		if (!out_val[0]) break;
 
-		/* Save screen */
-		character_icky = TRUE;
+		/* Save screen (nest the "icky" depth: close_game() already set it,
+		 * so use ++/-- instead of =TRUE/=FALSE to avoid clobbering it. In iso
+		 * mode a stray character_icky=FALSE here would let the isometric scene
+		 * repaint over the post-death character sheet and high-score screen). */
+		character_icky++;
 		Term_save();
 
 		/* Dump a character file */
@@ -5242,7 +5245,7 @@ static void show_info(void)
 
 		/* Load screen */
 		Term_load();
-		character_icky = FALSE;
+		character_icky--;
 	}
 
 

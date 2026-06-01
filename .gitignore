@@ -19,6 +19,14 @@ lib/apex/*.raw
 lib/bone/*
 lib/user/*.atm
 
+# Tiles fuente de Dungeon Odyssey (~3000 PNGs): solo se commitea el sheet
+# ensamblado lib/xtra/iso/do_extra.png (ver tools/build_do_extra.py)
+dungeonodyssey/
+
+# Informe generado por la auditoría de cobertura iso (TOMETIK_ISO_AUDIT)
+lib/user/iso_coverage.txt
+
 # Varios
 *.bak
 .DS_Store
+origsources/

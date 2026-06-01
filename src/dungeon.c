@@ -4508,6 +4508,13 @@ static void process_command(void)
 			break;
 		}
 
+		/* Auto-explore (TomeTik) */
+	case KTRL('E'):
+		{
+			do_cmd_explore();
+			break;
+		}
+
 		/* Show previous message */
 	case KTRL('O'):
 		{
@@ -4788,7 +4795,7 @@ void process_player(void)
 	if (!avoid_abort)
 	{
 		/* Check for "player abort" (semi-efficiently for resting) */
-		if (running || command_rep || (resting && !(resting & 0x0F)))
+		if (running || travelling || exploring || command_rep || (resting && !(resting & 0x0F)))
 		{
 			/* Do not wait */
 			inkey_scan = TRUE;
@@ -4930,6 +4937,25 @@ void process_player(void)
 			 * Eru and do the opposite for the other deities -- pelpel
 			 */
 			/* p_ptr->did_nothing = TRUE; */
+		}
+
+		/* Auto-travelling (click-to-walk / one leg of auto-explore) */
+		else if (travelling)
+		{
+			/* Take a step along the route */
+			travel_step();
+		}
+
+		/* Auto-exploring: pick the next leg (then the travel branch walks it) */
+		else if (exploring)
+		{
+			explore_step();
+		}
+
+		/* One-shot move/attack queued by a mouse click on an adjacent monster */
+		else if (click_dir)
+		{
+			click_act_step();
 		}
 
 		/* Repeated command */
@@ -5201,6 +5227,13 @@ static void dungeon(void)
 
 	/* Disturb */
 	disturb(1, 0);
+
+	/* TomeTik: en SUPERFICIE (pueblo / exterior local) la visión es total: al
+	 * entrar al nivel lo iluminamos y memorizamos entero (como de día), en vez
+	 * de depender del pequeño radio de antorcha. En mazmorra se conserva el FOV
+	 * normal (radio de luz). No aplica al mapa-mundo (wild_mode), que ya tiene
+	 * su propia gestión de "conocido". */
+	if (!dun_level && !p_ptr->wild_mode) wiz_lite();
 
 	/* Track maximum player level */
 	if (p_ptr->max_plv < p_ptr->lev)

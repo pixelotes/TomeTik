@@ -117,6 +117,9 @@ bool alive; 				/* True if game is running */
 bool death; 				/* True if player has died */
 
 s16b running; 			/* Current counter for running, if any */
+s16b travelling;		/* Steps left while auto-travelling (click-to-walk), or 0 */
+s16b click_dir;			/* One-shot move/attack direction queued by a mouse click, or 0 */
+s16b exploring;			/* TRUE while auto-exploring (drives travel legs), or 0 */
 s16b resting; 			/* Current counter for resting, if any */
 
 s16b cur_hgt; 			/* Current dungeon height */
@@ -133,6 +136,7 @@ s32b old_turn; 			/* Turn when level began (feelings) */
 bool wizard; 			/* Is the player currently in Wizard mode? */
 
 bool use_sound; 			/* The "sound" mode is enabled */
+bool use_music; 			/* TomeTik: background music enabled (off by default) */
 bool use_graphics; 		/* The "graphics" mode is enabled */
 bool use_bigtile = FALSE;
 	/*

@@ -4668,6 +4668,672 @@ void run_step(int dir)
 
 
 /*
+ * Auto-travel ("click to walk"): walk the player along a precomputed A* path,
+ * one step per game turn, until the goal is reached or something interrupts.
+ *
+ * This is the shared engine half of the mouse "go to" feature and the planned
+ * base for auto-explore: a frontend (or the explorer) only has to pick a goal
+ * grid and call travel_to(); the per-turn stepping, energy use and interruption
+ * are handled here, mirroring how run_step()/running work.
+ *
+ * The current route and our position along it.
+ */
+static path_result *travel_route = NULL;
+static int travel_idx = 0;
+static int travel_stuck = 0;   /* pasos seguidos sin movernos (abrir puerta atrancada) */
+
+/* Pause (ms) after each auto-walked step (travel / auto-explore) so the
+ * movement is watchable rather than instantaneous. */
+#define TRAVEL_STEP_DELAY 150
+#define TRAVEL_STUCK_MAX  12   /* si no avanzamos en N intentos, abandona el tramo */
+
+/* TomeTik: ¿hay algún monstruo NO aliado a la vista? (para no autoexplorar con
+ * enemigos delante / parar si aparece uno). */
+static bool monster_threat_visible(void)
+{
+	int i;
+	for (i = 1; i < m_max; i++)
+	{
+		monster_type *m_ptr = &m_list[i];
+		if (!m_ptr->r_idx) continue;            /* hueco libre */
+		if (!m_ptr->ml) continue;               /* no visible */
+		if (m_ptr->status >= MSTATUS_FRIEND) continue;  /* aliado/mascota */
+		return (TRUE);
+	}
+	return (FALSE);
+}
+
+/*
+ * Per-level "ever seen" bitmap.
+ *
+ * ToME only memorizes (CAVE_MARK) walls/doors and -- with view_perma_grids --
+ * lit-room floors; a torch-lit corridor floor is CAVE_SEEN while you stand on
+ * it but loses both flags once you leave. So CAVE_MARK alone can't tell "floor
+ * I have walked" from "floor I have never seen", which would make both travel
+ * (can't path back down a dark corridor) and auto-explore (oscillates over
+ * already-seen floor) misbehave.
+ *
+ * We therefore accumulate our own knowledge: any grid that is currently
+ * memorized or in view is recorded as "seen" and stays so for the rest of the
+ * level. This is the basis for BOTH walkability (can step onto seen floor) and
+ * the explore frontier (a seen grid next to an unseen one). The map is reset
+ * per level using old_turn (the turn the level began) as a cheap stamp.
+ */
+static byte *explore_seen = NULL;
+static int explore_seen_n = 0;
+static s32b explore_seen_stamp = -1;
+static long explore_seen_count = 0;   /* nº de celdas vistas (para medir progreso) */
+
+/* Anti-oscilación: metas (fronteras) que ya intentamos y NO aportaron celdas
+ * nuevas; no se vuelven a elegir (evita ir y venir entre fronteras "muertas"). */
+static byte *explore_bad = NULL;
+static int explore_goal_y = -1, explore_goal_x = -1;
+static long explore_goal_count = -1;  /* celdas vistas cuando fijamos la meta */
+static bool explore_goal_is_gold = FALSE; /* la meta actual es un montón de oro */
+
+/* Radio (en pasos) dentro del cual el autoexplore se DESVÍA a recoger oro que ya
+ * ha visto. El oro más lejos se ignora (no lo perseguimos por todo el mapa).
+ * Configurable; 0 lo desactiva. */
+int explore_gold_radius = 5;
+
+/* (Re)allocate for the current level if needed, then fold in everything that is
+ * memorized or currently visible. Cheap (one pass); call before pathing. */
+static void explore_sync_seen(void)
+{
+	int n = cur_hgt * cur_wid;
+	int y, x;
+
+	if ((explore_seen == NULL) || (explore_seen_n != n) ||
+	                (explore_seen_stamp != old_turn))
+	{
+		if (explore_seen) C_FREE(explore_seen, explore_seen_n, byte);
+		if (explore_bad) C_FREE(explore_bad, explore_seen_n, byte);
+		explore_seen_n = n;
+		C_MAKE(explore_seen, n, byte);
+		C_MAKE(explore_bad, n, byte);
+		explore_seen_stamp = old_turn;
+		explore_seen_count = 0;
+		explore_goal_y = explore_goal_x = -1;
+		explore_goal_count = -1;
+	}
+
+	explore_seen_count = 0;
+	for (y = 0; y < cur_hgt; y++)
+	{
+		for (x = 0; x < cur_wid; x++)
+		{
+			if (cave[y][x].info & (CAVE_MARK | CAVE_SEEN))
+				explore_seen[y * cur_wid + x] = 1;
+			if (explore_seen[y * cur_wid + x]) explore_seen_count++;
+		}
+	}
+}
+
+/* Have we ever seen this grid (this level)? Live flags count even if a sync
+ * hasn't folded them in yet. */
+static bool explore_is_seen(int y, int x)
+{
+	if (cave[y][x].info & (CAVE_MARK | CAVE_SEEN)) return (TRUE);
+	if (explore_seen && (explore_seen[y * cur_wid + x])) return (TRUE);
+	return (FALSE);
+}
+
+/* ¿Hay oro (ya visto) en esta celda? Para que el autoexplore lo recoja si está
+ * cerca (ver explore_gold_radius). */
+static bool cell_has_gold(int y, int x)
+{
+	s16b this_o_idx, next_o_idx;
+
+	for (this_o_idx = cave[y][x].o_idx; this_o_idx; this_o_idx = next_o_idx)
+	{
+		object_type *o_ptr = &o_list[this_o_idx];
+		next_o_idx = o_ptr->next_o_idx;
+		if (o_ptr->marked && (o_ptr->tval == TV_GOLD)) return (TRUE);
+	}
+	return (FALSE);
+}
+
+/*
+ * Walkability for the travel A*: a grid may be entered iff we have seen it (so
+ * we know it is there) and it is a floor-like feature -- no walls, closed doors
+ * or never-seen tiles. Monsters are ignored here (the path may cross a
+ * monster's grid); the stepping code stops short instead of bumping them.
+ */
+static bool travel_walkable_hook(int y, int x, void *user)
+{
+	int f;
+	(void)user;
+
+	if (!explore_is_seen(y, x)) return (FALSE);
+
+	/* Suelo transitable. */
+	if (cave_floor_bold(y, x)) return (TRUE);
+
+	/* Puertas cerradas/atrancadas: con easy_open (ON por defecto) el juego las
+	 * abre al andar contra ellas, así que las ruteamos como transitables. */
+	f = cave[y][x].feat;
+	if (easy_open && (f >= FEAT_DOOR_HEAD) && (f <= FEAT_DOOR_TAIL)) return (TRUE);
+
+	return (FALSE);
+}
+
+/*
+ * Silent teardown of the travel state. Used internally (arrival, restart) where
+ * we either say nothing or print our own, more specific, message.
+ */
+static void travel_clear(void)
+{
+	if (travel_route)
+	{
+		path_free(travel_route);
+		travel_route = NULL;
+	}
+	travel_idx = 0;
+	travel_stuck = 0;
+
+	if (travelling)
+	{
+		travelling = 0;
+
+		/* Mirror running's cleanup. */
+		p_ptr->update |= (PU_TORCH);
+		p_ptr->redraw |= (PR_STATE);
+	}
+}
+
+/*
+ * Stop auto-travelling. Called from disturb(), so it fires on ANY disturbance
+ * (a monster comes into view, damage, a key press, ...). When that interrupts
+ * an in-progress trip we report it, since otherwise the character would just
+ * halt mid-path for no visible reason. Safe to call when not travelling.
+ */
+void travel_cancel(void)
+{
+	bool interrupted = (travelling != 0);
+	bool was_exploring = (exploring != 0);
+
+	travel_clear();
+
+	/* Durante autoexplore NO avisamos aquí: un tramo se corta a menudo por algo
+	 * benigno (recoger oro/objeto) y explore_step re-planifica y sigue solo. Los
+	 * mensajes de parada real (monstruo / "Done") los pone explore_step. */
+	if (interrupted && !was_exploring)
+		msg_print("You stop travelling.");
+}
+
+/*
+ * Hard stop from inside travel_step(): end BOTH travel and any auto-explore
+ * (so we don't immediately re-pick a goal), then optionally report why.
+ */
+static void travel_abort(cptr msg)
+{
+	if (exploring)
+	{
+		exploring = 0;
+		p_ptr->redraw |= (PR_STATE);
+	}
+	travel_clear();
+	if (msg) msg_print(msg);
+}
+
+/*
+ * Plan and arm a travel route to (gy, gx). Pure mechanics: no disturb(), no
+ * messages, no state cancellation -- callers (travel_to for the mouse, and the
+ * auto-explorer) wrap it with their own policy. Returns TRUE if a route of at
+ * least one step was armed.
+ */
+static bool travel_plan(int gy, int gx)
+{
+	path_result *route;
+	int sy = p_ptr->py;
+	int sx = p_ptr->px;
+
+	if (!in_bounds2(gy, gx)) return (FALSE);
+	if ((gy == sy) && (gx == sx)) return (FALSE);
+
+	/* Goal must be a tile we could actually reach (walkable, known/seen). */
+	if (!travel_walkable_hook(gy, gx, NULL)) return (FALSE);
+
+	/* Path over cave[][] without copying it. Allow diagonals to cut corners,
+	 * matching how the player can actually move (otherwise paths through
+	 * corridors come out as orthogonal staircases). */
+	route = astar_find_path_cb(cur_hgt, cur_wid,
+	                           travel_walkable_hook, NULL,
+	                           sy, sx, gy, gx, ASTAR_8DIR_CUT);
+
+	/* steps[0] is the player's own tile, so a real path has length >= 2. */
+	if (!route || (route->length < 2))
+	{
+		path_free(route);
+		return (FALSE);
+	}
+
+	travel_route = route;
+	travel_idx = 1;        /* next tile to step onto (steps[0] is us) */
+	travelling = 1;        /* active flag; progress is tracked by travel_idx */
+
+	return (TRUE);
+}
+
+/*
+ * Begin auto-travelling to grid (gy, gx). Returns TRUE if a path was found and
+ * travel started, FALSE otherwise (no path, goal not walkable, can't travel).
+ */
+bool travel_to(int gy, int gx)
+{
+	/* Drop any previous route silently (re-clicking a new goal shouldn't say
+	 * "you stop travelling"), then cancel running/resting/repeat. */
+	travel_clear();
+	disturb(0, 0);
+
+	/* States where precise auto-walking makes no sense. */
+	if (p_ptr->confused || p_ptr->image || p_ptr->immovable) return (FALSE);
+
+	/* Refresh our "seen" knowledge before pathing. */
+	explore_sync_seen();
+
+	/* Clicking a wall / off-map / our own tile: nothing to do, quietly. */
+	if (!in_bounds2(gy, gx) || ((gy == p_ptr->py) && (gx == p_ptr->px))) return (FALSE);
+	if (!travel_walkable_hook(gy, gx, NULL)) return (FALSE);
+
+	/* Walkable but unreachable -> say so. */
+	if (!travel_plan(gy, gx))
+	{
+		msg_print("You can't find a path to there.");
+		return (FALSE);
+	}
+
+	return (TRUE);
+}
+
+/*
+ * Take one travel step. Called from process_player()'s energy loop while
+ * travelling, exactly where running calls run_step(). Stops on arrival or if
+ * the world changed under the route (monster in the way, terrain altered),
+ * reporting the reason.
+ */
+void travel_step(void)
+{
+	int ny, nx, dir, d;
+	int oy, ox;
+
+	/* Nothing to do / route consumed. */
+	if (!travel_route || (travel_idx >= travel_route->length))
+	{
+		travel_clear();
+		return;
+	}
+
+	/* Confusion would scramble the chosen direction. */
+	if (p_ptr->confused)
+	{
+		travel_abort("You are too confused to travel.");
+		return;
+	}
+
+	ny = travel_route->steps[travel_idx].y;
+	nx = travel_route->steps[travel_idx].x;
+
+	/* A monster stepped into our path: stop short instead of bumping it. */
+	if (cave[ny][nx].m_idx)
+	{
+		travel_abort("There is a monster in your way.");
+		return;
+	}
+
+	/* The next tile is no longer traversable (suelo o puerta conocidos). */
+	if (!travel_walkable_hook(ny, nx, NULL))
+	{
+		travel_abort("Your way is blocked.");
+		return;
+	}
+
+	/* Direction from the player to the next tile (also verifies adjacency). */
+	dir = 0;
+	for (d = 1; d <= 9; d++)
+	{
+		if (d == 5) continue;
+		if ((p_ptr->py + ddy[d] == ny) && (p_ptr->px + ddx[d] == nx))
+		{
+			dir = d;
+			break;
+		}
+	}
+	if (!dir)
+	{
+		travel_abort(NULL);
+		return;
+	}
+
+	/* Take the step: one game turn (monsters act in between). While auto-
+	 * exploring we always grab items in passing; plain travel honours the
+	 * player's always_pickup option. */
+	oy = p_ptr->py;
+	ox = p_ptr->px;
+	energy_use = 100;
+	move_player_aux(dir, (exploring ? TRUE : always_pickup), 1, TRUE);
+
+	/* Animate: draw the new position and pause briefly, so travelling and
+	 * auto-explore are watchable instead of teleport-fast. */
+	handle_stuff();
+	Term_fresh();
+	Term_xtra(TERM_XTRA_DELAY, TRAVEL_STEP_DELAY);
+
+	/* move_player_aux may have already cancelled us via disturb() (a trap, a
+	 * newly seen monster, ...) and reported it -- respect that. */
+	if (!travelling) return;
+
+	/* No nos movimos: normalmente porque easy_open acaba de ABRIR una puerta
+	 * (cuesta un turno y no avanzas). Reintenta el paso el turno siguiente SIN
+	 * avanzar el índice; si tras varios intentos seguimos clavados (puerta
+	 * atrancada que no cede), abandona el tramo. */
+	if ((p_ptr->py == oy) && (p_ptr->px == ox))
+	{
+		if (++travel_stuck > TRAVEL_STUCK_MAX) travel_abort(NULL);
+		return;
+	}
+	travel_stuck = 0;
+
+	/* Auto-explore: stop and announce when we reach something notable, so the
+	 * player can decide (DCSS-style). Travel-to-click keeps going. */
+	if (exploring)
+	{
+		cptr note = NULL;
+
+		switch (cave[p_ptr->py][p_ptr->px].feat)
+		{
+		case FEAT_LESS:        note = "There is a staircase up here."; break;
+		case FEAT_MORE:        note = "There is a staircase down here."; break;
+		case FEAT_SHOP:        note = "There is a shop entrance here."; break;
+		case FEAT_QUEST_ENTER: note = "There is a quest entrance here."; break;
+		default:               break;
+		}
+
+		if (note)
+		{
+			travel_abort(note);
+			return;
+		}
+	}
+
+	/* Advance; announce arrival at the goal. During auto-explore each leg ends
+	 * silently (only the final "Done exploring." matters). */
+	travel_idx++;
+	if (travel_idx >= travel_route->length)
+	{
+		travel_clear();
+		if (!exploring) msg_print("You arrive.");
+	}
+}
+
+
+/*
+ * Mouse "do the right thing" on a click at grid (gy, gx):
+ *  - If it holds a VISIBLE monster ADJACENT to the player, queue a single
+ *    step toward it. move_player_aux() then does the natural thing: ATTACK a
+ *    hostile, or "push past" (swap) a friendly/pet.
+ *  - Otherwise, travel there (which stops adjacent to monsters as before).
+ *
+ * Returns TRUE if a command was queued/started (so the frontend can unblock
+ * inkey() with an ESCAPE), FALSE if nothing to do.
+ */
+bool do_cmd_click(int gy, int gx)
+{
+	if (in_bounds2(gy, gx) && cave[gy][gx].m_idx)
+	{
+		monster_type *m_ptr = &m_list[cave[gy][gx].m_idx];
+		int dy = gy - p_ptr->py;
+		int dx = gx - p_ptr->px;
+
+		/* Visible monster on an adjacent tile -> melee / swap toward it. */
+		if (m_ptr->ml && (ABS(dy) <= 1) && (ABS(dx) <= 1) && (dy || dx))
+		{
+			int d;
+
+			/* Cancel any running/resting/travel first. */
+			disturb(0, 0);
+
+			if (p_ptr->confused || p_ptr->image || p_ptr->immovable) return (FALSE);
+
+			for (d = 1; d <= 9; d++)
+			{
+				if (d == 5) continue;
+				if ((p_ptr->py + ddy[d] == gy) && (p_ptr->px + ddx[d] == gx))
+				{
+					click_dir = d;
+					return (TRUE);
+				}
+			}
+			return (FALSE);
+		}
+	}
+
+	/* Not an adjacent monster: walk there. */
+	return (travel_to(gy, gx));
+}
+
+/*
+ * Perform the one-shot move/attack queued by do_cmd_click(). Called from
+ * process_player()'s energy loop, like run_step()/travel_step().
+ */
+void click_act_step(void)
+{
+	int dir = click_dir;
+
+	click_dir = 0;
+	if (!dir) return;
+
+	/* One game turn: move_player_aux attacks a hostile or pushes past an ally. */
+	energy_use = 100;
+	move_player_aux(dir, always_pickup, 0, TRUE);
+}
+
+
+/*
+ * Auto-explore (DCSS-style): repeatedly travel to the nearest unexplored part
+ * of the level until everything reachable is seen or something interrupts.
+ *
+ * It is a thin layer on top of travel: explore_step() picks a goal and arms a
+ * travel leg (travel_plan), the normal travel branch in process_player() walks
+ * that leg, and when the leg ends explore_step() picks the next goal. disturb()
+ * cancels both, so monsters/damage/key presses stop exploration like running.
+ *
+ * Find the nearest reachable "frontier": a known, walkable grid that is adjacent
+ * to an as-yet-unexplored (un-memorized) grid. A breadth-first flood from the
+ * player over walkable known grids returns the closest such grid (and proves it
+ * is reachable in one pass). Returns TRUE and fills (*gy,*gx) if one exists.
+ */
+static bool find_nearest_goal(int *gy, int *gx, bool *is_gold)
+{
+	/* 8-directional neighbour offsets. */
+	static const int dy8[8] = { -1, 1, 0, 0, -1, -1, 1, 1 };
+	static const int dx8[8] = { 0, 0, -1, 1, -1, 1, -1, 1 };
+
+	int n = cur_hgt * cur_wid;
+	byte *seen;
+	int *queue, *dist;
+	int head = 0, tail = 0;
+	int start = p_ptr->py * cur_wid + p_ptr->px;
+	bool found = FALSE;
+
+	*is_gold = FALSE;
+	if (n <= 0) return (FALSE);
+
+	C_MAKE(seen, n, byte);
+	C_MAKE(queue, n, int);
+	C_MAKE(dist, n, int);
+
+	seen[start] = 1;
+	dist[start] = 0;
+	queue[tail++] = start;
+
+	while (head < tail)
+	{
+		int cur = queue[head++];
+		int cy = cur / cur_wid;
+		int cx = cur % cur_wid;
+		int d;
+		bool here_player = ((cy == p_ptr->py) && (cx == p_ptr->px));
+
+		/* Oro cercano (dentro del radio) -> desviarse a recogerlo. */
+		if (!here_player && (explore_gold_radius > 0) &&
+		                (dist[cur] <= explore_gold_radius) && cell_has_gold(cy, cx))
+		{
+			*gy = cy; *gx = cx; *is_gold = TRUE; found = TRUE; break;
+		}
+
+		/* Frontera (no en lista negra): celda junto a una nunca vista. */
+		if (!here_player && !(explore_bad && explore_bad[cur]))
+		{
+			for (d = 0; d < 8; d++)
+			{
+				int ny = cy + dy8[d];
+				int nx = cx + dx8[d];
+
+				if ((ny < 0) || (ny >= cur_hgt) || (nx < 0) || (nx >= cur_wid)) continue;
+
+				if (!explore_is_seen(ny, nx))
+				{
+					*gy = cy; *gx = cx; found = TRUE;
+					break;
+				}
+			}
+			if (found) break;
+		}
+
+		/* Expand to walkable, known, not-yet-visited neighbours. */
+		for (d = 0; d < 8; d++)
+		{
+			int ny = cy + dy8[d];
+			int nx = cx + dx8[d];
+			int ncell;
+
+			if ((ny < 0) || (ny >= cur_hgt) || (nx < 0) || (nx >= cur_wid)) continue;
+
+			ncell = ny * cur_wid + nx;
+			if (seen[ncell]) continue;
+			if (!travel_walkable_hook(ny, nx, NULL)) continue;
+
+			seen[ncell] = 1;
+			dist[ncell] = dist[cur] + 1;
+			queue[tail++] = ncell;
+		}
+	}
+
+	C_FREE(seen, n, byte);
+	C_FREE(queue, n, int);
+	C_FREE(dist, n, int);
+
+	return (found);
+}
+
+/*
+ * One auto-explore decision. Called from process_player()'s energy loop while
+ * exploring and not currently mid-leg. Picks the nearest unexplored frontier
+ * and arms a travel leg toward it; when none remain, exploration is done.
+ */
+void explore_step(void)
+{
+	int gy = 0, gx = 0;
+	bool is_gold = FALSE;
+
+	/* A travel leg is still running: let it finish (travel branch handles it). */
+	if (travelling) return;
+
+	/* States where exploring makes no sense. */
+	if (p_ptr->confused || p_ptr->image || p_ptr->wild_mode)
+	{
+		exploring = 0;
+		p_ptr->redraw |= (PR_STATE);
+		return;
+	}
+
+	/* Parar si hay un enemigo a la vista (que el jugador decida). */
+	if (monster_threat_visible())
+	{
+		exploring = 0;
+		p_ptr->redraw |= (PR_STATE);
+		msg_print("There is a monster nearby; auto-explore stopped.");
+		return;
+	}
+
+	/* Fold in everything seen so far before choosing the next frontier. */
+	explore_sync_seen();
+
+	/* Anti-oscilación: si LLEGAMOS a una meta-FRONTERA y no descubrió nada nuevo
+	 * (frontera "muerta"), la metemos en la lista negra. Solo si de verdad la
+	 * alcanzamos (estamos sobre ella): un tramo cortado a medias por recoger oro
+	 * no debe descartar una frontera válida. Las metas de oro nunca se blacklistean. */
+	if ((explore_goal_y >= 0) && !explore_goal_is_gold && explore_bad &&
+	                (p_ptr->py == explore_goal_y) && (p_ptr->px == explore_goal_x) &&
+	                (explore_seen_count <= explore_goal_count))
+	{
+		explore_bad[explore_goal_y * cur_wid + explore_goal_x] = 1;
+	}
+	explore_goal_y = explore_goal_x = -1;
+
+	/* Nothing reachable left to uncover. */
+	if (!find_nearest_goal(&gy, &gx, &is_gold))
+	{
+		exploring = 0;
+		p_ptr->redraw |= (PR_STATE);
+		msg_print("Done exploring.");
+		return;
+	}
+
+	/* Recordar la meta y el progreso al fijarla (para el chequeo de arriba). */
+	explore_goal_y = gy;
+	explore_goal_x = gx;
+	explore_goal_count = explore_seen_count;
+	explore_goal_is_gold = is_gold;
+
+	/* Arm the leg toward it (no disturb/messages: that's our job, not its). */
+	if (!travel_plan(gy, gx))
+	{
+		/* BFS proved reachability, so this is unexpected; stop gracefully. */
+		exploring = 0;
+		p_ptr->redraw |= (PR_STATE);
+		msg_print("Done exploring.");
+		return;
+	}
+}
+
+/*
+ * Start auto-exploring. Bound to a command key (Ctrl-E). The per-turn stepping
+ * is driven by process_player(); here we just validate and flip the flag.
+ */
+void do_cmd_explore(void)
+{
+	if (p_ptr->immovable) return;
+
+	if (p_ptr->confused)
+	{
+		msg_print("You are too confused!");
+		return;
+	}
+
+	if (p_ptr->wild_mode)
+	{
+		msg_print("You cannot auto-explore the world map.");
+		return;
+	}
+
+	/* No autoexplorar con un enemigo a la vista. */
+	if (monster_threat_visible())
+	{
+		msg_print("There is a monster nearby.");
+		return;
+	}
+
+	/* Cancel running/resting/repeat/travel, then begin exploring. The energy
+	 * loop in process_player() will call explore_step() to pick the first leg. */
+	disturb(0, 0);
+	exploring = 1;
+	p_ptr->redraw |= (PR_STATE);
+}
+
+
+/*
  * Take care of the various things that can happen when you step
  * into a space. (Objects, traps, and stores.)
  */

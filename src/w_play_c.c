@@ -1,6 +1,6 @@
 /*
 ** Lua binding: player_c
-** Generated automatically by tolua 4.0a - angband on Sat May 30 13:54:36 2026.
+** Generated automatically by tolua 4.0a - angband on Mon Jun  1 10:29:48 2026.
 */
 
 #include "lua/tolua.h"

@@ -105,6 +105,11 @@
 #include <unistd.h>
 #include <dirent.h>
 
+#ifdef USE_SOUND
+# include <SDL.h>
+# include <SDL_mixer.h>
+#endif /* USE_SOUND */
+
 /* /me pffts Solaris */
 #ifndef NAME_MAX
 #define	NAME_MAX	_POSIX_NAME_MAX
@@ -204,8 +209,17 @@ struct term_data
 # define TERM_DATA_DRAWABLE(td) \
 ((td)->backing_store ? (td)->backing_store : (td)->drawing_area->window)
 
+/*
+ * TomeTik: en modo iso EN VIVO (sin menú/lista: character_icky==0, fuera de
+ * tienda) NO volcamos el render 2D del term a la ventana principal: lo redibuja
+ * la escena iso en TERM_XTRA_FRESH. Si no, los tiles 2D asomaban un instante en
+ * el mapa antes de que el iso los tapara (artefactos al redibujar). En menús/
+ * listas (character_icky>0) y sub-ventanas sí se vuelca, igual que antes.
+ */
 # define TERM_DATA_REFRESH(td, x, y, wid, hgt) \
-if ((td)->backing_store) gdk_draw_pixmap( \
+if ((td)->backing_store && \
+    !(iso_mode && ((td) == &data[0]) && !character_icky && !iso_in_store)) \
+gdk_draw_pixmap( \
 (td)->drawing_area->window, \
 (td)->gc, \
 (td)->backing_store, \
@@ -251,6 +265,68 @@ gdk_draw_pixmap( \
  * An array of "term_data" structures, one for each "sub-window"
  */
 static term_data data[MAX_TERM_DATA];
+
+/* --- TomeTik: modo isométrico (renderer nuevo, ver src/iso/iso_render.{h,c}) --- */
+#include "iso/iso_render.h"
+static bool iso_mode = FALSE;        /* TRUE solo en GRAF_MODE_ISO (lo fija init_graphics) */
+extern bool iso_in_store;            /* store.c: TRUE en pantalla de tienda */
+
+/* --- TomeTik: tooltip de casilla al pasar el ratón (ver motion handler) --- */
+static GtkWidget *tooltip_win = NULL;    /* popup borderless que sigue al ratón */
+static GtkWidget *tooltip_label = NULL;
+static int tooltip_cy = -1;              /* última celda descrita (para no repetir) */
+static int tooltip_cx = -1;
+static guint tooltip_timer = 0;          /* g_timeout pendiente (0 = ninguno) */
+static char tooltip_pending[256];        /* texto a mostrar cuando salte el timer */
+static gint tooltip_px = 0, tooltip_py = 0;  /* posición (raíz) donde mostrarlo */
+#define TOOLTIP_DELAY_MS 250             /* espera antes de mostrar el tooltip */
+
+/* Celda del cave resaltada bajo el ratón en modo iso (-1 = ninguna). */
+static int iso_hover_y = -1, iso_hover_x = -1;
+
+/* --- Doble buffer iso: la escena se renderiza a este pixmap offscreen y luego
+ * se vuelca de una sola pasada (evita ver el repintado tile a tile). iso_target
+ * es el destino actual de los blits (el buffer durante el render). --- */
+static GdkPixmap *iso_buffer = NULL;
+static int iso_buf_w = 0, iso_buf_h = 0;
+static GdkDrawable *iso_target = NULL;
+
+static GdkPixbuf *iso_sheet = NULL;  /* dg_iso32.gif (14x15 tiles 54x49, cian transp.) */
+/* Fase 4: lámina Gervais 2D 32x32 (lib/xtra/graf/32x32.bmp) para actores
+ * (jugador/monstruos/objetos). map_info da (a,c); tile = fila a&0x7F, col c&0x7F.
+ * Fondo (24,24,24) -> transparente. */
+static GdkPixbuf *gerv_sheet = NULL;
+static int gerv_cols = 0, gerv_rows = 0;
+
+/* TomeTik: tiles extra de Dungeon Odyssey (iso, 54x54, magenta #FF00FF transp.) para
+ * features sin equivalente en dg_iso32 (fuente, altares, fuego, pit, trampa, pools).
+ * Sheet ensamblada en lib/xtra/iso/do_extra.png (7 cols). Se blitean con offset -5
+ * en Y para alinear el rombo de suelo (DO 54px vs dg_iso32 49px). Ver iso_do_tile(). */
+static GdkPixbuf *do_sheet = NULL;
+/* TomeTik: sprite especial (PNG con alfa, 54x49) para los edificios del pueblo;
+ * más alto que el cubo 70 y con la tapa tintada. lib/xtra/iso/building_block.png.
+ * Si falta, se cae al cubo de piedra normal (ISO_T_SINGLE). */
+static GdkPixbuf *bldg_block = NULL;
+/* TomeTik: tile custom de hierba con flores (FEAT_FLOWER), 54x49, cian transp.
+ * lib/xtra/iso/grass_flowers.png. Si falta, FEAT_FLOWER cae al suelo de hierba (0). */
+static GdkPixbuf *flower_tile = NULL;
+/* TomeTik: tile custom de escombros (FEAT_RUBBLE 49 y 206 "pile of rubble"),
+ * 54x54, magenta #FF00FF transp., overlay sobre el suelo. lib/xtra/iso/rubble.png. */
+static GdkPixbuf *rubble_tile = NULL;
+#define DO_TILE_W   54
+#define DO_TILE_H   54
+#define DO_COLS      7
+#define DO_DY       (-5)        /* offset vertical para casar el rombo de suelo */
+/* Cuánto bajar el sprite del actor (jugador/monstruo/objeto) respecto al centro
+ * del rombo, para que "toque el suelo" en vez de flotar. */
+#define ISO_ACTOR_DROP  12
+enum {
+	DO_FOUNTAIN = 0, DO_PIT, DO_FIRE, DO_TRAP, DO_MONTRAP,
+	DO_ALTAR_BEING, DO_ALTAR_WINDS, DO_ALTAR_FORCE, DO_ALTAR_DARK, DO_ALTAR_NATURE,
+	DO_NETHER, DO_MIRKY, DO_WATER, DO_EMBERS,
+	DO_GRAVEYARD, DO_DARKWATER, DO_GRAVE_POOF, DO_DARKWATER_CORRUPT,
+	DO_TUNNEL, DO_PORTAL, DO_FLOORSTONE, DO_TOWN, DO_GLYPH_GREEN, DO_GLYPH_RED
+};
 
 /*
  * TomeTik: layout por defecto de las ventanas, pensado para la pantalla
@@ -597,6 +673,7 @@ static void term_data_set_fg(term_data *td, byte attr)
 #define GRAF_MODE_NONE	0
 #define GRAF_MODE_OLD	1
 #define GRAF_MODE_NEW	2
+#define GRAF_MODE_ISO	3   /* TomeTik: isométrico (Gervais 2D + overlay iso en data[0]) */
 
 static int graf_mode = GRAF_MODE_NONE;
 /* TomeTik: arrancar con tiles Gervais activados (GRAF_MODE_NEW = 32x32 Gervais).
@@ -2390,6 +2467,95 @@ static bool graf_init(
  * (oops, they must be representable by u16b), as long as they are lesser
  * or equal to 32 if you use smooth rescaling.
  */
+/*
+ * TomeTik: carga (perezosa, una sola vez) las láminas del modo isométrico:
+ *  - iso_sheet  = lib/xtra/iso/dg_iso32.gif (terreno iso; cian #00FFFF -> alfa)
+ *  - gerv_sheet = lib/xtra/graf/32x32.bmp   (actores; negro (0,0,0) -> alfa)
+ * Devuelve TRUE si iso_sheet quedó disponible (mínimo para dibujar el terreno).
+ * Llamada al entrar en GRAF_MODE_ISO; segura de invocar varias veces.
+ */
+static bool iso_load_sheets(void)
+{
+	char path[1024];
+	GdkPixbuf *raw;
+
+	if (iso_sheet) return TRUE;   /* ya cargadas */
+
+	path_build(path, 1024, ANGBAND_DIR_XTRA, "iso/dg_iso32.gif");
+	raw = gdk_pixbuf_new_from_file(path, NULL);
+	if (!raw)
+	{
+		plog_fmt("iso: no pude cargar %s; modo iso no disponible", path);
+		return FALSE;
+	}
+	iso_sheet = gdk_pixbuf_add_alpha(raw, TRUE, 0x00, 0xFF, 0xFF);
+	g_object_unref(raw);
+
+	/* Lámina Gervais 2D para actores. El mismo fichero que usa el render 2D;
+	 * NEGRO PURO (0,0,0) = color de fondo -> alfa transparente. */
+	path_build(path, 1024, ANGBAND_DIR_XTRA_GRAF, "32x32.bmp");
+	raw = gdk_pixbuf_new_from_file(path, NULL);
+	if (raw)
+	{
+		gerv_sheet = gdk_pixbuf_add_alpha(raw, TRUE, 0, 0, 0);
+		gerv_cols = gdk_pixbuf_get_width(gerv_sheet) / 32;
+		gerv_rows = gdk_pixbuf_get_height(gerv_sheet) / 32;
+		g_object_unref(raw);
+	}
+	else
+	{
+		plog_fmt("iso: no pude cargar %s; sin actores", path);
+	}
+
+	/* Tiles extra de Dungeon Odyssey (opcional; si falta, esas features caen a
+	 * suelo gris como antes). Magenta #FF00FF -> alfa. */
+	path_build(path, 1024, ANGBAND_DIR_XTRA, "iso/do_extra.png");
+	raw = gdk_pixbuf_new_from_file(path, NULL);
+	if (raw)
+	{
+		do_sheet = gdk_pixbuf_add_alpha(raw, TRUE, 0xFF, 0x00, 0xFF);
+		g_object_unref(raw);
+	}
+	else
+	{
+		plog_fmt("iso: no pude cargar %s; features extra como suelo gris", path);
+	}
+
+	/* Sprite especial de edificio (PNG con canal alfa propio; opcional). */
+	path_build(path, 1024, ANGBAND_DIR_XTRA, "iso/building_block.png");
+	bldg_block = gdk_pixbuf_new_from_file(path, NULL);
+	if (!bldg_block)
+		plog_fmt("iso: no pude cargar %s; edificios como cubo 70", path);
+
+	/* Tile custom de hierba con flores (cian #00FFFF -> alfa; opcional). */
+	path_build(path, 1024, ANGBAND_DIR_XTRA, "iso/grass_flowers.png");
+	raw = gdk_pixbuf_new_from_file(path, NULL);
+	if (raw)
+	{
+		flower_tile = gdk_pixbuf_add_alpha(raw, TRUE, 0x00, 0xFF, 0xFF);
+		g_object_unref(raw);
+	}
+	else
+	{
+		plog_fmt("iso: no pude cargar %s; FEAT_FLOWER como hierba", path);
+	}
+
+	/* Tile custom de escombros (magenta #FF00FF -> alfa; opcional). */
+	path_build(path, 1024, ANGBAND_DIR_XTRA, "iso/rubble.png");
+	raw = gdk_pixbuf_new_from_file(path, NULL);
+	if (raw)
+	{
+		rubble_tile = gdk_pixbuf_add_alpha(raw, TRUE, 0xFF, 0x00, 0xFF);
+		g_object_unref(raw);
+	}
+	else
+	{
+		plog_fmt("iso: no pude cargar %s; escombros como overlay 58", path);
+	}
+
+	return TRUE;
+}
+
 static void init_graphics(void)
 {
 	cptr tile_name;
@@ -2449,6 +2615,11 @@ static void init_graphics(void)
 		 * "new" tile assignments
 		 * It is updated for ToME by Andreas Koch
 		 */
+	/* TomeTik: el modo isométrico se apoya en los tiles Gervais 32x32: el term
+	 * 2D los pinta debajo y map_info() devuelve los índices (a,c) que el overlay
+	 * iso usa para los actores. Así que se configura igual que GRAF_MODE_NEW; lo
+	 * único distinto (activar el repintado iso) lo decide iso_mode más abajo. */
+	case GRAF_MODE_ISO:
 	case GRAF_MODE_NEW:
 		{
 			/* TomeTik: usar el tileset 32x32 de David Gervais (lo que
@@ -2484,6 +2655,17 @@ static void init_graphics(void)
 	/* Update current graphics mode */
 	graf_mode = graf_mode_request;
 	smooth_rescaling = smooth_rescaling_request;
+
+	/* TomeTik: el repintado isométrico se activa SOLO en GRAF_MODE_ISO. En el
+	 * resto de modos (None/Old/New) iso_mode=FALSE -> TERM_XTRA_FRESH no pinta la
+	 * escena iso y se ve el render 2D normal del term. Carga perezosa de láminas
+	 * al entrar la primera vez; si fallan, se cae de vuelta a Gervais 2D (New). */
+	iso_mode = (graf_mode == GRAF_MODE_ISO);
+	if (iso_mode && !iso_load_sheets())
+	{
+		iso_mode = FALSE;
+		graf_mode = graf_mode_request = GRAF_MODE_NEW;
+	}
 
 	/* Reset visuals */
 #ifndef ANG281_RESET_VISUALS
@@ -3095,11 +3277,1004 @@ static void DrainEvents(void)
 /*
  * Handle a "special request"
  */
+/*
+ * TomeTik: mapeo feature -> tile de dg_iso32.gif (Fase 3b).
+ *
+ * Los índices de tile y el auto-tiling de muros están PORTADOS del sistema iso
+ * de OmnibandTk: índices de tk/config/dg32+iso.cfg y el cálculo de forma de
+ * muro de src/common/icon1.c (wall_shape). Tema fijo "light smooth".
+ */
+#define ISO_T_FLOOR   13   /* suelo */
+#define ISO_T_WALL    71   /* muro con forma: base + offset (0..10) */
+#define ISO_T_SINGLE  70   /* muro aislado / pilar */
+#define ISO_T_DOOR    93   /* abierta +0/+1, cerrada +2/+3, rota +4/+5 (ns/we) */
+#define ISO_T_STAIR   99   /* subir +0, bajar +1 */
+#define ISO_T_WOODDOOR 64  /* puerta de madera: ns +0, we +1 (entrada a tienda) */
+#define ISO_T_DARK   208   /* rombo oscuro: celda desconocida (feature 0 en cfg) */
+
+/* Formas de muro (orden propio); offset dentro del set de 11 tiles. */
+enum {
+	ISH_SINGLE, ISH_NS, ISH_WE, ISH_NW, ISH_NE, ISH_SW, ISH_SE,
+	ISH_TRI_N, ISH_TRI_S, ISH_TRI_W, ISH_TRI_E, ISH_QUAD, ISH_NOT
+};
+/* offset de tile por forma (de los "offsets" de dg32+iso.cfg). -1 = usar SINGLE. */
+static const int iso_wall_off[] = {
+	-1, /* SINGLE */  0, /* NS */  1, /* WE */
+	 5, /* NW */      2, /* NE */   4, /* SW */   3, /* SE */
+	 7, /* TRI_N */   9, /* TRI_S */ 6, /* TRI_W */ 8, /* TRI_E */
+	10, /* QUAD */   -1  /* NOT */
+};
+
+static bool iso_inb(int y, int x)
+{
+	return (y >= 0 && x >= 0 && y < cur_hgt && x < cur_wid);
+}
+
+/* Declarados antes de iso_is_wall_feat porque éste los usa para excluir puertas
+ * y terreno de tipo overlay. */
+static int iso_overlay_tile(int f);
+static bool iso_is_door_feat(int f);
+
+static bool iso_is_wall_feat(int f)
+{
+	/* Muro iso (cubo) = cualquier feature con el flag FF1_WALL, EXCEPTO:
+	 *  - puertas (se pintan como arco aparte; las cerradas también son WALL),
+	 *  - terreno tipo overlay (árbol/montaña/escombros/árbol-muerto: WALL en
+	 *    f_info pero los pintamos como sprite transparente sobre el suelo).
+	 * Usar el flag (vía f_info) en vez de listas de rangos cubre granito, vetas,
+	 * permanente, secreta, cristal, lava... y ADEMÁS los TEJADOS/ventanas/barril
+	 * de los edificios del pueblo (feats 190-198, todos WALL), que antes caían al
+	 * suelo y se veían como losas planas. */
+	if ((f < 0) || (f >= max_f_idx)) return FALSE;
+	/* Muro de ilusión: es FLOOR (atravesable) pero SE VE como muro -> en iso lo
+	 * pintamos como cubo para preservar la ilusión. */
+	if (f == FEAT_ILLUS_WALL) return TRUE;
+	if (iso_is_door_feat(f)) return FALSE;
+	if (iso_overlay_tile(f) >= 0) return FALSE;
+	return (f_info[f].flags1 & FF1_WALL) != 0;
+}
+
+/* Tile de SUELO (rombo completo) por feature. */
+static int iso_ground_tile(int f)
+{
+	switch (f)
+	{
+		case FEAT_GRASS: case FEAT_FLOWER:
+		case FEAT_TREES: case FEAT_SMALL_TREES: case FEAT_DEAD_TREE:
+		case FEAT_DEAD_SMALL_TREE:         return 0;    /* hierba (árboles van de overlay) */
+		case 181:                          return 30;   /* field -> surcos de cultivo */
+		case 200: case 201:                return 15;   /* cobblestone road -> adoquín */
+		case 207:                          return 58;   /* rocky ground -> grava */
+		case FEAT_DIRT: case FEAT_SAND:    return 9;    /* tierra/arena */
+		case FEAT_MUD:                     return 22;
+		case FEAT_ICE:                     return 39;
+		case FEAT_ASH:                     return 14;
+		case FEAT_SHAL_WATER:              return 3;    /* agua poco profunda */
+		case FEAT_DEEP_WATER: case FEAT_EKKAIA:
+		case FEAT_TAINTED_WATER:           return 5;    /* agua profunda */
+		case FEAT_SHAL_LAVA:               return 17;
+		case FEAT_DEEP_LAVA:               return 18;
+		default:                           return 13;   /* piedra */
+	}
+}
+
+/* Overlay (sprite transparente) sobre el suelo, o -1 si ninguno. */
+static int iso_overlay_tile(int f)
+{
+	switch (f)
+	{
+		case FEAT_TREES:        return 47;
+		case FEAT_SMALL_TREES:  return 48;
+		case FEAT_DEAD_TREE:    return 46;
+		case FEAT_DEAD_SMALL_TREE: return 46;   /* árbol seco pequeño -> árbol muerto */
+		case FEAT_MOUNTAIN:     return 34;
+		case FEAT_RUBBLE:       return 58;
+		case 16:                return 42;      /* web -> telaraña/red iso */
+		default:                return -1;
+	}
+}
+
+static bool iso_is_up_stair(int f)
+{
+	return f == FEAT_LESS || f == FEAT_WAY_LESS ||
+	       f == FEAT_SHAFT_UP || f == FEAT_QUEST_UP;
+}
+static bool iso_is_down_stair(int f)
+{
+	return f == FEAT_MORE || f == FEAT_WAY_MORE || f == FEAT_BETWEEN ||
+	       f == FEAT_SHAFT_DOWN || f == FEAT_QUEST_DOWN || f == FEAT_QUEST_ENTER;
+}
+
+static bool iso_is_door_feat(int f)
+{
+	return (f == FEAT_OPEN) || (f == FEAT_BROKEN) ||
+	       (f >= FEAT_DOOR_HEAD && f <= FEAT_DOOR_TAIL);
+}
+
+/* ¿celda conocida (memorizada)? */
+static bool iso_marked(int y, int x)
+{
+	if (!iso_inb(y, x)) return FALSE;
+	return (cave[y][x].info & CAVE_MARK) != 0;
+}
+
+/* ¿la celda cuenta como muro/puerta para el auto-tiling (y es conocida)? */
+static bool iso_walldoor(int y, int x)
+{
+	int f;
+	if (!iso_marked(y, x)) return FALSE;
+	f = cave[y][x].feat;
+	return iso_is_wall_feat(f) || iso_is_door_feat(f);
+}
+
+/* Forma de muro a partir de los 8 vecinos (port de wall_shape, icon1.c). */
+static int iso_wall_shape(int y, int x)
+{
+	bool wall[3][3];
+	int n = 0, nswe = 0, col0n = 0, col2n = 0, row0n = 0, row2n = 0;
+	int i, j, shape = ISH_NOT;
+
+	if (!iso_walldoor(y, x)) return ISH_NOT;
+
+	for (j = 0; j < 3; j++)
+	{
+		for (i = 0; i < 3; i++)
+		{
+			if (i == 1 && j == 1) { wall[j][i] = FALSE; continue; }
+			wall[j][i] = iso_walldoor(y - 1 + j, x - 1 + i);
+			if (wall[j][i])
+			{
+				++n;
+				if (!i) ++col0n; else if (i == 1) ++nswe; else ++col2n;
+				if (!j) ++row0n; else if (j == 1) ++nswe; else ++row2n;
+			}
+		}
+	}
+
+	if (n == 8) return ISH_SINGLE;
+	if (!n || !nswe) return ISH_SINGLE;   /* aislado / sin vecino ortogonal */
+
+	if (nswe == 4)
+	{
+		shape = ISH_QUAD;
+		if (n < 6) return shape;
+		if (n == 6)
+		{
+			if (row0n == 3) return ISH_TRI_S;
+			if (row2n == 3) return ISH_TRI_N;
+			if (col0n == 3) return ISH_TRI_E;
+			if (col2n == 3) return ISH_TRI_W;
+			return shape;
+		}
+		/* n == 7: una esquina falta */
+		if (!wall[0][0]) return ISH_SE;
+		if (!wall[2][0]) return ISH_NE;
+		if (!wall[0][2]) return ISH_SW;
+		return ISH_NW;
+	}
+
+	if (nswe == 3)
+	{
+		if (wall[0][1] && wall[2][1])   /* muros a N y S */
+		{
+			if (col0n == 3 || col2n == 3) return ISH_NS;
+			return wall[1][0] ? ISH_TRI_W : ISH_TRI_E;
+		}
+		else                            /* muros a W y E */
+		{
+			if (row0n == 3 || row2n == 3) return ISH_WE;
+			return wall[0][1] ? ISH_TRI_N : ISH_TRI_S;
+		}
+	}
+
+	if (nswe == 2)
+	{
+		if (wall[0][1] && wall[2][1]) shape = ISH_NS;
+		if (wall[1][0] && wall[1][2]) shape = ISH_WE;
+		if (wall[0][1] && wall[1][0]) shape = ISH_SE;
+		if (wall[0][1] && wall[1][2]) shape = ISH_SW;
+		if (wall[2][1] && wall[1][0]) shape = ISH_NE;
+		if (wall[2][1] && wall[1][2]) shape = ISH_NW;
+		return shape;
+	}
+
+	if (nswe == 1)
+		return (wall[0][1] || wall[2][1]) ? ISH_NS : ISH_WE;
+
+	return ISH_SINGLE;
+}
+
+/*
+ * Orientación de una puerta: TRUE = "we" (la puerta forma parte de una línea de
+ * muro horizontal W-E, se cruza N-S), FALSE = "ns" (línea de muro vertical, se
+ * cruza W-E). Se decide por el eje con más muros/puertas flanqueando la celda;
+ * así funciona también cuando solo hay muro a un lado o en juntas (antes exigía
+ * muro a AMBOS lados W y E y, si no, caía siempre a "ns" -> puertas torcidas). */
+static bool iso_door_we(int y, int x)
+{
+	/* Suma muros/puertas a lo largo de cada eje mirando DOS celdas a cada lado:
+	 * una línea de muro real continúa más allá del vecino inmediato, así que
+	 * esto detecta la dirección de la pared mucho mejor que solo radio 1 (que
+	 * fallaba en cruces y extremos -> arcos torcidos). */
+	int we = (iso_walldoor(y, x - 1) ? 1 : 0) + (iso_walldoor(y, x + 1) ? 1 : 0) +
+	         (iso_walldoor(y, x - 2) ? 1 : 0) + (iso_walldoor(y, x + 2) ? 1 : 0);
+	int ns = (iso_walldoor(y - 1, x) ? 1 : 0) + (iso_walldoor(y + 1, x) ? 1 : 0) +
+	         (iso_walldoor(y - 2, x) ? 1 : 0) + (iso_walldoor(y + 2, x) ? 1 : 0);
+
+	/* Eje dominante de la línea de muro. */
+	if (we != ns) return (we > ns);
+
+	/* Empate (esquina real / aislada): usa los vecinos inmediatos como antes. */
+	return (iso_walldoor(y, x - 1) && iso_walldoor(y, x + 1));
+}
+
+/* Blit de un tile de la lámina por índice (col = idx%14, fila = idx/14). */
+static void iso_blit(term_data *td, int idx, int sx, int sy)
+{
+	int col, row;
+	if (idx < 0) return;
+	col = idx % ISO_SHEET_COLS;
+	row = idx / ISO_SHEET_COLS;
+	gdk_draw_pixbuf(iso_target, td->gc, iso_sheet,
+	                col * ISO_TILE_W, row * ISO_TILE_H,
+	                sx, sy, ISO_TILE_W, ISO_TILE_H,
+	                GDK_RGB_DITHER_NONE, 0, 0);
+}
+
+/* Blit de un tile extra de Dungeon Odyssey (54x54) en (sx, sy+DO_DY) para alinear
+ * el rombo de suelo con los tiles dg_iso32 (49px). */
+static void do_blit(term_data *td, int idx, int sx, int sy)
+{
+	int col, row;
+	if (!do_sheet || idx < 0) return;
+	col = idx % DO_COLS;
+	row = idx / DO_COLS;
+	gdk_draw_pixbuf(iso_target, td->gc, do_sheet,
+	                col * DO_TILE_W, row * DO_TILE_H,
+	                sx, sy + DO_DY, DO_TILE_W, DO_TILE_H,
+	                GDK_RGB_DITHER_NONE, 0, 0);
+}
+
+/* Mapea una feature a un tile extra de Dungeon Odyssey, o -1 si ninguno.
+ * Estas features no tienen equivalente en dg_iso32; se pintan sobre el suelo. */
+static int iso_do_tile(int f)
+{
+	switch (f)
+	{
+		case FEAT_FOUNTAIN:                return DO_FOUNTAIN;
+		case 15:                           return DO_FOUNTAIN;   /* fountain (2ª) */
+		case FEAT_DARK_PIT:                return DO_PIT;
+		case FEAT_GREAT_FIRE: case FEAT_FIRE: return DO_FIRE;    /* 178 / 205 */
+		case FEAT_TRAP:                    return DO_TRAP;
+		case FEAT_MON_TRAP:                return DO_MONTRAP;
+		case 161:                          return DO_ALTAR_BEING;
+		case 162:                          return DO_ALTAR_WINDS;
+		case 163:                          return DO_ALTAR_FORCE;
+		case 164:                          return DO_ALTAR_DARK;
+		case 165:                          return DO_ALTAR_NATURE;
+		case 102:                          return DO_NETHER;     /* nether mist */
+		case 208: case 210:                return DO_MIRKY;      /* vapour / dense mist */
+		case 209:                          return DO_WATER;      /* condensing water */
+		case FEAT_GLYPH:                   return DO_GLYPH_GREEN; /* glyph of warding (3) */
+		case FEAT_MINOR_GLYPH:             return DO_GLYPH_RED;  /* explosive rune (64) */
+		/* Straight Road (camino mágico): tramos 65-70 suelo "graveyard" teal;
+		 * 71 descargado (dark water); 72 salida (graveyard + poof); 73 corrupto. */
+		case 65: case 66: case 67:
+		case 68: case 69: case 70:         return DO_GRAVEYARD;
+		case 71:                           return DO_DARKWATER;
+		case 72:                           return DO_GRAVE_POOF;
+		case 73:                           return DO_DARKWATER_CORRUPT;
+		case 173: case 204:                return DO_TUNNEL;     /* Underground Tunnel */
+		case FEAT_BETWEEN2:                return DO_PORTAL;     /* Void Jumpgate (176) */
+		case 183:                          return DO_FLOORSTONE; /* void */
+		case FEAT_TOWN:                    return DO_TOWN;       /* town (203) */
+		default:                           return -1;
+	}
+}
+
+/* Dibuja el rombo de resaltado (hover) en la posición de pantalla (sx,sy) (ya
+ * proyectada y desplazada). Se llama UNA vez al final de la escena para que
+ * tenga prioridad sobre cualquier tile/sprite (si no, las celdas dibujadas
+ * después en orden de profundidad lo taparían). */
+static void iso_hover_outline(term_data *td, int sx, int sy)
+{
+	GdkColor hi;
+	GdkPoint pts[4];
+	int mx, my;
+
+	mx = sx + ISO_TILE_W / 2;
+	my = sy + ISO_FLOOR_CY;
+
+	pts[0].x = mx;               pts[0].y = my - ISO_FLOOR_H / 2;  /* arriba */
+	pts[1].x = sx + ISO_TILE_W;  pts[1].y = my;                    /* derecha */
+	pts[2].x = mx;               pts[2].y = my + ISO_FLOOR_H / 2;  /* abajo */
+	pts[3].x = sx;               pts[3].y = my;                    /* izquierda */
+
+	hi.red = 0xFFFF; hi.green = 0xFFFF; hi.blue = 0x3000;  /* amarillo */
+	gdk_gc_set_rgb_fg_color(td->gc, &hi);
+	gdk_gc_set_line_attributes(td->gc, 2, GDK_LINE_SOLID,
+	                           GDK_CAP_BUTT, GDK_JOIN_MITER);
+	gdk_draw_polygon(td->drawing_area->window, td->gc, FALSE, pts, 4);
+	gdk_gc_set_line_attributes(td->gc, 0, GDK_LINE_SOLID,
+	                           GDK_CAP_BUTT, GDK_JOIN_MITER);
+}
+
+/*
+ * Callback de celda del núcleo iso: elige y dibuja el/los tile(s) de la celda.
+ * Se dibuja una celda si está MEMORIZADA (CAVE_MARK) o VISIBLE ahora mismo
+ * (CAVE_SEEN): en mazmorra el suelo iluminado solo por la antorcha queda
+ * CAVE_SEEN pero NO se memoriza, así que con solo CAVE_MARK el jugador y su
+ * radio de luz salían en negro (el 2D dibuja lo visible, no solo lo memorizado).
+ * Muros llevan suelo debajo (los tiles de muro son transparentes en la zona del
+ * rombo, igual que los "dynamic" del cfg).
+ */
+static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
+{
+	term_data *td = (term_data *)ctx;
+	int f;
+
+	if (!iso_inb(cy, cx)) return;
+
+	/* Celda ni memorizada ni visible: rombo oscuro (rellena los huecos del
+	 * borde explorado que asoman bajo la parte transparente de los muros).
+	 * EXCEPCIÓN: la celda del propio jugador siempre se dibuja (suelo + sprite),
+	 * aunque su rejilla no esté marcada/iluminada (p.ej. pueblo de noche), para
+	 * que el personaje no desaparezca. */
+	if (!(cave[cy][cx].info & (CAVE_MARK | CAVE_SEEN)) &&
+	                !((cy == p_ptr->py) && (cx == p_ptr->px)))
+	{
+		iso_blit(td, ISO_T_DARK, sx, sy);
+		return;
+	}
+
+	f = cave[cy][cx].feat;
+
+	/* Escombros (FEAT_RUBBLE 49 y 206 "pile of rubble"): tile custom como overlay
+	 * sobre el suelo. Antes del check de muro para que mande aunque la feature
+	 * tenga el flag WALL. */
+	if (((f == FEAT_RUBBLE) || (f == 206)) && rubble_tile)
+	{
+		iso_blit(td, iso_ground_tile(f), sx, sy);
+		gdk_draw_pixbuf(iso_target, td->gc, rubble_tile,
+		                0, 0, sx, sy + DO_DY, DO_TILE_W, DO_TILE_H,
+		                GDK_RGB_DITHER_NONE, 0, 0);
+	}
+	else if (iso_is_wall_feat(f))
+	{
+		iso_blit(td, ISO_T_FLOOR, sx, sy);                       /* suelo debajo */
+
+		if (dun_level == 0)
+		{
+			/* PUEBLO: rectángulos MACIZOS (sin auto-tiling). Diferenciamos CASA de
+			 * MURALLA: las feats de edificio (190..198 = tejados/remates/chimeneas,
+			 * ventanas, barril) Y los muros PERM que tocan una de ellas (la base/
+			 * cara de la casa, que es FEAT_PERM_SOLID) se pintan con el bloque-
+			 * edificio (tapa roja) -> casa uniforme. El resto de muros del pueblo
+			 * (muralla suelta) van con el cubo de piedra gris. */
+			bool is_building = (f >= 190) && (f <= 198);
+
+			/* Un muro PERM es parte de una casa si hay un tejado (190..198) cerca.
+			 * Radio 2 porque algunos edificios (p.ej. alcalde+museo) tienen la
+			 * pared sur de DOS filas de grosor y la exterior queda a 2 celdas del
+			 * tejado. La muralla/borde del mapa está lejísimos de cualquier
+			 * tejado, así que sigue cayendo en el cubo de piedra. */
+			if (!is_building)
+			{
+				int dy, dx;
+				for (dy = -2; (dy <= 2) && !is_building; dy++)
+				{
+					for (dx = -2; dx <= 2; dx++)
+					{
+						int ny = cy + dy, nx = cx + dx;
+						int nf;
+						if (!iso_inb(ny, nx)) continue;
+						nf = cave[ny][nx].feat;
+						if ((nf >= 190) && (nf <= 198)) { is_building = TRUE; break; }
+					}
+				}
+			}
+
+			if (bldg_block && is_building)
+				gdk_draw_pixbuf(iso_target, td->gc, bldg_block,
+				                0, 0, sx, sy, 54, 49, GDK_RGB_DITHER_NONE, 0, 0);
+			else
+				iso_blit(td, ISO_T_SINGLE, sx, sy);
+		}
+		else
+		{
+			/* MAZMORRA: muros finos (corredores/salas) -> auto-tiling por forma. */
+			int off = iso_wall_off[iso_wall_shape(cy, cx)];
+			iso_blit(td, (off < 0) ? ISO_T_SINGLE : ISO_T_WALL + off, sx, sy);
+		}
+	}
+	else if (iso_is_door_feat(f))
+	{
+		int base = (f == FEAT_OPEN)   ? ISO_T_DOOR :
+		           (f == FEAT_BROKEN) ? ISO_T_DOOR + 4 : ISO_T_DOOR + 2;
+		iso_blit(td, ISO_T_FLOOR, sx, sy);                       /* suelo bajo la puerta */
+		iso_blit(td, base + (iso_door_we(cy, cx) ? 1 : 0), sx, sy);
+	}
+	else if (f == FEAT_SHOP)
+	{
+		/* entrada a tienda: puerta de madera (64 ns / 65 we) sobre suelo */
+		iso_blit(td, ISO_T_FLOOR, sx, sy);
+		iso_blit(td, ISO_T_WOODDOOR + (iso_door_we(cy, cx) ? 1 : 0), sx, sy);
+	}
+	else if ((f == FEAT_QUEST_EXIT) || (f == 12))    /* 12 = town exit */
+	{
+		/* Salida de quest / del pueblo: arco de piedra ABIERTO (93 ns / 94 we),
+		 * como una puerta/portón de salida. */
+		iso_blit(td, ISO_T_FLOOR, sx, sy);
+		iso_blit(td, ISO_T_DOOR + (iso_door_we(cy, cx) ? 1 : 0), sx, sy);
+	}
+	else if (iso_is_up_stair(f))
+	{
+		iso_blit(td, iso_ground_tile(f), sx, sy);
+		iso_blit(td, ISO_T_STAIR, sx, sy);
+	}
+	else if (iso_is_down_stair(f))
+	{
+		iso_blit(td, iso_ground_tile(f), sx, sy);
+		iso_blit(td, ISO_T_STAIR + 1, sx, sy);
+	}
+	else if ((f == FEAT_FLOWER) && flower_tile)
+	{
+		/* hierba con flores: tile custom (lib/xtra/iso/grass_flowers.png). */
+		gdk_draw_pixbuf(iso_target, td->gc, flower_tile,
+		                0, 0, sx, sy, 54, 49, GDK_RGB_DITHER_NONE, 0, 0);
+	}
+	else if (do_sheet && iso_do_tile(f) >= 0)
+	{
+		/* feature sin tile en dg_iso32 -> tile extra de Dungeon Odyssey sobre suelo
+		 * (fuente, altar, fuego, pit, trampa, pools de niebla/agua). */
+		iso_blit(td, ISO_T_FLOOR, sx, sy);
+		do_blit(td, iso_do_tile(f), sx, sy);
+	}
+	else
+	{
+		/* terreno general: suelo + posible overlay (árbol/montaña/escombros) */
+		int ov = iso_overlay_tile(f);
+		iso_blit(td, iso_ground_tile(f), sx, sy);
+		if (ov >= 0) iso_blit(td, ov, sx, sy);
+	}
+
+	/* Overlay de ACTOR (jugador/monstruo/objeto) con la lámina Gervais 32x32.
+	 * map_info da (a,c)=lo de encima y (ta,tc)=terreno; si difieren y es un tile
+	 * gráfico (bit alto), lo bliteamos centrado y apoyado en el rombo del suelo. */
+	if (gerv_sheet && gerv_cols && gerv_rows)
+	{
+		byte a, ta, ea;
+		char c, tc, ec;
+
+		map_info(cy, cx, &a, &c, &ta, &tc, &ea, &ec);
+
+		if ((a & 0x80) && ((a != ta) || (c != tc)))
+		{
+			int col = (c & 0x7F) % gerv_cols;
+			int row = (a & 0x7F) % gerv_rows;
+			/* 32 de ancho centrado en el tile (54); pies hacia el centro del
+			 * rombo (alto 49) para que el actor "se pose" en la celda. */
+			int dx = sx + (ISO_TILE_W - 32) / 2;
+			int dy = sy + ISO_TILE_H / 2 - 32 + ISO_ACTOR_DROP;
+
+			gdk_draw_pixbuf(iso_target, td->gc, gerv_sheet,
+			                col * 32, row * 32, dx, dy, 32, 32,
+			                GDK_RGB_DITHER_NONE, 0, 0);
+		}
+	}
+
+	/* Barra de vida sobre el actor (jugador o monstruo visible) si no está al
+	 * 100%. Verde = vida restante, rojo = daño, con marco negro. */
+	{
+		int chp = -1, mhp = 0;
+
+		if ((cy == p_ptr->py) && (cx == p_ptr->px))
+		{
+			chp = p_ptr->chp;
+			mhp = p_ptr->mhp;
+		}
+		else if (cave[cy][cx].m_idx)
+		{
+			monster_type *m_ptr = &m_list[cave[cy][cx].m_idx];
+			if (m_ptr->ml)
+			{
+				chp = m_ptr->hp;
+				mhp = m_ptr->maxhp;
+			}
+		}
+
+		if ((mhp > 0) && (chp >= 0) && (chp < mhp))
+		{
+			GdkColor col_bg, col_red, col_green;
+			int bw = 28, bh = 4;
+			int bx = sx + (ISO_TILE_W - bw) / 2;
+			int by = sy + ISO_TILE_H / 2 - 32 + ISO_ACTOR_DROP - bh - 2;  /* sobre el sprite */
+			int gw = (bw * chp) / mhp;
+
+			if (gw < 0) gw = 0;
+			if (gw > bw) gw = bw;
+
+			col_bg.red = col_bg.green = col_bg.blue = 0x0000;     /* negro */
+			col_red.red = 0xD000;  col_red.green = 0x1000; col_red.blue = 0x1000;
+			col_green.red = 0x1000; col_green.green = 0xC000; col_green.blue = 0x1000;
+
+			/* Marco negro (relleno) como fondo. */
+			gdk_gc_set_rgb_fg_color(td->gc, &col_bg);
+			gdk_draw_rectangle(iso_target, td->gc, TRUE,
+			                   bx - 1, by - 1, bw + 2, bh + 2);
+			/* Daño (rojo) y vida restante (verde). */
+			gdk_gc_set_rgb_fg_color(td->gc, &col_red);
+			gdk_draw_rectangle(iso_target, td->gc, TRUE,
+			                   bx, by, bw, bh);
+			gdk_gc_set_rgb_fg_color(td->gc, &col_green);
+			gdk_draw_rectangle(iso_target, td->gc, TRUE,
+			                   bx, by, gw, bh);
+		}
+	}
+
+}
+
+/*
+ * TomeTik: auditoría de cobertura de tiles en modo ISO. Escribe un informe en
+ * ANGBAND_DIR_USER/iso_coverage.txt con:
+ *  - MONSTRUOS y OBJETOS sin tile gráfico (x_attr sin el bit 0x80): en iso solo
+ *    dibujamos el sprite si map_info devuelve un tile gráfico, así que esas
+ *    entidades son INVISIBLES en iso (en 2D salen como letra ASCII).
+ *  - FEATURES que el render iso pinta como suelo gris genérico (tile 13) por no
+ *    tener tratamiento propio en iso_cell_cb (posibles huecos del mapeo de terreno).
+ * Se dispara solo si la variable de entorno TOMETIK_ISO_AUDIT está definida, al
+ * entrar en el modo iso. No afecta al juego normal.
+ */
+static void iso_audit_coverage(void)
+{
+	FILE *fp;
+	char path[1024];
+	int i, n_mon = 0, n_obj = 0, n_feat = 0;
+
+	path_build(path, sizeof(path), ANGBAND_DIR_USER, "iso_coverage.txt");
+	fp = my_fopen(path, "w");
+	if (!fp) { plog_fmt("iso-audit: no pude abrir %s", path); return; }
+
+	fprintf(fp, "# TomeTik - auditoria de cobertura de tiles en modo ISO\n");
+	fprintf(fp, "# Entidades sin tile grafico (x_attr sin bit 0x80) -> INVISIBLES en iso.\n");
+	fprintf(fp, "# (En modo 2D salen como caracter ASCII; en iso no se dibujan.)\n\n");
+
+	fprintf(fp, "== MONSTRUOS sin tile (invisibles en iso) ==\n");
+	for (i = 1; i < max_r_idx; i++)
+	{
+		monster_race *r = &r_info[i];
+		if (!r->name) continue;
+		if (!(r->x_attr & 0x80))
+		{
+			fprintf(fp, "  R:%-4d %s\n", i, r_name + r->name);
+			n_mon++;
+		}
+	}
+	fprintf(fp, "  --- total monstruos sin tile: %d ---\n\n", n_mon);
+
+	fprintf(fp, "== OBJETOS sin tile (invisibles en iso) ==\n");
+	for (i = 1; i < max_k_idx; i++)
+	{
+		object_kind *k = &k_info[i];
+		if (!k->name) continue;
+		if (!(k->x_attr & 0x80))
+		{
+			fprintf(fp, "  K:%-4d %s\n", i, k_name + k->name);
+			n_obj++;
+		}
+	}
+	fprintf(fp, "  --- total objetos sin tile: %d ---\n\n", n_obj);
+
+	fprintf(fp, "== FEATURES que el iso pinta como SUELO GRIS generico (tile 13) ==\n");
+	fprintf(fp, "# Sin tratamiento propio en iso_cell_cb; revisar si necesitan tile real\n");
+	fprintf(fp, "# (puerta entre mundos, trampa, altar, fuente... no deberian ser suelo).\n");
+	for (i = 1; i < max_f_idx; i++)
+	{
+		feature_type *f = &f_info[i];
+		if (!f->name) continue;
+		/* ¿el iso le da tratamiento propio? */
+		if (iso_is_wall_feat(i) || iso_is_door_feat(i) || (i == FEAT_SHOP) ||
+		                (i == FEAT_QUEST_EXIT) || (i == 12) /* town exit */ ||
+		                iso_is_up_stair(i) || iso_is_down_stair(i) ||
+		                (iso_overlay_tile(i) >= 0) ||
+		                (do_sheet && iso_do_tile(i) >= 0))
+			continue;
+		/* iso_ground_tile devuelve 13 SOLO en el caso por defecto (no reconocido). */
+		if (iso_ground_tile(i) == ISO_T_FLOOR)
+		{
+			fprintf(fp, "  F:%-4d %s\n", i, f_name + f->name);
+			n_feat++;
+		}
+	}
+	fprintf(fp, "  --- total features como suelo gris: %d ---\n\n", n_feat);
+
+	fprintf(fp, "RESUMEN: %d monstruos, %d objetos sin tile (invisibles en iso); "
+	            "%d features pintadas como suelo gris.\n", n_mon, n_obj, n_feat);
+
+	/* Histograma de features del nivel actual (cave): para saber de qué están
+	 * hechos los edificios vs el borde del pueblo (afinar el sprite de edificio). */
+	{
+		static int hist[256];
+		int y, x;
+		for (i = 0; i < 256; i++) hist[i] = 0;
+		for (y = 0; y < cur_hgt; y++)
+			for (x = 0; x < cur_wid; x++)
+				hist[cave[y][x].feat & 0xFF]++;
+		fprintf(fp, "\n== HISTOGRAMA DE FEATURES DEL NIVEL ACTUAL (dun_level=%d) ==\n",
+		        dun_level);
+		for (i = 0; i < 256; i++)
+			if (hist[i])
+				fprintf(fp, "  feat %3d (0x%02X) x%-5d %s%s\n", i, i, hist[i],
+				        (i < max_f_idx) ? (f_name + f_info[i].name) : "?",
+				        iso_is_wall_feat(i) ? "  [WALL]" : "");
+	}
+
+	my_fclose(fp);
+	plog_fmt("iso-audit: informe escrito en %s (%d mon, %d obj, %d feat)",
+	         path, n_mon, n_obj, n_feat);
+}
+
+/* TomeTik: recompone una fila de texto plano del term por encima de la escena
+ * iso. El renderer iso pinta negro + tiles directamente sobre la ventana
+ * (saltándose el backing store), así que borra el texto que el term ya había
+ * dibujado en esa fila -- típicamente la línea de mensajes/prompt (fila 0),
+ * p.ej. "(Inven: c-c, ESC) Wear/Wield which item?". La releemos del backing
+ * store del term (scr) y la repintamos, igual que en 2D el prompt va siempre
+ * sobre el mapa. */
+static void iso_overlay_text_row(term_data *td, int row)
+{
+	term_win *scr = td->t.scr;
+	int x, first = -1, last = -1;
+
+	if (!scr || row < 0 || row >= td->rows) return;
+
+	/* Localiza el tramo con contenido (primer/último carácter no-blanco) */
+	for (x = 0; x < td->cols; x++)
+	{
+		if (scr->c[row][x] != ' ')
+		{
+			if (first < 0) first = x;
+			last = x;
+		}
+	}
+
+	/* Fila vacía: deja ver la escena iso (no pintamos banda negra) */
+	if (first < 0) return;
+
+	/* Fondo negro contiguo bajo el texto (como la barra de mensajes 2D),
+	 * cubriendo los espacios internos del prompt para que sea legible. */
+	gdk_draw_rectangle(td->drawing_area->window,
+	                   td->drawing_area->style->black_gc, TRUE,
+	                   first * td->font_wid, row * td->font_hgt,
+	                   (last - first + 1) * td->font_wid, td->font_hgt);
+
+	/* Redibuja el texto agrupando celdas contiguas del mismo color */
+	x = first;
+	while (x <= last)
+	{
+		byte a = scr->a[row][x];
+		char buf[256];
+		int start = x, len = 0;
+
+		while (x <= last && scr->a[row][x] == a && len < (int)sizeof(buf) - 1)
+		{
+			buf[len++] = scr->c[row][x];
+			x++;
+		}
+
+		term_data_set_fg(td, a);
+		gdk_draw_text(td->drawing_area->window, td->font, td->gc,
+		              start * td->font_wid,
+		              td->font->ascent + row * td->font_hgt,
+		              buf, len);
+	}
+}
+
+/*
+ * Geometría de la vista iso: reserva a la IZQUIERDA la barra de stats
+ * (cols 0..COL_MAP-1) y ARRIBA la línea de mensajes (fila 0); el mapa iso vive
+ * en (ox,oy) con tamaño map_w x map_h. (Term diminuto -> pantalla completa.)
+ */
+static void iso_geometry(term_data *td, int *ox, int *oy, int *map_w, int *map_h)
+{
+	int fw = td->font_wid, fh = td->font_hgt;
+	int win_w = td->cols * fw, win_h = td->rows * fh;
+
+	*ox = COL_MAP * fw;
+	*oy = ROW_MAP * fh;
+	*map_w = win_w - *ox;
+	*map_h = win_h - *oy;
+
+	if ((*map_w <= 0) || (*map_h <= 0)) { *ox = *oy = 0; *map_w = win_w; *map_h = win_h; }
+}
+
+/*
+ * Renderiza la escena iso (tiles + actores + barras de vida) al pixmap OFFSCREEN
+ * iso_buffer, en coords locales (0,0). Es la parte cara; se hace solo cuando
+ * cambia el estado del juego (FRESH / expose), no en cada movimiento del ratón.
+ * El pixmap recorta solo: los tiles que se salen de map_w x map_h no invaden la
+ * barra de stats al volcarlo.
+ */
+static void iso_render_to_buffer(term_data *td, int map_w, int map_h)
+{
+	if (!iso_buffer || (iso_buf_w != map_w) || (iso_buf_h != map_h))
+	{
+		if (iso_buffer) g_object_unref(iso_buffer);
+		iso_buffer = gdk_pixmap_new(td->drawing_area->window, map_w, map_h, -1);
+		iso_buf_w = map_w;
+		iso_buf_h = map_h;
+	}
+
+	/* Dibujar AL BUFFER (no a la ventana) -> sin parpadeo de repintado tile a tile. */
+	iso_target = iso_buffer;
+	gdk_draw_rectangle(iso_buffer, td->drawing_area->style->black_gc, TRUE,
+	                   0, 0, map_w, map_h);
+	iso_render_scene(td, p_ptr->px, p_ptr->py, map_w, map_h, 0, 0, iso_cell_cb);
+	iso_target = td->drawing_area->window;
+}
+
+/*
+ * Vuelca el buffer cacheado a la ventana de una sola pasada y dibuja encima el
+ * rombo de resaltado del ratón. Barato: una copia de pixmap + un polígono.
+ */
+static void iso_present(term_data *td, int ox, int oy)
+{
+	if (!iso_buffer) return;
+
+	gdk_draw_pixmap(td->drawing_area->window, td->gc, iso_buffer,
+	                0, 0, ox, oy, iso_buf_w, iso_buf_h);
+
+	/* Rombo del hover ENCIMA de todo, recortado a la región del mapa. */
+	if ((iso_hover_y >= 0) && (iso_hover_x >= 0))
+	{
+		GdkRectangle clip;
+		int hsx, hsy;
+
+		clip.x = ox; clip.y = oy; clip.width = iso_buf_w; clip.height = iso_buf_h;
+		gdk_gc_set_clip_rectangle(td->gc, &clip);
+
+		iso_project(iso_hover_x, iso_hover_y, p_ptr->px, p_ptr->py,
+		            iso_buf_w, iso_buf_h, &hsx, &hsy);
+		iso_hover_outline(td, hsx + ox, hsy + oy);
+
+		gdk_gc_set_clip_rectangle(td->gc, NULL);
+	}
+}
+
+/*
+ * Redibujado COMPLETO de la escena iso (cambió el estado del juego): re-renderiza
+ * los tiles al buffer, lo vuelca, y recompone la barra de stats + la línea de
+ * mensajes desde el render 2D del term (backing store).
+ */
+static void iso_draw_scene(term_data *td)
+{
+	int ox, oy, map_w, map_h;
+
+	if (!iso_sheet || !td->drawing_area->window) return;
+
+	/* Auditoría de cobertura (una sola vez, bajo TOMETIK_ISO_AUDIT). */
+	if (getenv("TOMETIK_ISO_AUDIT"))
+	{
+		static bool iso_audited = FALSE;
+		if (!iso_audited) { iso_audited = TRUE; iso_audit_coverage(); }
+	}
+
+	iso_geometry(td, &ox, &oy, &map_w, &map_h);
+	iso_render_to_buffer(td, map_w, map_h);
+	iso_present(td, ox, oy);
+
+	/* Barra de stats + línea de mensajes desde el backing store 2D (la escena
+	 * iso no las toca). Sin backing store, al menos recompón la fila 0. */
+	if (td->backing_store)
+	{
+		int win_w = td->cols * td->font_wid;
+		int win_h = td->rows * td->font_hgt;
+		gdk_draw_pixmap(td->drawing_area->window, td->gc, td->backing_store,
+		                0, 0, 0, 0, win_w, oy);              /* línea de mensajes */
+		gdk_draw_pixmap(td->drawing_area->window, td->gc, td->backing_store,
+		                0, oy, 0, oy, ox, win_h - oy);       /* barra lateral */
+	}
+	else
+	{
+		iso_overlay_text_row(td, 0);
+	}
+}
+
+/*
+ * Refresco BARATO para el movimiento del ratón: solo vuelve a volcar el buffer
+ * cacheado + el rombo del hover (sin re-renderizar tiles ni la barra). Si no hay
+ * buffer o cambió la geometría, hace un redibujado completo.
+ */
+static void iso_refresh_overlay(term_data *td)
+{
+	int ox, oy, map_w, map_h;
+
+	if (!iso_sheet || !td->drawing_area->window) return;
+
+	iso_geometry(td, &ox, &oy, &map_w, &map_h);
+
+	if (!iso_buffer || (iso_buf_w != map_w) || (iso_buf_h != map_h))
+	{
+		iso_draw_scene(td);
+		return;
+	}
+
+	iso_present(td, ox, oy);
+}
+
+
+#ifdef USE_SOUND
+
+/* --- TomeTik: audio (SDL2_mixer). Sonido por eventos (Sound.cfg) y música. --- */
+#define GTK_SND_MAX 12               /* samples por evento como mucho */
+static Mix_Chunk *snd_chunk[SOUND_MAX][GTK_SND_MAX];
+static int snd_count[SOUND_MAX];
+static bool sdl_audio_ready = FALSE; /* Mix_OpenAudio hecho */
+static bool snd_loaded = FALSE;      /* Sound.cfg cargado */
+static Mix_Music *cur_music = NULL;
+
+/* Carpeta lib/xtra/sound (ANGBAND_DIR_XTRA + "sound"). */
+static void gtk_sound_dir(char *buf, int len)
+{
+	path_build(buf, len, ANGBAND_DIR_XTRA, "sound");
+}
+
+/* Abre el dispositivo de audio (perezoso, solo al activar sonido/música). */
+static bool gtk_audio_open(void)
+{
+	if (sdl_audio_ready) return TRUE;
+
+	if (SDL_Init(SDL_INIT_AUDIO) < 0)
+	{
+		plog_fmt("SDL audio init: %s", SDL_GetError());
+		return FALSE;
+	}
+	if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 1024) < 0)
+	{
+		plog_fmt("Mix_OpenAudio: %s", Mix_GetError());
+		return FALSE;
+	}
+	Mix_AllocateChannels(16);
+	sdl_audio_ready = TRUE;
+	return TRUE;
+}
+
+/* Carga los samples de cada evento desde lib/xtra/sound/Sound.cfg (mismo formato
+ * que usa el GDI): "evento = a.wav b.wav ...". */
+static void gtk_sound_load(void)
+{
+	char dir[1024], path[1024], line[1024];
+	FILE *fp;
+
+	if (snd_loaded) return;
+	snd_loaded = TRUE;
+
+	gtk_sound_dir(dir, sizeof(dir));
+	path_build(path, sizeof(path), dir, "Sound.cfg");
+
+	fp = my_fopen(path, "r");
+	if (!fp) { plog_fmt("sonido: no pude abrir %s", path); return; }
+
+	while (fgets(line, sizeof(line), fp))
+	{
+		char *eq, *name, *p, *tok;
+		int idx = -1, i;
+
+		/* saltar comentarios / secciones / vacías */
+		p = line;
+		while (*p == ' ' || *p == '\t') p++;
+		if (*p == '#' || *p == '[' || *p == '\n' || *p == '\r' || *p == '\0') continue;
+
+		eq = strchr(p, '=');
+		if (!eq) continue;
+		*eq = '\0';
+
+		/* nombre del evento (sin espacios al final) */
+		name = p;
+		{ char *e = eq - 1; while (e > name && (*e == ' ' || *e == '\t')) *e-- = '\0'; }
+
+		/* índice del evento en angband_sound_name[] */
+		for (i = 1; i < SOUND_MAX; i++)
+			if (streq(name, angband_sound_name[i])) { idx = i; break; }
+		if (idx < 0) continue;
+
+		/* cargar cada wav listado */
+		tok = strtok(eq + 1, " \t\r\n");
+		while (tok && snd_count[idx] < GTK_SND_MAX)
+		{
+			char wpath[1024];
+			Mix_Chunk *c;
+			path_build(wpath, sizeof(wpath), dir, tok);
+			c = Mix_LoadWAV(wpath);
+			if (c) snd_chunk[idx][snd_count[idx]++] = c;
+			tok = strtok(NULL, " \t\r\n");
+		}
+	}
+	my_fclose(fp);
+}
+
+/* Reproduce un sample (aleatorio) del evento v, si hay sonido activo. */
+static void gtk_play_sound(int v)
+{
+	if (!use_sound || !sdl_audio_ready) return;
+	if (v <= 0 || v >= SOUND_MAX) return;
+	if (snd_count[v] <= 0) return;
+	Mix_PlayChannel(-1, snd_chunk[v][rand_int(snd_count[v])], 0);
+}
+
+/* Activa/desactiva el sonido (carga perezosa de samples al activar). */
+static void gtk_sound_enable(bool on)
+{
+	use_sound = on;
+	if (on)
+	{
+		if (!gtk_audio_open()) { use_sound = FALSE; return; }
+		gtk_sound_load();
+	}
+}
+
+/* Arranca/para la música. Busca el primer fichero en lib/xtra/music/
+ * (ogg/mp3/mod/it/xm/s3m/wav). Sin ficheros, es un no-op (aún no hay música). */
+static void gtk_music_update(void)
+{
+	char mdir[1024], mpath[1024];
+	DIR *d;
+	struct dirent *ent;
+	char found[256];
+
+	if (!use_music)
+	{
+		if (cur_music) { Mix_HaltMusic(); Mix_FreeMusic(cur_music); cur_music = NULL; }
+		return;
+	}
+
+	if (!gtk_audio_open()) { use_music = FALSE; return; }
+	if (cur_music) return;   /* ya sonando */
+
+	path_build(mdir, sizeof(mdir), ANGBAND_DIR_XTRA, "music");
+	found[0] = '\0';
+	d = opendir(mdir);
+	if (d)
+	{
+		while ((ent = readdir(d)))
+		{
+			cptr e = strrchr(ent->d_name, '.');
+			if (!e) continue;
+			if (!strcmp(e, ".ogg") || !strcmp(e, ".mp3") || !strcmp(e, ".mod") ||
+			    !strcmp(e, ".it") || !strcmp(e, ".xm") || !strcmp(e, ".s3m") ||
+			    !strcmp(e, ".wav"))
+			{
+				strnfmt(found, sizeof(found), "%s", ent->d_name);
+				break;
+			}
+		}
+		closedir(d);
+	}
+
+	if (!found[0]) return;   /* todavía no hay música instalada */
+
+	path_build(mpath, sizeof(mpath), mdir, found);
+	cur_music = Mix_LoadMUS(mpath);
+	if (cur_music) Mix_PlayMusic(cur_music, -1);   /* loop infinito */
+}
+
+#endif /* USE_SOUND */
+
+
 static errr Term_xtra_gtk(int n, int v)
 {
 	/* Handle a subset of the legal requests */
 	switch (n)
 	{
+#ifdef USE_SOUND
+		/* Play a sound (engine ya filtró por use_sound en sound()) */
+	case TERM_XTRA_SOUND:
+		{
+			gtk_play_sound(v);
+			return (0);
+		}
+#endif /* USE_SOUND */
+
 		/* Make a noise */
 	case TERM_XTRA_NOISE:
 		{
@@ -3113,6 +4288,20 @@ static errr Term_xtra_gtk(int n, int v)
 		/* Flush the output */
 	case TERM_XTRA_FRESH:
 		{
+			/* TomeTik: en modo iso, repinta la escena isométrica sobre la
+			 * ventana principal tras refrescar el term. NO mientras hay texto
+			 * plano de pantalla completa por encima: la tienda (iso_in_store)
+			 * o cualquier popup que pase por screen_save() -> character_icky
+			 * (inventario 'i', hoja 'C', menús de hechizos/skills, ayuda,
+			 * opciones, la lista de objetos con '*', prompts de askfor...).
+			 * En esos casos dejamos ver el render 2D del term. */
+			if (iso_mode && iso_sheet && game_in_progress && character_generated
+			                && !iso_in_store && !character_icky
+			                && (Term == &data[0].t))
+			{
+				iso_draw_scene(&data[0]);
+			}
+
 			/* Flush pending X requests - almost always no-op */
 			gdk_flush();
 
@@ -4437,6 +5626,20 @@ static gboolean expose_event_handler(
 	/* Paranoia */
 	if (td == NULL) return (TRUE);
 
+	/* TomeTik: en modo iso la escena se dibuja DIRECTO a la ventana (el backing
+	 * store guarda el render 2D del term). Por eso cualquier expose -p.ej. al
+	 * arrastrarse el popup del tooltip por encima del mapa- debe repintar la
+	 * escena iso, no blitear el 2D del backing store. Mismas condiciones que el
+	 * repintado iso de TERM_XTRA_FRESH (incluido el gate por popups: con un
+	 * texto plano de pantalla completa arriba restauramos el backing store
+	 * 2D, no repintamos la escena iso). */
+	if (iso_mode && iso_sheet && game_in_progress && character_generated
+	                && !iso_in_store && !character_icky && (td == &data[0]))
+	{
+		iso_draw_scene(td);
+		return (TRUE);
+	}
+
 	/* The window has a backing store */
 	if (td->backing_store)
 	{
@@ -4556,6 +5759,50 @@ static errr term_data_init(term_data *td, int i)
 
 
 /*
+ * TomeTik: menú "Action" (réplica del de OmnibandTk). Cada entrada manda al
+ * juego la tecla del comando correspondiente; el inkey() bloqueado en
+ * request_command la recoge y ejecuta el comando, igual que si la pulsaras.
+ *
+ * Solo actúa si el juego está esperando un comando de alto nivel (inkey_flag,
+ * el equivalente a INKEY_CMD de OmnibandTk), para no inyectar teclas en medio
+ * de un sub-prompt/menú. La tecla del comando va en callback_action (que el
+ * item factory entrega como user_data, igual que change_graf_mode_*).
+ */
+static void action_event_handler(
+        GtkButton *was_clicked,
+        gpointer user_data)
+{
+	int key = (int)user_data;
+
+	if (!game_in_progress || !character_generated) return;
+	if (!inkey_flag) return;
+
+	Term_keypress(key);
+}
+
+
+/* TomeTik: menú Audio -- activar/desactivar sonido y música (CheckItems). */
+static void toggle_sound_event_handler(
+        GtkButton *was_clicked,
+        gpointer user_data)
+{
+#ifdef USE_SOUND
+	gtk_sound_enable(!use_sound);
+#endif
+}
+
+static void toggle_music_event_handler(
+        GtkButton *was_clicked,
+        gpointer user_data)
+{
+#ifdef USE_SOUND
+	use_music = !use_music;
+	gtk_music_update();
+#endif
+}
+
+
+/*
  * Neater menu code with GtkItemFactory.
  *
  * Menu bar of the Angband window
@@ -4586,6 +5833,50 @@ static GtkItemFactoryEntry main_menu_items[] =
 	  save_event_handler, 0, NULL },
 	{ "/File/Quit", "<mod1>Q",
 	  quit_event_handler, 0, NULL },
+
+	/* "Action" menu (TomeTik: acciones del juego, jugable con ratón; las teclas
+	 * van entre paréntesis. No se ponen aceleradores para no robarle teclas al
+	 * juego). Réplica del menú Action de OmnibandTk. */
+	{ "/Action", NULL, NULL, 0, "<Branch>" },
+
+	{ "/Action/Movement", NULL, NULL, 0, "<Branch>" },
+	{ "/Action/Movement/Go down (>)", NULL, action_event_handler, '>', NULL },
+	{ "/Action/Movement/Go up (<)", NULL, action_event_handler, '<', NULL },
+	{ "/Action/Movement/Run (.)", NULL, action_event_handler, '.', NULL },
+	{ "/Action/Movement/Walk and pick up (;)", NULL, action_event_handler, ';', NULL },
+	{ "/Action/Movement/Walk (-)", NULL, action_event_handler, '-', NULL },
+	{ "/Action/Movement/Auto-explore (^E)", NULL, action_event_handler, KTRL('E'), NULL },
+
+	{ "/Action/Alter", NULL, NULL, 0, "<Branch>" },
+	{ "/Action/Alter/Alter (+)", NULL, action_event_handler, '+', NULL },
+	{ "/Action/Alter/Open (o)", NULL, action_event_handler, 'o', NULL },
+	{ "/Action/Alter/Close (c)", NULL, action_event_handler, 'c', NULL },
+	{ "/Action/Alter/Disarm (D)", NULL, action_event_handler, 'D', NULL },
+	{ "/Action/Alter/Bash (B)", NULL, action_event_handler, 'B', NULL },
+	{ "/Action/Alter/Tunnel (T)", NULL, action_event_handler, 'T', NULL },
+
+	{ "/Action/Looking", NULL, NULL, 0, "<Branch>" },
+	{ "/Action/Looking/Look (l)", NULL, action_event_handler, 'l', NULL },
+	{ "/Action/Looking/Locate (L)", NULL, action_event_handler, 'L', NULL },
+	{ "/Action/Looking/Full map (M)", NULL, action_event_handler, 'M', NULL },
+	{ "/Action/Looking/Target (*)", NULL, action_event_handler, '*', NULL },
+
+	{ "/Action/Searching", NULL, NULL, 0, "<Branch>" },
+	{ "/Action/Searching/Search (s)", NULL, action_event_handler, 's', NULL },
+	{ "/Action/Searching/Toggle search mode (S)", NULL, action_event_handler, 'S', NULL },
+
+	{ "/Action/Resting", NULL, NULL, 0, "<Branch>" },
+	{ "/Action/Resting/Rest (R)", NULL, action_event_handler, 'R', NULL },
+	{ "/Action/Resting/Stay and pick up (,)", NULL, action_event_handler, ',', NULL },
+	{ "/Action/Resting/Stay (g)", NULL, action_event_handler, 'g', NULL },
+
+	{ "/Action/sep1", NULL, NULL, 0, "<Separator>" },
+	{ "/Action/Take note (:)", NULL, action_event_handler, ':', NULL },
+
+	/* "Audio" menu (TomeTik): sonido y música, desactivados por defecto. */
+	{ "/Audio", NULL, NULL, 0, "<Branch>" },
+	{ "/Audio/Sound", NULL, toggle_sound_event_handler, 0, "<CheckItem>" },
+	{ "/Audio/Music", NULL, toggle_music_event_handler, 0, "<CheckItem>" },
 
 	/* "Terms" menu */
 	{ "/Terms", NULL,
@@ -4644,6 +5935,8 @@ static GtkItemFactoryEntry main_menu_items[] =
 	  change_graf_mode_event_handler, GRAF_MODE_OLD, "<CheckItem>" },
 	{ "/Options/Graphics/New", NULL,
 	  change_graf_mode_event_handler, GRAF_MODE_NEW, "<CheckItem>" },
+	{ "/Options/Graphics/Isometric", NULL,
+	  change_graf_mode_event_handler, GRAF_MODE_ISO, "<CheckItem>" },
 # ifdef USE_DOUBLE_TILES
 	{ "/Options/Graphics/sep3", NULL,
 	  NULL, 0, "<Separator>" },
@@ -4974,6 +6267,9 @@ static void graf_menu_update_handler(
 	check_menu_item(
 	        "<Angband>/Options/Graphics/New",
 	        (graf_mode == GRAF_MODE_NEW));
+	check_menu_item(
+	        "<Angband>/Options/Graphics/Isometric",
+	        (graf_mode == GRAF_MODE_ISO));
 
 #ifdef USE_DOUBLE_TILES
 
@@ -5133,6 +6429,239 @@ static void add_menu_update_callbacks()
 
 
 /*
+ * TomeTik: tooltips de casilla al pasar el ratón por el mapa.
+ *
+ * Funciona en los tres modos de render (iso / tiles 2D / ASCII) y con tiles
+ * simples o dobles (bigtile): el texto lo genera el motor con describe_grid()
+ * (el mismo "qué hay aquí" del comando look), y el píxel se convierte a celda
+ * del cave según el modo. El globo es un GTK_WINDOW_POPUP que sigue al cursor.
+ */
+
+/* Convierte un píxel (px,py) del drawing area del mapa a la celda del cave
+ * (*cy,*cx). Devuelve FALSE si el píxel cae fuera del área de mapa (p.ej. el
+ * sidebar de texto o la línea superior en modo 2D/ASCII). */
+static bool gtk_map_pixel_to_cave(term_data *td, int px, int py, int *cy, int *cx)
+{
+	if (iso_mode)
+	{
+		/* Inverso de la proyección isométrica. El mapa iso vive desplazado por la
+		 * barra de stats (ox) y la línea de mensajes (oy); fuera de esa región no
+		 * hay casilla de mapa. */
+		int fw = td->font_wid, fh = td->font_hgt;
+		int ox = COL_MAP * fw;
+		int oy = ROW_MAP * fh;
+		int map_w = td->cols * fw - ox;
+		int map_h = td->rows * fh - oy;
+
+		if (map_w <= 0 || map_h <= 0) { ox = oy = 0; map_w = td->cols * fw; map_h = td->rows * fh; }
+		if (px < ox || py < oy) return FALSE;
+
+		iso_unproject(px - ox, py - oy, p_ptr->px, p_ptr->py, map_w, map_h, cx, cy);
+		return TRUE;
+	}
+	else
+	{
+		/* 2D / ASCII: inverso de panel_col_of()/panel_row_of() (cave.c). El
+		 * mapa empieza en la celda (COL_MAP,ROW_MAP) del term; con bigtile cada
+		 * columna del cave ocupa 2 celdas de term. */
+		int scol = px / td->font_wid;
+		int srow = py / td->font_hgt;
+		int col = scol - COL_MAP;
+		int row = srow - ROW_MAP;
+
+		/* Fuera del área de mapa (sidebar / línea de mensajes). */
+		if (col < 0 || row < 0) return FALSE;
+
+		if (use_bigtile) col /= 2;
+		if (use_zoom) { col /= arg_zoom; row /= arg_zoom; }
+
+		*cx = col + panel_col_min;
+		*cy = row + panel_row_min;
+		return TRUE;
+	}
+}
+
+/* Crea el popup del tooltip la primera vez, con aspecto de tooltip clásico
+ * (fondo amarillo pálido, texto negro, multilínea alineado a la izquierda). */
+static void tooltip_ensure(void)
+{
+	GdkColor bg, fg;
+
+	if (tooltip_win) return;
+
+	tooltip_win = gtk_window_new(GTK_WINDOW_POPUP);
+	gtk_widget_set_name(tooltip_win, "gtk-tooltips");
+	gtk_container_set_border_width(GTK_CONTAINER(tooltip_win), 4);
+
+	tooltip_label = gtk_label_new("");
+	gtk_misc_set_alignment(GTK_MISC(tooltip_label), 0.0, 0.0);
+	gtk_label_set_justify(GTK_LABEL(tooltip_label), GTK_JUSTIFY_LEFT);
+	gtk_container_add(GTK_CONTAINER(tooltip_win), tooltip_label);
+	gtk_widget_show(tooltip_label);
+
+	/* Amarillo pálido clásico + texto negro (independiente del tema). */
+	bg.red = 0xFFFF; bg.green = 0xFFFF; bg.blue = 0xC000;
+	fg.red = 0x0000; fg.green = 0x0000; fg.blue = 0x0000;
+	gtk_widget_modify_bg(tooltip_win, GTK_STATE_NORMAL, &bg);
+	gtk_widget_modify_fg(tooltip_label, GTK_STATE_NORMAL, &fg);
+}
+
+/* Realmente pinta el globo (lo llama el timer tras el retardo). */
+static gboolean tooltip_reveal_cb(gpointer data)
+{
+	tooltip_ensure();
+	gtk_label_set_text(GTK_LABEL(tooltip_label), tooltip_pending);
+	/* Un poco abajo-derecha del cursor, para no taparlo. */
+	gtk_window_move(GTK_WINDOW(tooltip_win), tooltip_px + 12, tooltip_py + 16);
+	gtk_widget_show(tooltip_win);
+
+	tooltip_timer = 0;
+	return FALSE;   /* one-shot */
+}
+
+/* Oculta el tooltip, cancela el timer pendiente y olvida la celda mostrada. */
+static void tooltip_hide(void)
+{
+	tooltip_cy = tooltip_cx = -1;
+	if (tooltip_timer) { g_source_remove(tooltip_timer); tooltip_timer = 0; }
+	if (tooltip_win) gtk_widget_hide(tooltip_win);
+}
+
+/* Programa el tooltip para 'text' junto al puntero, tras TOOLTIP_DELAY_MS. */
+static void tooltip_arm(cptr text, gint root_x, gint root_y)
+{
+	strnfmt(tooltip_pending, sizeof(tooltip_pending), "%s", text);
+	tooltip_px = root_x;
+	tooltip_py = root_y;
+
+	if (tooltip_timer) g_source_remove(tooltip_timer);
+	tooltip_timer = g_timeout_add(TOOLTIP_DELAY_MS, tooltip_reveal_cb, NULL);
+}
+
+/* Quita el resaltado de hover (iso) y repinta la escena si hacía falta. */
+static void iso_clear_hover(term_data *td)
+{
+	if (!iso_mode) return;
+	if ((iso_hover_y == -1) && (iso_hover_x == -1)) return;
+
+	iso_hover_y = iso_hover_x = -1;
+	if (game_in_progress && character_generated) iso_refresh_overlay(td);
+}
+
+/* Movimiento del ratón sobre el mapa: actualiza el tooltip de casilla. */
+static gboolean motion_notify_event_handler(
+        GtkWidget *widget,
+        GdkEventMotion *event,
+        gpointer user_data)
+{
+	term_data *td = (term_data *)user_data;
+	int cy = 0, cx = 0;
+	char buf[256];
+
+	/* Solo con una partida realmente en curso (cave[] poblado). */
+	if (!game_in_progress || !character_generated)
+	{
+		tooltip_hide();
+		iso_clear_hover(td);
+		return FALSE;
+	}
+
+	if (!gtk_map_pixel_to_cave(td, (int)event->x, (int)event->y, &cy, &cx))
+	{
+		tooltip_hide();
+		iso_clear_hover(td);
+		return FALSE;
+	}
+
+	/* Misma celda: si el globo ya está visible, lo seguimos con el cursor;
+	 * si aún está en el retardo, actualizamos dónde aparecerá. */
+	if (cy == tooltip_cy && cx == tooltip_cx)
+	{
+		if (tooltip_win && GTK_WIDGET_VISIBLE(tooltip_win))
+			gtk_window_move(GTK_WINDOW(tooltip_win),
+			                (gint)event->x_root + 12, (gint)event->y_root + 16);
+		else if (tooltip_timer)
+		{
+			tooltip_px = (gint)event->x_root;
+			tooltip_py = (gint)event->y_root;
+		}
+		return FALSE;
+	}
+
+	/* Cambiamos de celda: mover el rombo de resaltado. Refresco BARATO (solo
+	 * re-vuelca el buffer cacheado + el rombo; no re-renderiza tiles). */
+	if (iso_mode && ((cy != iso_hover_y) || (cx != iso_hover_x)))
+	{
+		iso_hover_y = cy;
+		iso_hover_x = cx;
+		iso_refresh_overlay(td);
+	}
+
+	/* Pedir al motor el "qué hay aquí". */
+	describe_grid(cy, cx, buf);
+
+	if (buf[0] == '\0')
+	{
+		tooltip_hide();
+		return FALSE;
+	}
+
+	/* Nueva celda con contenido: rearmar el retardo (oculta el globo previo). */
+	tooltip_cy = cy;
+	tooltip_cx = cx;
+	if (tooltip_win) gtk_widget_hide(tooltip_win);
+	tooltip_arm(buf, (gint)event->x_root, (gint)event->y_root);
+
+	return FALSE;
+}
+
+/* El ratón sale del mapa: ocultar el tooltip y quitar el resaltado. */
+static gboolean leave_notify_event_handler(
+        GtkWidget *widget,
+        GdkEventCrossing *event,
+        gpointer user_data)
+{
+	term_data *td = (term_data *)user_data;
+
+	tooltip_hide();
+	iso_clear_hover(td);
+	return FALSE;
+}
+
+/* Clic en el mapa: "go to" (click-to-walk). Botón izquierdo sobre una casilla
+ * transitable -> el motor calcula la ruta A* y camina hasta allí. Reutiliza la
+ * misma identificación de celda que el tooltip. El ESCAPE que inyectamos solo
+ * sirve para desbloquear el inkey() en el que el motor está esperando comando;
+ * el bucle de turnos ve 'travelling' y va dando los pasos. */
+static gboolean button_press_event_handler(
+        GtkWidget *widget,
+        GdkEventButton *event,
+        gpointer user_data)
+{
+	term_data *td = (term_data *)user_data;
+	int cy = 0, cx = 0;
+
+	/* Solo botón izquierdo, con partida en curso y no dentro de menú/tienda. */
+	if (event->button != 1) return FALSE;
+	if (!game_in_progress || !character_generated || character_icky) return FALSE;
+
+	if (!gtk_map_pixel_to_cave(td, (int)event->x, (int)event->y, &cy, &cx))
+		return FALSE;
+
+	/* Clic: atacar/intercambiar si hay un monstruo adyacente, o viajar hasta la
+	 * casilla. Si hace algo, desbloquear el inkey para que el bucle de turnos lo
+	 * ejecute (el ESCAPE es un no-op de comando). */
+	if (do_cmd_click(cy, cx))
+	{
+		tooltip_hide();
+		Term_keypress(ESCAPE);
+	}
+
+	return TRUE;
+}
+
+
+/*
  * Create Gtk widgets for a terminal window and set up callbacks
  */
 static void init_gtk_window(term_data *td, int i)
@@ -5233,6 +6762,31 @@ static void init_gtk_window(term_data *td, int i)
 	        "expose_event",
 	        GTK_SIGNAL_FUNC(expose_event_handler),
 	        (gpointer)td);
+
+	/* TomeTik: tooltips de casilla al pasar el ratón (solo en el mapa). El
+	 * drawing area no recibe eventos de movimiento por defecto: hay que pedir
+	 * la máscara explícitamente. */
+	if (main_window)
+	{
+		gtk_widget_add_events(td->drawing_area,
+		                      GDK_POINTER_MOTION_MASK | GDK_LEAVE_NOTIFY_MASK
+		                      | GDK_BUTTON_PRESS_MASK);
+		gtk_signal_connect(
+		        GTK_OBJECT(td->drawing_area),
+		        "motion_notify_event",
+		        GTK_SIGNAL_FUNC(motion_notify_event_handler),
+		        (gpointer)td);
+		gtk_signal_connect(
+		        GTK_OBJECT(td->drawing_area),
+		        "leave_notify_event",
+		        GTK_SIGNAL_FUNC(leave_notify_event_handler),
+		        (gpointer)td);
+		gtk_signal_connect(
+		        GTK_OBJECT(td->drawing_area),
+		        "button_press_event",
+		        GTK_SIGNAL_FUNC(button_press_event_handler),
+		        (gpointer)td);
+	}
 
 
 	/* Create menu */
@@ -5405,6 +6959,15 @@ errr init_gtk2(int argc, char **argv)
 			continue;
 		}
 
+		/* TomeTik: arrancar en modo isométrico (= seleccionar GRAF_MODE_ISO).
+		 * init_graphics fija iso_mode y carga las láminas. Se puede alternar en
+		 * caliente desde Options -> Graphics. */
+		if (streq(argv[i], "-i"))
+		{
+			graf_mode_request = GRAF_MODE_ISO;
+			continue;
+		}
+
 #endif /* USE_GRAPHICS */
 
 		/* None of the above */
@@ -5452,6 +7015,10 @@ errr init_gtk2(int argc, char **argv)
 		/* Init the window */
 		init_gtk_window(td, i);
 	}
+
+	/* TomeTik: las láminas del modo iso (dg_iso32.gif + 32x32.bmp) se cargan de
+	 * forma perezosa en init_graphics()/iso_load_sheets() la primera vez que se
+	 * entra en GRAF_MODE_ISO (sea por -i al arrancar o por el menú Graphics). */
 
 	/* Activate the "Angband" window screen */
 	Term_activate(&data[0].t);

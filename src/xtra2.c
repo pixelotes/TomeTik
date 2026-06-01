@@ -5263,6 +5263,202 @@ cptr look_mon_desc(int m_idx)
 
 
 /*
+ * Non-interactive sibling of target_set_aux(): build a human readable
+ * description of EVERYTHING at grid (y,x) -- the monster, each known object, a
+ * trap and the terrain -- into 'out_val' (caller buffer, at least 256 bytes).
+ *
+ * A single thing reads as one sentence ("You see a kobold."); several are
+ * listed one per line so a hover tooltip can show the monster AND the items AND
+ * the floor at once. Used by the graphical frontends for mouse-hover tooltips.
+ * 'out_val' is set to the empty string when there is nothing worth describing
+ * (off the map, or an unknown/unseen grid), so the caller just hides the tip.
+ *
+ * Mirrors OmnibandTk's angtk_examine(), adapted to the ToME 2.2.2 cave_type.
+ * It must NOT call inkey()/prt()/Term_*: it only reads game state.
+ */
+void describe_grid(int y, int x, char *out_val)
+{
+	cave_type *c_ptr;
+
+	bool on_player;
+
+	int feat;
+
+	s16b this_o_idx, next_o_idx = 0;
+
+	/* Collected entity descriptions to list (monster, objects, trap, feature) */
+	char parts[12][80];
+	int nparts = 0;
+	int i, len;
+
+	/* Nothing to see */
+	out_val[0] = '\0';
+
+	/* Off the map */
+	if (!in_bounds2(y, x)) return;
+
+	c_ptr = &cave[y][x];
+	on_player = ((y == p_ptr->py) && (x == p_ptr->px));
+
+	/* Hack -- hallucination: we can't trust anything we see */
+	if (p_ptr->image)
+	{
+		strcpy(out_val, "You see something strange.");
+		return;
+	}
+
+	/* Monster (visible, and not a sleeping mimic which looks like an object) */
+	if (c_ptr->m_idx)
+	{
+		monster_type *m_ptr = &m_list[c_ptr->m_idx];
+		monster_race *r_ptr = race_inf(m_ptr);
+
+		if (m_ptr->ml && !((r_ptr->flags9 & RF9_MIMIC) && m_ptr->csleep))
+		{
+			char m_name[80];
+			cptr mstat;
+
+			monster_desc(m_name, m_ptr, 0x08);
+
+			switch (m_ptr->status)
+			{
+			case MSTATUS_NEUTRAL:
+			case MSTATUS_NEUTRAL_M:
+			case MSTATUS_NEUTRAL_P:
+				mstat = " (neutral)";
+				break;
+			case MSTATUS_PET:
+				mstat = " (pet)";
+				break;
+			case MSTATUS_FRIEND:
+				mstat = " (coaligned)";
+				break;
+			case MSTATUS_COMPANION:
+				mstat = " (companion)";
+				break;
+			default:
+				mstat = "";
+				break;
+			}
+
+			strnfmt(parts[nparts], 80, "%s (%s)%s",
+			        m_name, look_mon_desc(c_ptr->m_idx), mstat);
+			nparts++;
+		}
+	}
+
+	/* Every known object in the pile (cap the list, then summarize the rest) */
+	{
+		int more = 0;
+
+		for (this_o_idx = c_ptr->o_idx; this_o_idx; this_o_idx = next_o_idx)
+		{
+			object_type *o_ptr = &o_list[this_o_idx];
+
+			next_o_idx = o_ptr->next_o_idx;
+
+			if (!o_ptr->marked) continue;
+
+			if (nparts < 8)
+			{
+				char o_name[80];
+
+				object_desc(o_name, o_ptr, TRUE, 3);
+				strnfmt(parts[nparts], 80, "%s", o_name);
+				nparts++;
+			}
+			else
+			{
+				more++;
+			}
+		}
+
+		if (more && (nparts < 11))
+		{
+			strnfmt(parts[nparts], 80, "...and %d more item%s",
+			        more, (more == 1) ? "" : "s");
+			nparts++;
+		}
+	}
+
+	/* Known trap on the grid */
+	if ((c_ptr->info & (CAVE_TRDT)) && c_ptr->t_idx && (nparts < 11))
+	{
+		if (t_info[c_ptr->t_idx].ident)
+			strnfmt(parts[nparts], 80, "a trap (%s)",
+			        t_name + t_info[c_ptr->t_idx].name);
+		else
+			strnfmt(parts[nparts], 80, "an unknown trap");
+		nparts++;
+	}
+
+	/* Terrain feature (apply "mimic") */
+	if (c_ptr->mimic)
+		feat = c_ptr->mimic;
+	else
+		feat = f_info[c_ptr->feat].mimic;
+
+	/* Require knowledge about the grid, or the ability to see it */
+	if (!(c_ptr->info & (CAVE_MARK)) && !player_can_see_bold(y, x))
+		feat = FEAT_NONE;
+
+	if ((feat != FEAT_NONE) && (nparts < 12))
+	{
+		cptr name;
+		cptr art;
+
+		if (feat == FEAT_SHOP)
+			name = st_name + st_info[c_ptr->special].name;
+		else
+			name = f_name + f_info[feat].name;
+
+		/* Indefinite article */
+		art = (is_a_vowel(name[0])) ? "an " : "a ";
+
+		/* Shop entrances and special tiles */
+		if (feat == FEAT_SHOP)
+		{
+			art = "the entrance to the ";
+		}
+		if ((feat == FEAT_MORE) && c_ptr->special)
+		{
+			art = "";
+			name = d_text + d_info[c_ptr->special].text;
+		}
+		if (p_ptr->wild_mode && (feat == FEAT_TOWN))
+		{
+			art = "";
+			name = format("%s(%s)",
+			              wf_name + wf_info[wild_map[y][x].feat].name,
+			              wf_text + wf_info[wild_map[y][x].feat].text);
+		}
+
+		strnfmt(parts[nparts], 80, "%s%s", art, name);
+		nparts++;
+	}
+
+	/* Nothing worth describing (unknown/unseen empty grid) */
+	if (nparts == 0) return;
+
+	/* Format: a single thing reads as a sentence; several are listed one per
+	 * line so the tooltip shows the monster AND the items AND the floor. */
+	if (nparts == 1)
+	{
+		strnfmt(out_val, 256, "%s%s.",
+		        on_player ? "You are on " : "You see ", parts[0]);
+	}
+	else
+	{
+		len = strnfmt(out_val, 256, "%s:",
+		              on_player ? "You are standing on" : "You see");
+		for (i = 0; i < nparts; i++)
+			len += strnfmt(out_val + len, 256 - len, "\n  - %s", parts[i]);
+	}
+}
+
+
+
+/*
  * Angband sorting algorithm -- quick sort in place
  *
  * Note that the details of the data we are sorting is hidden,
