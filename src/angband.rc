@@ -30,6 +30,7 @@ ANGBAND MENU
    MENUITEM "Run (.)", 2046
    MENUITEM "Walk and pick up (;)", 2059
    MENUITEM "Walk (-)", 2045
+   MENUITEM "Auto-explore (^E)", 2005
   }
   POPUP "Alter"
   {
