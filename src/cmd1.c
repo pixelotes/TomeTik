@@ -4729,6 +4729,12 @@ static long explore_seen_count = 0;   /* nº de celdas vistas (para medir progre
 static byte *explore_bad = NULL;
 static int explore_goal_y = -1, explore_goal_x = -1;
 static long explore_goal_count = -1;  /* celdas vistas cuando fijamos la meta */
+static bool explore_goal_is_gold = FALSE; /* la meta actual es un montón de oro */
+
+/* Radio (en pasos) dentro del cual el autoexplore se DESVÍA a recoger oro que ya
+ * ha visto. El oro más lejos se ignora (no lo perseguimos por todo el mapa).
+ * Configurable; 0 lo desactiva. */
+int explore_gold_radius = 5;
 
 /* (Re)allocate for the current level if needed, then fold in everything that is
  * memorized or currently visible. Cheap (one pass); call before pathing. */
@@ -4769,6 +4775,21 @@ static bool explore_is_seen(int y, int x)
 {
 	if (cave[y][x].info & (CAVE_MARK | CAVE_SEEN)) return (TRUE);
 	if (explore_seen && (explore_seen[y * cur_wid + x])) return (TRUE);
+	return (FALSE);
+}
+
+/* ¿Hay oro (ya visto) en esta celda? Para que el autoexplore lo recoja si está
+ * cerca (ver explore_gold_radius). */
+static bool cell_has_gold(int y, int x)
+{
+	s16b this_o_idx, next_o_idx;
+
+	for (this_o_idx = cave[y][x].o_idx; this_o_idx; this_o_idx = next_o_idx)
+	{
+		object_type *o_ptr = &o_list[this_o_idx];
+		next_o_idx = o_ptr->next_o_idx;
+		if (o_ptr->marked && (o_ptr->tval == TV_GOLD)) return (TRUE);
+	}
 	return (FALSE);
 }
 
@@ -4833,8 +4854,11 @@ void travel_cancel(void)
 
 	travel_clear();
 
-	if (interrupted)
-		msg_print(was_exploring ? "You stop exploring." : "You stop travelling.");
+	/* Durante autoexplore NO avisamos aquí: un tramo se corta a menudo por algo
+	 * benigno (recoger oro/objeto) y explore_step re-planifica y sigue solo. Los
+	 * mensajes de parada real (monstruo / "Done") los pone explore_step. */
+	if (interrupted && !was_exploring)
+		msg_print("You stop travelling.");
 }
 
 /*
@@ -5119,7 +5143,7 @@ void click_act_step(void)
  * player over walkable known grids returns the closest such grid (and proves it
  * is reachable in one pass). Returns TRUE and fills (*gy,*gx) if one exists.
  */
-static bool find_nearest_unexplored(int *gy, int *gx)
+static bool find_nearest_goal(int *gy, int *gx, bool *is_gold)
 {
 	/* 8-directional neighbour offsets. */
 	static const int dy8[8] = { -1, 1, 0, 0, -1, -1, 1, 1 };
@@ -5127,17 +5151,20 @@ static bool find_nearest_unexplored(int *gy, int *gx)
 
 	int n = cur_hgt * cur_wid;
 	byte *seen;
-	int *queue;
+	int *queue, *dist;
 	int head = 0, tail = 0;
 	int start = p_ptr->py * cur_wid + p_ptr->px;
 	bool found = FALSE;
 
+	*is_gold = FALSE;
 	if (n <= 0) return (FALSE);
 
 	C_MAKE(seen, n, byte);
 	C_MAKE(queue, n, int);
+	C_MAKE(dist, n, int);
 
 	seen[start] = 1;
+	dist[start] = 0;
 	queue[tail++] = start;
 
 	while (head < tail)
@@ -5146,11 +5173,17 @@ static bool find_nearest_unexplored(int *gy, int *gx)
 		int cy = cur / cur_wid;
 		int cx = cur % cur_wid;
 		int d;
+		bool here_player = ((cy == p_ptr->py) && (cx == p_ptr->px));
 
-		/* Is this (seen, walkable) grid next to a never-seen one? (Saltamos las
-		 * fronteras en lista negra: ya intentadas sin aportar nada nuevo.) */
-		if (!((cy == p_ptr->py) && (cx == p_ptr->px)) &&
-		                !(explore_bad && explore_bad[cur]))
+		/* Oro cercano (dentro del radio) -> desviarse a recogerlo. */
+		if (!here_player && (explore_gold_radius > 0) &&
+		                (dist[cur] <= explore_gold_radius) && cell_has_gold(cy, cx))
+		{
+			*gy = cy; *gx = cx; *is_gold = TRUE; found = TRUE; break;
+		}
+
+		/* Frontera (no en lista negra): celda junto a una nunca vista. */
+		if (!here_player && !(explore_bad && explore_bad[cur]))
 		{
 			for (d = 0; d < 8; d++)
 			{
@@ -5161,10 +5194,7 @@ static bool find_nearest_unexplored(int *gy, int *gx)
 
 				if (!explore_is_seen(ny, nx))
 				{
-					/* Nearest frontier (BFS pops in distance order). */
-					*gy = cy;
-					*gx = cx;
-					found = TRUE;
+					*gy = cy; *gx = cx; found = TRUE;
 					break;
 				}
 			}
@@ -5185,12 +5215,14 @@ static bool find_nearest_unexplored(int *gy, int *gx)
 			if (!travel_walkable_hook(ny, nx, NULL)) continue;
 
 			seen[ncell] = 1;
+			dist[ncell] = dist[cur] + 1;
 			queue[tail++] = ncell;
 		}
 	}
 
 	C_FREE(seen, n, byte);
 	C_FREE(queue, n, int);
+	C_FREE(dist, n, int);
 
 	return (found);
 }
@@ -5203,6 +5235,7 @@ static bool find_nearest_unexplored(int *gy, int *gx)
 void explore_step(void)
 {
 	int gy = 0, gx = 0;
+	bool is_gold = FALSE;
 
 	/* A travel leg is still running: let it finish (travel branch handles it). */
 	if (travelling) return;
@@ -5227,18 +5260,20 @@ void explore_step(void)
 	/* Fold in everything seen so far before choosing the next frontier. */
 	explore_sync_seen();
 
-	/* Anti-oscilación: si el tramo anterior NO descubrió nada nuevo, mete su
-	 * meta en la lista negra para no volver a elegirla (evita ir y venir). */
-	if ((explore_goal_y >= 0) && (explore_goal_count >= 0) &&
-	                (explore_seen_count <= explore_goal_count) && explore_bad &&
-	                in_bounds2(explore_goal_y, explore_goal_x))
+	/* Anti-oscilación: si LLEGAMOS a una meta-FRONTERA y no descubrió nada nuevo
+	 * (frontera "muerta"), la metemos en la lista negra. Solo si de verdad la
+	 * alcanzamos (estamos sobre ella): un tramo cortado a medias por recoger oro
+	 * no debe descartar una frontera válida. Las metas de oro nunca se blacklistean. */
+	if ((explore_goal_y >= 0) && !explore_goal_is_gold && explore_bad &&
+	                (p_ptr->py == explore_goal_y) && (p_ptr->px == explore_goal_x) &&
+	                (explore_seen_count <= explore_goal_count))
 	{
 		explore_bad[explore_goal_y * cur_wid + explore_goal_x] = 1;
 	}
 	explore_goal_y = explore_goal_x = -1;
 
 	/* Nothing reachable left to uncover. */
-	if (!find_nearest_unexplored(&gy, &gx))
+	if (!find_nearest_goal(&gy, &gx, &is_gold))
 	{
 		exploring = 0;
 		p_ptr->redraw |= (PR_STATE);
@@ -5250,6 +5285,7 @@ void explore_step(void)
 	explore_goal_y = gy;
 	explore_goal_x = gx;
 	explore_goal_count = explore_seen_count;
+	explore_goal_is_gold = is_gold;
 
 	/* Arm the leg toward it (no disturb/messages: that's our job, not its). */
 	if (!travel_plan(gy, gx))
