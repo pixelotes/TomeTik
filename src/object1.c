@@ -5690,6 +5690,13 @@ bool get_item_floor(int *cp, cptr pmt, cptr str, int mode)
 	if (mode & (USE_EXTRA)) extra = TRUE;
 	if (mode & (USE_AUTO)) automat = TRUE;
 
+	/* TomeTik: mostrar SIEMPRE la lista de selección inline en la ventana
+	 * principal (no solo en la sub-ventana de inventario). Antes solo lo hacían
+	 * inven/equip/activate (ponían command_see=TRUE); el resto (wield, quaff,
+	 * drop, read, ...) salían con solo el prompt "* to see". El jugador puede
+	 * seguir alternando con '*'. */
+	command_see = TRUE;
+
 
 	/* Paranoia XXX XXX XXX */
 	msg_print(NULL);
