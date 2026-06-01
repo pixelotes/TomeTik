@@ -3,9 +3,13 @@
 Mejoras y objetivos futuros (ToME 2.2.2 + tiles, port moderno en Docker).
 
 ## Render isométrico
-- [ ] **Finalizar el modo isométrico.**
+- [x] **Finalizar el modo isométrico.**
 - [ ] **Hacer que el tamaño de los tiles sea seleccionable.**
-- [ ] **Arreglar el cambio dinámico** isométrico ⇄ tiles 2D ⇄ ASCII.
+- [x] **Arreglar el cambio dinámico** isométrico ⇄ tiles 2D ⇄ ASCII.
+- [ ] **Integrar los tiles sueltos en `do_extra.png`** (building_block.png,
+  grass_flowers.png, rubble.png → al atlas, en vez de PNGs individuales).
+- [ ] **Mejorar el rendimiento del redibujado iso** (hoy se repinta la escena
+  entera en cada FRESH y en cada cambio de celda en hover).
 
 ## Ratón
 - [x] **Tooltips de casilla** ("You are looking at a wall", etc.). Texto del motor
@@ -16,18 +20,27 @@ Mejoras y objetivos futuros (ToME 2.2.2 + tiles, port moderno en Docker).
   transitable → A\* (con corner-cutting) + travel paso a paso por turno
   (`travel_to`/`travel_step`/`travel_cancel`, cmd1.c). Reusa la identificación de
   celda del tooltip; GTK2 (iso/2D/ASCII) y GDI. Mensajes de inicio/llegada/parada.
-- [x] **Resaltar el tile bajo el ratón** (iso): rombo de suelo amarillo en la celda
-  en hover; se repinta al cambiar de celda. (2D/ASCII pendiente.)
+- [x] **Resaltar el tile bajo el ratón**: en iso, rombo de suelo amarillo en la
+  celda en hover, dibujado al final con prioridad sobre todo (también sobre celdas
+  desconocidas). En 2D ya funciona también. (ASCII no aplica.)
+- [x] **Atacar al hacer clic en un enemigo adyacente** (`do_cmd_click`/`click_act_step`,
+  cmd1.c): `move_player_aux` hacia el monstruo → ataca hostiles, intercambia con
+  aliados. Clic lejano sigue viajando y parándose al lado.
 - [ ] **Menú contextual con clic derecho.**
+- [ ] **Punteros de ratón contextuales** en iso (botas=mover, espada=atacar,
+  labios=hablar) según lo que haya bajo el cursor. Ligado al autodesplazamiento.
 
 ## Interfaz / UX
 - [x] **Barras de vida sobre los personajes** (jugador y monstruos) con HP<100%:
   barra verde/rojo con marco negro sobre el sprite, en `iso_cell_cb`. **Solo modo
-  iso por ahora**; falta portarlo a tiles 2D.
+  iso** (decisión: no se portan a 2D/ASCII por purismo).
 - [x] **Tooltip de casilla muestra TODO** lo del tile (monstruo + objetos + trampa +
   suelo), con retardo de aparición y estilo (GTK2 y GDI).
-- [ ] **Sidebar de stats en iso**: hecho parcial — se reserva el margen izquierdo y
+- [X] **Sidebar de stats en iso**: hecho parcial — se reserva el margen izquierdo y
   se recompone la barra 2D; revisar si el viewport iso queda bien proporcionado.
+- [ ] **Bug: el menú `wield` no aparece en la pantalla principal** (sí salen eat /
+  inventory / equip). Posible trigger/refresco que falta al abrirlo.
+- [ ] **Mejoras surtidas de UX** (varias, a definir).
 
 ## Jugabilidad / motor
 - [~] **Campo de visión / niebla de guerra.** En **superficie** (pueblo/exterior

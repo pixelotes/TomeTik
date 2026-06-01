@@ -4221,9 +4221,9 @@ LRESULT FAR PASCAL AngbandWndProc(HWND hWnd, UINT uMsg,
 
 			if (!win_map_pixel_to_cave(td, px, py, &cy, &cx)) break;
 
-			/* Iniciar viaje; el ESCAPE desbloquea el inkey() en el que el motor
-			 * espera comando, y el bucle de turnos camina viendo 'travelling'. */
-			if (travel_to(cy, cx))
+			/* Clic: atacar/intercambiar si hay monstruo adyacente, o viajar. El
+			 * ESCAPE desbloquea el inkey() y el bucle de turnos lo ejecuta. */
+			if (do_cmd_click(cy, cx))
 			{
 				win_tooltip_hide(hWnd);
 				Term_keypress(ESCAPE);
