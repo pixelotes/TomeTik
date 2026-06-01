@@ -397,6 +397,7 @@ static bool object_easy_know(int i)
 	case TV_CORPSE:
 	case TV_HYPNOS:
 	case TV_SPIKE:
+	case TV_JUNK:
 		{
 			return (TRUE);
 		}
@@ -1240,6 +1241,9 @@ void object_flags_known(object_type *o_ptr, u32b *f1, u32b *f2, u32b *f3, u32b *
 			}
 		}
 	}
+
+	/* Hack - Res Chaos -> Res Confusion */
+	if (*f2 & TR2_RES_CHAOS) (*f2) |= (TR2_RES_CONF);
 }
 
 
@@ -1279,100 +1283,83 @@ static char *object_desc_str(char *t, cptr s)
 	return (t);
 }
 
+/*
+ * Do the actual conversion of a number for object_desc_num() and
+ * object_desc_int().
+ */
+static char *convert_number(char *result, u32b num)
+{
+	char *tp;
+	char temp[11];
 
+	tp = temp;
+	*tp = '0' + (num % 10);
+	for (num /= 10; num != 0; num /= 10)
+	{
+		*++tp = '0' + (num % 10);
+	}
+
+	while (tp != temp)
+	{
+		*result++ = *tp--;
+	}
+	*result++ = *tp;
+	*result = '\0';
+
+	return result;
+}
 
 /*
  * Print a nnumber "n" into a string "t", as if by
  * sprintf(t, "%u", n), and return a pointer to the terminator.
  */
-static char *object_desc_num(char *t, int n)
+static char *object_desc_num(char *result, s32b num)
 {
-	uint p;
+	u32b n;
 
-	if (n < 0)
+	if (num < 0)
 	{
-		*t++ = '-';
-		n *= -1;
+		*result++ = '-';
+		n = -num;
 	}
-	/* Find "size" of "n" */
-	for (p = 1; n >= p * 10; p = p * 10) /* loop */;
-
-	/* Dump each digit */
-	while (p >= 1)
-	{
-		/* Dump the digit */
-		*t++ = '0' + n / p;
-
-		/* Remove the digit */
-		n = n % p;
-
-		/* Process next digit */
-		p = p / 10;
-	}
-
-	/* Terminate */
-	*t = '\0';
+	else
+		n = num;
 
 	/* Result */
-	return (t);
+	return convert_number(result, n);
 }
 
-
-
-
 /*
- * Print an signed number "v" into a string "t", as if by
+ * Print an signed number "num" into a string "result", as if by
  * sprintf(t, "%+d", n), and return a pointer to the terminator.
  * Note that we always print a sign, either "+" or "-".
  */
-static char *object_desc_int(char *t, sint v)
+static char *object_desc_int(char *result, s32b num)
 {
-	uint p, n;
+	u32b n;
 
 	/* Negative */
-	if (v < 0)
+	if (num < 0)
 	{
 		/* Take the absolute value */
-		n = 0 - v;
+		n = -num;
 
 		/* Use a "minus" sign */
-		*t++ = '-';
+		*result++ = '-';
 	}
-
 	/* Positive (or zero) */
 	else
 	{
 		/* Use the actual number */
-		n = v;
+		n = num;
 
 		/* Use a "plus" sign */
-		*t++ = '+';
+		*result++ = '+';
 	}
-
-	/* Find "size" of "n" */
-	for (p = 1; n >= p * 10; p = p * 10) /* loop */;
-
-	/* Dump each digit */
-	while (p >= 1)
-	{
-		/* Dump the digit */
-		*t++ = '0' + n / p;
-
-		/* Remove the digit */
-		n = n % p;
-
-		/* Process next digit */
-		p = p / 10;
-	}
-
-	/* Terminate */
-	*t = '\0';
 
 	/* Result */
-	return (t);
+	return convert_number(result, n);
 }
-
-
 
 /*
  * Creates a description of the item "o_ptr", and stores it in "out_val".
@@ -1423,7 +1410,7 @@ void object_desc(char *buf, object_type *o_ptr, int pref, int mode)
 {
 	bool hack_name = FALSE;
 	cptr basenm, modstr;
-	int power, indexx;
+	int indexx;
 
 	bool aware = FALSE;
 	bool known = FALSE;
@@ -1443,6 +1430,7 @@ void object_desc(char *buf, object_type *o_ptr, int pref, int mode)
 	char tmp_val[160];
 	char tmp_val2[90];
 
+	s32b power;
 	u32b f1, f2, f3, f4, f5, esp;
 
 	object_kind *k_ptr = &k_info[o_ptr->k_idx];
@@ -2181,7 +2169,17 @@ void object_desc(char *buf, object_type *o_ptr, int pref, int mode)
 	if ((f4 & TR4_LEVELS) && known)
 	{
 		t = object_desc_str(t, " (E:");
-		t = object_desc_num(t, o_ptr->exp);
+		if (exp_need)
+		{
+			s32b need;
+			/* Formula from check_experience_obj(). */
+			need = player_exp[o_ptr->elevel - 1] * 5 / 2;
+			t = object_desc_num(t, need - o_ptr->exp);
+		}
+		else
+		{
+			t = object_desc_num(t, o_ptr->exp);
+		}
 		t = object_desc_str(t, ", L:");
 		t = object_desc_num(t, o_ptr->elevel);
 		t = object_desc_chr(t, ')');
@@ -2312,7 +2310,7 @@ void object_desc(char *buf, object_type *o_ptr, int pref, int mode)
 			t = object_desc_chr(t, ' ');
 			t = object_desc_chr(t, p1);
 			t = object_desc_int(t, o_ptr->to_h);
-			if (!(f3 & (TR3_HIDE_TYPE)))
+			if (!(f3 & (TR3_HIDE_TYPE)) || o_ptr->art_name)
 				t = object_desc_str(t, " to accuracy");
 			t = object_desc_chr(t, p2);
 		}
@@ -2323,7 +2321,7 @@ void object_desc(char *buf, object_type *o_ptr, int pref, int mode)
 			t = object_desc_chr(t, ' ');
 			t = object_desc_chr(t, p1);
 			t = object_desc_int(t, o_ptr->to_d);
-			if (!(f3 & (TR3_HIDE_TYPE)))
+			if (!(f3 & (TR3_HIDE_TYPE)) || o_ptr->art_name)
 				t = object_desc_str(t, " to damage");
 			t = object_desc_chr(t, p2);
 		}
@@ -2984,7 +2982,7 @@ void describe_device(object_type *o_ptr)
  * Print the level something was found on
  *
  */
-const cptr object_out_desc_where_found(s16b level, s16b dungeon)
+static cptr object_out_desc_where_found(s16b level, s16b dungeon)
 {
 	static char str[80];
 
@@ -3128,11 +3126,11 @@ bool object_out_desc(object_type *o_ptr, FILE *fff, bool trim_down, bool wait_fo
 			else
 				text_out(item_activation(o_ptr, 0));
 
-			/* Mega-hack -- get rid of useless line for randarts */
-			if (o_ptr->tval != TV_RANDART)
-				text_out(" if it is being worn. ");
-			else
+			/* Mega-hack -- get rid of useless line for e.g. randarts */
+			if (f5 & (TR5_ACTIVATE_NO_WIELD))
 				text_out(".  ");
+			else
+				text_out(" if it is being worn. ");
 		}
 		/* Granted power */
 		if (object_power(o_ptr) != -1)
@@ -3548,19 +3546,19 @@ bool object_out_desc(object_type *o_ptr, FILE *fff, bool trim_down, bool wait_fo
 		{
 			vp[vn++] = "life draining";
 		}
-		if (f2 & (TR2_RES_ACID))
+		if ((f2 & (TR2_RES_ACID)) && !(f2 & (TR2_IM_ACID)))
 		{
 			vp[vn++] = "acid";
 		}
-		if (f2 & (TR2_RES_ELEC))
+		if ((f2 & (TR2_RES_ELEC)) && !(f2 & (TR2_IM_ELEC)))
 		{
 			vp[vn++] = "electricity";
 		}
-		if (f2 & (TR2_RES_FIRE))
+		if ((f2 & (TR2_RES_FIRE)) && !(f2 & (TR2_IM_FIRE)))
 		{
 			vp[vn++] = "fire";
 		}
-		if (f2 & (TR2_RES_COLD))
+		if ((f2 & (TR2_RES_COLD)) && !(f2 & (TR2_IM_COLD)))
 		{
 			vp[vn++] = "cold";
 		}
@@ -3592,11 +3590,7 @@ bool object_out_desc(object_type *o_ptr, FILE *fff, bool trim_down, bool wait_fo
 		{
 			vp[vn++] = "shards";
 		}
-		if (f4 & (TR4_IM_NETHER))
-		{
-			vp[vn++] = "nether";
-		}
-		if (f2 & (TR2_RES_NETHER))
+		if ((f2 & (TR2_RES_NETHER)) && !(f4 & (TR4_IM_NETHER)))
 		{
 			vp[vn++] = "nether";
 		}
@@ -3634,6 +3628,10 @@ bool object_out_desc(object_type *o_ptr, FILE *fff, bool trim_down, bool wait_fo
 			text_out(".  ");
 		}
 
+		if (f2 & (TR2_SENS_FIRE))
+		{
+			text_out("It renders you especially vulnerable to fire.  ");
+		}
 		if (f3 & (TR3_WRAITH))
 		{
 			text_out("It renders you incorporeal.  ");
@@ -3657,6 +3655,10 @@ bool object_out_desc(object_type *o_ptr, FILE *fff, bool trim_down, bool wait_fo
 		if (f4 & (TR4_CLIMB))
 		{
 			text_out("It allows you to climb mountains.  ");
+		}
+		if (f5 & (TR5_IMMOVABLE))
+		{
+			text_out("It renders you immovable.  ");
 		}
 		if (f3 & (TR3_SEE_INVIS))
 		{
@@ -3827,7 +3829,7 @@ bool object_out_desc(object_type *o_ptr, FILE *fff, bool trim_down, bool wait_fo
 
 		if (f4 & (TR4_DG_CURSE))
 		{
-			text_out("It carries an ancient morgothian curse.  ");
+			text_out("It carries an ancient Morgothian curse.  ");
 		}
 		if (f4 & (TR4_CLONE))
 		{
@@ -3925,6 +3927,16 @@ bool object_out_desc(object_type *o_ptr, FILE *fff, bool trim_down, bool wait_fo
 				}
 				display_ammo_damage(o_ptr);
 			}
+
+			/* Monster recall for totems and corpses */
+			if (o_ptr->tval == TV_TOTEM)
+			{
+				monster_description_out(o_ptr->pval, 0);
+			}
+			if (o_ptr->tval == TV_CORPSE)
+			{
+				monster_description_out(o_ptr->pval2, 0);
+			}
 		}
 
 		if (!object_known_p(o_ptr))
@@ -3991,7 +4003,8 @@ bool object_out_desc(object_type *o_ptr, FILE *fff, bool trim_down, bool wait_fo
 
 	if (fff)
 	{
-		if (!trim_down) fprintf(fff, "\n");
+		/* Flush the line position. */
+		text_out("\n");
 		text_out_file = NULL;
 	}
 	else
@@ -4204,13 +4217,14 @@ s16b wield_slot_ideal(object_type *o_ptr, bool ideal)
 			{
 				return get_slot(INVEN_AMMO);
 			}
-			else if (p_ptr->inventory[INVEN_BOW].k_idx)
+			else if ((p_ptr->inventory[INVEN_BOW].k_idx) && (p_ptr->inventory[INVEN_BOW].tval == TV_BOW))
 			{
 				if (p_ptr->inventory[INVEN_BOW].sval < 10)
 					return get_slot(INVEN_AMMO);
 			}
 			return -1;
 		}
+
 	case TV_ARROW:
 		{
 			if (ideal)
@@ -4223,13 +4237,14 @@ s16b wield_slot_ideal(object_type *o_ptr, bool ideal)
 			{
 				return get_slot(INVEN_AMMO);
 			}
-			else if (p_ptr->inventory[INVEN_BOW].k_idx)
+			else if ((p_ptr->inventory[INVEN_BOW].k_idx) && (p_ptr->inventory[INVEN_BOW].tval == TV_BOW))
 			{
 				if ((p_ptr->inventory[INVEN_BOW].sval >= 10) && (p_ptr->inventory[INVEN_BOW].sval < 20))
 					return get_slot(INVEN_AMMO);
 			}
 			return -1;
 		}
+
 	case TV_BOLT:
 		{
 			if (ideal)
@@ -4242,7 +4257,7 @@ s16b wield_slot_ideal(object_type *o_ptr, bool ideal)
 			{
 				return get_slot(INVEN_AMMO);
 			}
-			else if (p_ptr->inventory[INVEN_BOW].k_idx)
+			else if ((p_ptr->inventory[INVEN_BOW].k_idx) && (p_ptr->inventory[INVEN_BOW].tval == TV_BOW))
 			{
 				if (p_ptr->inventory[INVEN_BOW].sval >= 20)
 					return get_slot(INVEN_AMMO);
@@ -4275,11 +4290,7 @@ cptr mention_use(int i)
 	switch (i)
 	{
 	case INVEN_WIELD:
-		p = "Wielding";
-		break;
 	case INVEN_WIELD + 1:
-		p = "Wielding";
-		break;
 	case INVEN_WIELD + 2:
 		p = "Wielding";
 		break;
@@ -4287,26 +4298,14 @@ cptr mention_use(int i)
 		p = "Shooting";
 		break;
 	case INVEN_RING:
-		p = "On finger";
-		break;
 	case INVEN_RING + 1:
-		p = "On finger";
-		break;
 	case INVEN_RING + 2:
-		p = "On finger";
-		break;
 	case INVEN_RING + 3:
-		p = "On finger";
-		break;
 	case INVEN_RING + 4:
-		p = "On finger";
-		break;
 	case INVEN_RING + 5:
 		p = "On finger";
 		break;
 	case INVEN_NECK:
-		p = "Around neck";
-		break;
 	case INVEN_NECK + 1:
 		p = "Around neck";
 		break;
@@ -4320,32 +4319,20 @@ cptr mention_use(int i)
 		p = "About body";
 		break;
 	case INVEN_ARM:
-		p = "On arm";
-		break;
 	case INVEN_ARM + 1:
-		p = "On arm";
-		break;
 	case INVEN_ARM + 2:
 		p = "On arm";
 		break;
 	case INVEN_HEAD:
-		p = "On head";
-		break;
 	case INVEN_HEAD + 1:
 		p = "On head";
 		break;
 	case INVEN_HANDS:
-		p = "On hands";
-		break;
 	case INVEN_HANDS + 1:
-		p = "On hands";
-		break;
 	case INVEN_HANDS + 2:
 		p = "On hands";
 		break;
 	case INVEN_FEET:
-		p = "On feet";
-		break;
 	case INVEN_FEET + 1:
 		p = "On feet";
 		break;
@@ -4363,8 +4350,8 @@ cptr mention_use(int i)
 		break;
 	}
 
-	/* Hack -- Heavy weapon */
-	if (i == INVEN_WIELD)
+	/* Hack -- Heavy weapons */
+	if ((INVEN_WIELD <= i) && (i <= INVEN_WIELD + 2))
 	{
 		object_type *o_ptr;
 		o_ptr = &p_ptr->inventory[i];
@@ -4374,12 +4361,16 @@ cptr mention_use(int i)
 		}
 	}
 
-	/* Hack -- Heavy bow */
+	/* Hack -- music instruments and heavy bow */
 	if (i == INVEN_BOW)
 	{
 		object_type *o_ptr;
 		o_ptr = &p_ptr->inventory[i];
-		if (adj_str_hold[p_ptr->stat_ind[A_STR]] < o_ptr->weight / 10)
+		if (o_ptr->tval == TV_INSTRUMENT)
+		{
+			p = "Playing";
+		}
+		else if (adj_str_hold[p_ptr->stat_ind[A_STR]] < o_ptr->weight / 10) 
 		{
 			p = "Just holding";
 		}
@@ -4401,11 +4392,7 @@ cptr describe_use(int i)
 	switch (i)
 	{
 	case INVEN_WIELD:
-		p = "attacking monsters with";
-		break;
 	case INVEN_WIELD + 1:
-		p = "attacking monsters with";
-		break;
 	case INVEN_WIELD + 2:
 		p = "attacking monsters with";
 		break;
@@ -4413,26 +4400,14 @@ cptr describe_use(int i)
 		p = "shooting missiles with";
 		break;
 	case INVEN_RING:
-		p = "wearing on your finger";
-		break;
 	case INVEN_RING + 1:
-		p = "wearing on your finger";
-		break;
 	case INVEN_RING + 2:
-		p = "wearing on your finger";
-		break;
 	case INVEN_RING + 3:
-		p = "wearing on your finger";
-		break;
 	case INVEN_RING + 4:
-		p = "wearing on your finger";
-		break;
 	case INVEN_RING + 5:
 		p = "wearing on your finger";
 		break;
 	case INVEN_NECK:
-		p = "wearing around your neck";
-		break;
 	case INVEN_NECK + 1:
 		p = "wearing around your neck";
 		break;
@@ -4446,42 +4421,39 @@ cptr describe_use(int i)
 		p = "wearing on your back";
 		break;
 	case INVEN_ARM:
-		p = "wearing on your arm";
-		break;
 	case INVEN_ARM + 1:
-		p = "wearing on your arm";
-		break;
 	case INVEN_ARM + 2:
 		p = "wearing on your arm";
 		break;
 	case INVEN_HEAD:
-		p = "wearing on your head";
-		break;
 	case INVEN_HEAD + 1:
 		p = "wearing on your head";
 		break;
 	case INVEN_HANDS:
-		p = "wearing on your hands";
-		break;
 	case INVEN_HANDS + 1:
+	case INVEN_HANDS + 2:
 		p = "wearing on your hands";
 		break;
 	case INVEN_FEET:
-		p = "wearing on your feet";
-		break;
 	case INVEN_FEET + 1:
 		p = "wearing on your feet";
 		break;
 	case INVEN_CARRY:
 		p = "in symbiosis with";
 		break;
+	case INVEN_AMMO:
+		p = "carrying in your quiver";
+		break;
+	case INVEN_TOOL:
+		p = "using as a tool";
+		break; 
 	default:
 		p = "carrying in your pack";
 		break;
 	}
 
-	/* Hack -- Heavy weapon */
-	if (i == INVEN_WIELD)
+	/* Hack -- Heavy weapons */
+	if ((INVEN_WIELD <= i) && (i <= INVEN_WIELD + 2))
 	{
 		object_type *o_ptr;
 		o_ptr = &p_ptr->inventory[i];
@@ -4491,12 +4463,16 @@ cptr describe_use(int i)
 		}
 	}
 
-	/* Hack -- Heavy bow */
+	/* Hack -- Music instruments and heavy bow */
 	if (i == INVEN_BOW)
 	{
 		object_type *o_ptr;
 		o_ptr = &p_ptr->inventory[i];
-		if (adj_str_hold[p_ptr->stat_ind[A_STR]] < o_ptr->weight / 10)
+		if (o_ptr->tval == TV_INSTRUMENT)
+		{
+			p = "playing music with";
+		}
+		else if (adj_str_hold[p_ptr->stat_ind[A_STR]] < o_ptr->weight / 10)
 		{
 			p = "just holding";
 		}
@@ -5637,6 +5613,7 @@ bool get_item_floor(int *cp, cptr pmt, cptr str, int mode)
 
 	int floor_num, floor_list[23], floor_top = 0;
 
+	k = 0;
 #ifdef ALLOW_REPEAT
 
 	/* Get the item index */
@@ -6689,6 +6666,27 @@ void py_pickup_floor(int pickup)
 	/* Try to grab ammo */
 	pickup_ammo();
 
+	/* Mega Hack -- If we have auto-Id, do an ID sweep *before* squleching,
+	 * so that we don't have to walk over things twice to get them
+	 * squelched.  --dsb */
+	if (p_ptr->auto_id)
+	{
+		this_o_idx = cave[p_ptr->py][p_ptr->px].o_idx;
+
+		for (; this_o_idx; this_o_idx = next_o_idx)
+		{
+			/* Aquire the object */
+			o_ptr = &o_list[this_o_idx];
+
+			/* Acquire the next object index */
+			next_o_idx = o_ptr->next_o_idx;
+
+			/* Identify Object */
+			object_aware(o_ptr);
+			object_known(o_ptr);
+		}
+	}
+
 	/* Squeltch the floor */
 	squeltch_grid();
 
@@ -6697,12 +6695,6 @@ void py_pickup_floor(int pickup)
 	{
 		/* Acquire object */
 		o_ptr = &o_list[this_o_idx];
-
-		if (p_ptr->auto_id)
-		{
-			object_aware(o_ptr);
-			object_known(o_ptr);
-		}
 
 		/* Acquire next object */
 		next_o_idx = o_ptr->next_o_idx;
@@ -6819,7 +6811,7 @@ void py_pickup_floor(int pickup)
 		item_tester_hook = item_tester_hook_getable;
 
 		q = "Get which item? ";
-		s = "You see nothing you can pick up there.";
+		s = "You have no room in your pack for any of the items here.";
 		if (get_item(&item, q, s, (USE_FLOOR)))
 		{
 			this_o_idx = 0 - item;
@@ -7118,7 +7110,7 @@ bool apply_set(s16b a_idx, s16b set_idx)
 }
 
 bool apply_flags_set(s16b a_idx, s16b set_idx,
-                     s32b *f1, s32b *f2, s32b *f3, s32b *f4, s32b *f5, s32b *esp)
+                     u32b *f1, u32b *f2, u32b *f3, u32b *f4, u32b *f5, u32b *esp)
 {
 	set_type *s_ptr = &set_info[set_idx];
 	int i, j;

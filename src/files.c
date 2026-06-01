@@ -56,9 +56,9 @@ void safe_setuid_drop(void)
 			quit("setregid(): cannot set permissions correctly!");
 		}
 
-# endif 
+# endif
 
-# endif 
+# endif
 
 #endif
 	}
@@ -1426,6 +1426,9 @@ static void display_player_middle(void)
 	int show_todam = p_ptr->dis_to_d;
 
 	object_type *o_ptr = &p_ptr->inventory[INVEN_WIELD];
+	char num[7];
+	byte color;
+	int speed;
 
 
 	/* Hack -- add in weapon info if known */
@@ -1481,56 +1484,110 @@ static void display_player_middle(void)
 
 	if (p_ptr->necro_extra & CLASS_UNDEAD)
 	{
-		prt_num("Max Death Points ", p_ptr->mhp, 9, 52, TERM_L_BLUE, "   ");
-
+		put_str("Death Points ", 9, 52);
 		if (p_ptr->chp >= p_ptr->mhp)
 		{
-			prt_num("Cur Death Points ", p_ptr->chp, 10, 52, TERM_L_BLUE, "   ");
+			color = TERM_L_BLUE;
 		}
 		else if (p_ptr->chp > (p_ptr->mhp * hitpoint_warn) / 10)
 		{
-			prt_num("Cur Death Points ", p_ptr->chp, 10, 52, TERM_VIOLET, "   ");
+			color = TERM_VIOLET;
 		}
 		else
 		{
-			prt_num("Cur Death Points ", p_ptr->chp, 10, 52, TERM_L_RED, "   ");
+			color = TERM_L_RED;
 		}
+		(void)sprintf(num, "%6ld", (long)p_ptr->chp);
+		c_put_str(color, num, 9, 65);
+		put_str("/", 9, 71);
+		(void)sprintf(num, "%6ld", (long)p_ptr->mhp);
+		c_put_str(TERM_L_BLUE, num, 9, 72);
 	}
 	else
 	{
-		prt_num("Max Hit Points ", p_ptr->mhp, 9, 52, TERM_L_GREEN, "   ");
-
+		put_str("Hit Points   ", 9, 52);
 		if (p_ptr->chp >= p_ptr->mhp)
 		{
-			prt_num("Cur Hit Points ", p_ptr->chp, 10, 52, TERM_L_GREEN, "   ");
+			color = TERM_L_GREEN;
 		}
 		else if (p_ptr->chp > (p_ptr->mhp * hitpoint_warn) / 10)
 		{
-			prt_num("Cur Hit Points ", p_ptr->chp, 10, 52, TERM_YELLOW, "   ");
+			color = TERM_YELLOW;
 		}
 		else
 		{
-			prt_num("Cur Hit Points ", p_ptr->chp, 10, 52, TERM_RED, "   ");
+			color = TERM_RED;
 		}
+		(void)sprintf(num, "%6ld", (long)p_ptr->chp);
+		c_put_str(color, num, 9, 65);
+		put_str("/", 9, 71);
+		(void)sprintf(num, "%6ld", (long)p_ptr->mhp);
+		c_put_str(TERM_L_GREEN, num, 9, 72);
 	}
 
-	prt_num("Max SP (Mana)  ", p_ptr->msp, 11, 52, TERM_L_GREEN, "   ");
-
+	put_str("Spell Points ", 10, 52);
 	if (p_ptr->csp >= p_ptr->msp)
 	{
-		prt_num("Cur SP (Mana)  ", p_ptr->csp, 12, 52, TERM_L_GREEN, "   ");
+		color = TERM_L_GREEN;
 	}
 	else if (p_ptr->csp > (p_ptr->msp * hitpoint_warn) / 10)
 	{
-		prt_num("Cur SP (Mana)  ", p_ptr->csp, 12, 52, TERM_YELLOW, "   ");
+		color = TERM_YELLOW;
 	}
 	else
 	{
-		prt_num("Cur SP (Mana)  ", p_ptr->csp, 12, 52, TERM_RED, "   ");
+		color = TERM_RED;
 	}
+	(void)sprintf(num, "%6ld", (long)p_ptr->csp);
+	c_put_str(color, num, 10, 65);
+	put_str("/", 10, 71);
+	(void)sprintf(num, "%6ld", (long)p_ptr->msp);
+	c_put_str(TERM_L_GREEN, num, 10, 72);
+
+	put_str("Sanity       ", 11, 52);
+	if (p_ptr->csane >= p_ptr->msane)
+	{
+		color = TERM_L_GREEN;
+	}
+	else if (p_ptr->csane > (p_ptr->msane * hitpoint_warn) / 10)
+	{
+		color = TERM_YELLOW;
+	}
+	else
+	{
+		color = TERM_RED;
+	}
+	(void)sprintf(num, "%6ld", (long)p_ptr->csane);
+	c_put_str(color, num, 11, 65);
+	put_str("/", 11, 71);
+	(void)sprintf(num, "%6ld", (long)p_ptr->msane);
+	c_put_str(TERM_L_GREEN, num, 11, 72);
 
 	if (p_ptr->pgod != GOD_NONE)
-		prt_num("Piety          ", p_ptr->grace, 13, 52, TERM_L_GREEN, "   ");
+	{
+		prt_num("Piety          ", p_ptr->grace, 12, 52, TERM_L_GREEN, "     ");
+	}
+
+	put_str("Speed           ", 13, 52);
+	speed = p_ptr->pspeed;
+	/* Hack -- Visually "undo" the Search Mode Slowdown */
+	if (p_ptr->searching) speed += 10;
+	if (speed > 110)
+	{
+		char s[11];
+		(void)sprintf(s, "Fast (+%d)", speed - 110);
+		c_put_str(TERM_L_GREEN, s, 13, (speed >= 120) ? 68 : 69);
+	}
+	else if (speed < 110)
+	{
+		char s[11];
+		(void)sprintf(s, "Slow (-%d)", 110 - speed);
+		c_put_str(TERM_L_UMBER, s, 13, (speed <= 100) ? 68 : 69);
+	}
+	else
+	{
+		put_str("Normal", 13, 72);
+	}
 }
 
 
@@ -1727,7 +1784,15 @@ static void display_player_various(void)
 			--i;
 		max_attack = &blow_table[i];
 
-		desc = format("%d-%d", blows * min_attack->dd, blows * maxroll(max_attack->dd, max_attack->ds));
+		dambonus += p_ptr->to_d_melee;
+		tmp = min_attack->dd + dambonus;
+		if (tmp < 0) tmp = 0;
+		tmp2 = maxroll(max_attack->dd, max_attack->ds) + dambonus;
+		if (tmp2 < 0) tmp2 = 0;
+		if (!tmp && !tmp2)
+			desc = "0";
+		else
+			desc = format("%d-%d", blows * tmp, blows * tmp2);
 	}
 	else if (!r_info[p_ptr->body_monster].body_parts[BODY_WEAPON])
 	{
@@ -1797,6 +1862,37 @@ static void display_player_various(void)
 
 
 /*
+ * Obtain the "flags" of the wielded symbiote
+ */
+
+void wield_monster_flags(u32b *f1, u32b *f2, u32b *f3, u32b *f4, u32b *f5, u32b *esp)
+{
+	object_type *o_ptr;
+	monster_race *r_ptr;
+
+	/* Clear */
+	(*f1) = (*f2) = (*f3) = (*f4) = (*f5) = (*esp) = 0L;
+
+	/* Get the carried monster */
+	o_ptr = &p_ptr->inventory[INVEN_CARRY];
+
+	if (o_ptr->k_idx)
+	{
+		r_ptr = &r_info[o_ptr->pval];
+
+		if (r_ptr->flags2 & RF2_INVISIBLE)
+			(*f2) |= TR2_INVIS;
+		if (r_ptr->flags2 & RF2_REFLECTING)
+			(*f2) |= TR2_REFLECT;
+		if (r_ptr->flags7 & RF7_CAN_FLY)
+			(*f3) |= TR3_FEATHER;
+		if (r_ptr->flags7 & RF7_AQUATIC)
+			(*f5) |= TR5_WATER_BREATH;
+	}
+}
+
+
+/*
  * Obtain the "flags" for the player as if he was an item
  */
 void player_flags(u32b *f1, u32b *f2, u32b *f3, u32b *f4, u32b *f5, u32b *esp)
@@ -1812,8 +1908,52 @@ void player_flags(u32b *f1, u32b *f2, u32b *f3, u32b *f4, u32b *f5, u32b *esp)
 		(*f3) |= TR3_WRAITH;
 	}
 
+/* Skills */
 	if (get_skill(SKILL_DAEMON) > 20) (*f2) |= TR2_RES_CONF;
 	if (get_skill(SKILL_DAEMON) > 30) (*f2) |= TR2_RES_FEAR;
+	if (get_skill(SKILL_MINDCRAFT) >= 40) (*esp) |= ESP_ALL;
+	if (p_ptr->melee_style == SKILL_HAND && get_skill(SKILL_HAND) > 24 && !monk_heavy_armor())
+		(*f2) |= TR2_FREE_ACT;
+/* Hack - from Lua */
+	if (get_skill(SKILL_MANA) >= 35) (*f1) |= TR1_MANA;
+	if (get_skill(SKILL_AIR) >= 50) (*f5) |= (TR5_MAGIC_BREATH | TR5_WATER_BREATH);
+	if (get_skill(SKILL_WATER) >= 30) (*f5) |= TR5_WATER_BREATH;
+
+/* Gods */
+	GOD(GOD_ERU)
+	{
+		if ((p_ptr->grace >= 100) || (p_ptr->grace <= -100))  (*f1) |= TR1_MANA;
+		if (p_ptr->grace > 10000) (*f1) |= TR1_WIS;
+	}
+
+	GOD(GOD_MELKOR)
+	{
+		(*f2) |= TR2_RES_FIRE;
+		if (p_ptr->melkor_sacrifice > 0) (*f2) |= TR2_LIFE;
+		if (p_ptr->grace > 10000) (*f1) |= (TR1_STR | TR1_CON | TR1_INT | TR1_WIS | TR1_CHR);
+		PRAY_GOD(GOD_MELKOR)
+		{
+			if (p_ptr->grace > 5000)  (*f2) |= TR2_INVIS;
+			if (p_ptr->grace > 15000) (*f2) |= TR2_IM_FIRE;
+		}
+	}
+
+	GOD(GOD_MANWE)
+	{
+		if (p_ptr->grace >= 2000) (*f3) |= TR3_FEATHER;
+		PRAY_GOD(GOD_MANWE)
+		{
+			if (p_ptr->grace >= 7000)  (*f2) |= TR2_FREE_ACT;
+			if (p_ptr->grace >= 15000) (*f4) |= TR4_FLY;
+			if ((p_ptr->grace >= 5000) || (p_ptr->grace <= -5000)) (*f1) |= TR1_SPEED;
+		}
+	}
+
+	GOD(GOD_TULKAS)
+	{
+		if (p_ptr->grace > 5000)  (*f1) |= TR1_CON;
+		if (p_ptr->grace > 10000) (*f1) |= TR1_STR;
+	}
 
 	/* Classes */
 	for (i = 1; i <= p_ptr->lev; i++)
@@ -2125,6 +2265,11 @@ void player_flags(u32b *f1, u32b *f2, u32b *f3, u32b *f4, u32b *f5, u32b *esp)
 	{
 		(*f4) |= TR4_BLACK_BREATH;
 	}
+
+	if (p_ptr->hp_mod != 0)
+	{
+		(*f2) |= TR2_LIFE;
+	}
 }
 
 /*
@@ -2187,7 +2332,7 @@ static cptr object_flag_names[192] =
 	"Res Cold",
 	"Res Pois",
 	"Res Fear",
-	"Res Lite",
+	"Res Light",
 	"Res Dark",
 	"Res Blind",
 	"Res Conf",
@@ -2201,9 +2346,8 @@ static cptr object_flag_names[192] =
 
 
 	"Aura Fire",
-
 	"Aura Elec",
-	NULL,
+	"Auto Curse",
 	NULL,
 	"NoTeleport",
 	"AntiMagic",
@@ -2242,9 +2386,8 @@ static cptr object_flag_names[192] =
 	"Mrg.Curse",
 	NULL,
 	NULL,
-	NULL,
-	NULL,
-	NULL,
+	"Sentient",
+	"Clone",
 	NULL,
 	"Climb",
 	NULL,
@@ -2266,6 +2409,7 @@ static cptr object_flag_names[192] =
 	NULL,
 	NULL,
 	NULL,
+	NULL,
 
 	"Orc.ESP",
 	"Troll.ESP",
@@ -2279,7 +2423,7 @@ static cptr object_flag_names[192] =
 	"Good.ESP",
 	"Nlive.ESP",
 	"Unique.ESP",
-	NULL,
+	"Spider ESP",
 	NULL,
 	NULL,
 	NULL,
@@ -2349,6 +2493,24 @@ static void display_player_ben_one(int mode)
 		b[n][9] = (u16b)(esp >> 16);
 		d[n] = o_ptr->pval;
 	}
+
+	/* Carried symbiote */
+	n = INVEN_CARRY - INVEN_WIELD;
+
+	/* Player flags */
+	wield_monster_flags(&f1, &f2, &f3, &f4, &f5, &esp);
+
+	/* Incorporate */
+	b[n][0] = (u16b)(f1 & 0xFFFF);
+	b[n][1] = (u16b)(f1 >> 16);
+	b[n][2] = (u16b)(f2 & 0xFFFF);
+	b[n][3] = (u16b)(f2 >> 16);
+	b[n][4] = (u16b)(f3 & 0xFFFF);
+	b[n][5] = (u16b)(f3 >> 16);
+	b[n][6] = (u16b)(f4 & 0xFFFF);
+	b[n][7] = (u16b)(f4 >> 16);
+	b[n][8] = (u16b)(esp & 0xFFFF);
+	b[n][9] = (u16b)(esp >> 16);
 
 	/* Index */
 	n = INVEN_TOTAL - INVEN_WIELD;
@@ -2446,16 +2608,13 @@ static void display_player_ben_one(int mode)
 							}
 							else
 							{
-								c = (d[n] > 9 ? '*' : d[n]);
+								c = d[n];
 								if (c < 0)
 								{
-									c = I2D(c * -1);
+									c = -c;
 									a = TERM_RED;
 								}
-								else if (c < 10)
-								{
-									c = I2D(c);
-								}
+								c = (c > 9 ? '*' : I2D(c));
 							}
 						}
 						else
@@ -2469,7 +2628,7 @@ static void display_player_ben_one(int mode)
 					   apply to Res Neth line */
 					if (modetemp == 1 && x == 1 && y == 12)
 					{
-						if (b[n][7] & (1 << 7))
+						if (b[n][7] & (1 << 6))
 						{
 							a = (is_green ? TERM_L_GREEN : TERM_WHITE);
 							c = '*';
@@ -2842,9 +3001,7 @@ void file_character_print_item(FILE *fff, char label, object_type *obj, bool ful
 	if ((artifact_p(obj) || ego_item_p(obj) || obj->tval == TV_RING || obj->tval == TV_AMULET || full) &&
 	                (obj->ident & IDENT_MENTAL))
 	{
-		fprintf(fff, "    ");
 		object_out_desc(obj, fff, TRUE, TRUE);
-		fprintf(fff, "\n");
 	}
 }
 
@@ -2867,7 +3024,7 @@ void file_character_print_store(FILE *fff, wilderness_type_info *place, int stor
 		/* Dump all available items */
 		for (i = 0; i < st_ptr->stock_num; i++)
 		{
-			file_character_print_item(fff, I2A(i), &st_ptr->stock[i], full);
+			file_character_print_item(fff, I2A(i%24), &st_ptr->stock[i], full);
 		}
 
 		/* Add an empty line */
@@ -2966,7 +3123,7 @@ errr file_character(cptr name, bool full)
 	if (!fff)
 	{
 		/* Message */
-		msg_format("Character dump failed!");
+		msg_format("Character sheet creation failed!");
 		msg_print(NULL);
 
 		/* Error */
@@ -2975,7 +3132,7 @@ errr file_character(cptr name, bool full)
 
 
 	/* Begin dump */
-	fprintf(fff, "  [%s %ld.%ld.%ld%s Character Dump]\n\n",
+	fprintf(fff, "  [%s %ld.%ld.%ld%s Character Sheet]\n\n",
 	        game_module, VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, IS_CVS);
 
 
@@ -3030,16 +3187,6 @@ errr file_character(cptr name, bool full)
 	exec_lua("patchs_list()");
 
 	fprintf(fff, "\n\n  [Miscellaneous information]\n");
-	if (cth_monsters)
-		fprintf(fff, "\n Cth monsters:         ON");
-	else
-		fprintf(fff, "\n Cth monsters:         OFF");
-
-	if (zang_monsters)
-		fprintf(fff, "\n Z-like monsters:      ON");
-	else
-		fprintf(fff, "\n Z-like monsters:      OFF");
-
 	if (joke_monsters)
 		fprintf(fff, "\n Joke monsters:        ON");
 	else
@@ -3095,7 +3242,7 @@ errr file_character(cptr name, bool full)
 	if (noscore)
 		fprintf(fff, "\n You have done something illegal.");
 
-	if (PRACE_FLAGS(PR1_EXPERIMENTAL))
+	if (PRACE_FLAGS(PR1_EXPERIMENTAL) || seed_dungeon)
 		fprintf(fff, "\n You have done something experimental.");
 
 	if (stupid_monsters)
@@ -3174,36 +3321,32 @@ errr file_character(cptr name, bool full)
 		        days, (days == 1) ? "" : "s");
 	}
 
+	fprintf (fff, "\n\n");
 
-
-	/* If requesting a full version use the self-knowledge */
+	/* Emit the self-knowledge lines, even though they duplicate the
+	   information in the grids (below), because they contain information
+	   that's not in the grids (racial abilities, luck, etc.). */
 	if (full)
 	{
-		fprintf (fff, "\n\n");
-
 		self_knowledge(fff);
+		fprintf(fff, "\n\n");
 	}
-	/* If not use the boring and bad looking grid */
-	else
-	{
-		fprintf (fff, "\n\n");
 
-		/* adds and slays */
-		display_player (2);
-		file_character_print_grid(fff, FALSE, TRUE);
+	/* adds and slays */
+	display_player (2);
+	file_character_print_grid(fff, FALSE, TRUE);
 
-		/* sustains and resistances */
-		display_player (3);
-		file_character_print_grid(fff, TRUE, FALSE);
+	/* sustains and resistances */
+	display_player (3);
+	file_character_print_grid(fff, TRUE, FALSE);
 
-		/* stuff */
-		display_player (4);
-		file_character_print_grid(fff, FALSE, FALSE);
+	/* stuff */
+	display_player (4);
+	file_character_print_grid(fff, FALSE, FALSE);
 
-		/* a little bit of stuff */
-		display_player (5);
-		file_character_print_grid(fff, FALSE, FALSE);
-	}
+	/* a little bit of stuff */
+	display_player (5);
+	file_character_print_grid(fff, FALSE, FALSE);
 
 	/* Dump corruptions */
 	if (got_corruptions())
@@ -3287,7 +3430,7 @@ errr file_character(cptr name, bool full)
 
 
 	/* Message */
-	msg_print("Character dump successful.");
+	msg_print("Character sheet creation successful.");
 	msg_print(NULL);
 
 	/* Success */
@@ -4539,7 +4682,6 @@ bool chg_to_txt(cptr base, cptr newname)
 		                ((buf[0] >= '0') && (buf[0] <= '9')) || (buf[0] == '#')) continue;
 
 		if (buf[1] != ' ')
-
 			lens[get_key(buf[1])]++;
 	}
 
@@ -4564,9 +4706,6 @@ bool chg_to_txt(cptr base, cptr newname)
 	/* Allocate big amount of temporary storage */
 	C_MAKE(strs, KEY_NUM, chg_type);
 
-	fprintf(txt, "%s %ld.%ld.%ld changes\n",
-	        game_module, VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH);
-
 	/* Display the file */
 	while (TRUE)
 	{
@@ -4578,8 +4717,13 @@ bool chg_to_txt(cptr base, cptr newname)
 
 		if (buf[1] != ' ') key = get_key(buf[1]);
 
-		strcpy(strs[key][lens[key]++], buf + 3);
+		if (key == KEY_NUM - 1)
+			strcpy(strs[key][lens[key]++], buf + 5);
+		else
+			strcpy(strs[key][lens[key]++], buf + 3);
 	}
+
+	fprintf(txt, "%s changes\n", strs[KEY_NUM - 1][0]);
 
 	for (i = 0; i < KEY_NUM - 1; i++)
 	{
@@ -4631,7 +4775,7 @@ void process_player_base()
 {
 	char temp[128];
 
-#ifdef SAVEFILE_USE_UID
+#if defined(SAVEFILE_USE_UID) && !defined(PRIVATE_USER_PATH)
 	/* Rename the savefile, using the player_uid and player_base */
 	(void)sprintf(temp, "%d.%s", player_uid, player_base);
 #else
@@ -4832,6 +4976,34 @@ void do_cmd_suicide(void)
 }
 
 
+	/* HACK - Remove / set the CAVE_VIEW flag, since view_x / view_y
+	 * is not saved, and the visible locations are not lighted correctly
+	 * when the game is loaded again
+	 * Alternatively forget_view() and update_view() can be used
+	 */
+void remove_cave_view(bool remove)
+{
+	int i;
+	cave_type *c_ptr;
+
+	if (view_n)
+	{
+		/* Clear them all */
+		for (i = 0; i < view_n; i++)
+		{
+			int y = view_y[i];
+			int x = view_x[i];
+
+			/* Access the grid */
+			c_ptr = &cave[y][x];
+
+			if (remove)
+				c_ptr->info &= ~(CAVE_VIEW);
+			else
+				c_ptr->info |= (CAVE_VIEW);
+		}
+	}
+}
 
 /*
  * Save the game
@@ -4839,6 +5011,8 @@ void do_cmd_suicide(void)
 void do_cmd_save_game(void)
 {
 	panic_save = 0;   /* Fixes an apparently long-lived bug */
+
+	remove_cave_view(TRUE);
 
 	/* Save the current level if in a persistent level */
 	save_dungeon();
@@ -4880,6 +5054,8 @@ void do_cmd_save_game(void)
 		prt("Saving game... failed!", 0, 0);
 	}
 
+	remove_cave_view(FALSE);
+
 	/* Allow suspend again */
 	signals_handle_tstp();
 
@@ -4908,21 +5084,22 @@ long total_points(void)
 #else   /* New calculation */
 	s16b max_dl = 0, i, k;
 	long temp, Total = 0;
-	long mult = 100;
+	long mult = 20; /* was 100. Divided values by 5 because of an overflow error */
 	long comp_death = (p_ptr->companion_killed * 2 / 5);
 
 	if (!comp_death) comp_death = 1;
 
-	if (p_ptr->preserve) mult -= 5;  /* Penalize preserve, maximize modes */
-	if (p_ptr->maximize) mult -= 5;
-	if (auto_scum) mult -= 20;
-	if (stupid_monsters) mult -= 50;
-	if (small_levels) mult += ((always_small_level) ? 20 : 50);
-	if (empty_levels) mult += 10;
-	if (smart_learn) mult += 20;
-	if (smart_cheat) mult += 20;
+	if (p_ptr->preserve) mult -= 1;  /* Penalize preserve, maximize modes */
+	if (p_ptr->maximize) mult -= 1;
+	if (auto_scum) mult -= 4;
+	if (stupid_monsters) mult -= 10;
+	if (small_levels) mult += ((always_small_level) ? 4 : 10);
+	if (empty_levels) mult += 2;
+	if (smart_learn) mult += 4;
+	if (smart_cheat) mult += 4;
 
-	if (mult < 10) mult = 10;  /* At least 10% of the original score */
+	if (mult < 2) mult = 2;  /* At least 10% of the original score */
+	/* mult is now between 2 and 40, i.e. 10% and 200% */
 
 	for (i = 0; i < max_d_idx; i++)
 		if (max_dlv[i] > max_dl)
@@ -4932,9 +5109,10 @@ long total_points(void)
 
 	temp += p_ptr->max_exp / 5;
 
-	temp += p_ptr->au / 5;
+	temp = (temp * mult / 20);
 
-	temp = (temp * mult / 100);
+	/* Gold increases score */
+	temp += p_ptr->au / 5;
 
 	/* Completing quest increase score */
 	for (i = 0; i < max_q_idx; i++)
@@ -5841,7 +6019,7 @@ void race_score(int race_num)
 
 	/* rr9: TODO - pluralize the race */
 	sprintf(tmp_str, "The Greatest of all the %s", rp_name + race_info[race_num].title);
-	prt(tmp_str, 5, 15);
+	prt(tmp_str, 5, 3);
 
 	/* Build the filename */
 	path_build(buf, 1024, ANGBAND_DIR_APEX, "scores.raw");
@@ -5872,7 +6050,7 @@ void race_score(int race_num)
 	m = 0;
 	j = 0;
 
-	while ((m < 10) || (j < MAX_HISCORES))
+	while ((m < 10) && (j < i))
 	{
 		if (highscore_seek(j)) break;
 		if (highscore_read(&the_score)) break;
@@ -6113,12 +6291,15 @@ errr predict_score(void)
 
 	/* Calculate and save the points */
 	sprintf(the_score.pts, "%9lu", (long)total_points());
+	the_score.pts[9] = '\0';
 
 	/* Save the current gold */
 	sprintf(the_score.gold, "%9lu", (long)p_ptr->au);
+	the_score.gold[9] = '\0';
 
 	/* Save the current turn */
 	sprintf(the_score.turns, "%9lu", (long)turn - (START_DAY * 10L));
+	the_score.turns[9] = '\0';
 
 	/* Hack -- no time needed */
 	strcpy(the_score.day, "TODAY");
@@ -6332,7 +6513,7 @@ void close_game(void)
 		wipe_saved();
 
 		/* Save memories */
-		if (!save_player()) msg_print("death save failed!");
+		if (!save_player()) msg_print("Death save failed!");
 
 		/* You are dead */
 		print_tomb();

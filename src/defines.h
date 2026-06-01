@@ -38,12 +38,14 @@
 
 #ifndef IS_CVS
 #define IS_CVS          ""
-/*#define IS_CVS          "(CVS)"*/
+/*#define IS_CVS          ""*/
 #endif
+
+#define USER_PATH_VERSION "/2.3"
 
 #define ANGBAND_2_8_1
 
-#define SAVEFILE_VERSION 101
+#define SAVEFILE_VERSION 104
 
 /*
  * This value is not currently used
@@ -340,7 +342,7 @@
 /*
  * Store constants
  */
-#define STORE_INVEN_MAX 24              /* Max number of discrete objs in inven */
+#define STORE_INVEN_MAX 255             /* Max number of discrete objs in inven */
 #define STORE_CHOICES   56              /* Number of items to choose stock from */
 #define STORE_OBJ_LEVEL 5               /* Magic Level for normal stores */
 #define STORE_TURNOVER  9               /* Normal shop turnover, per day */
@@ -408,11 +410,6 @@
 #define GREAT_OBJ       20
 
 #define GREAT_EGO       20
-
-#define RANDART_WEAPON  30
-#define RANDART_ARMOR   20
-#define RANDART_JEWEL   20
-
 
 /*
  * There is a 1/50 (2%) chance of inflating the requested monster_level
@@ -1255,8 +1252,10 @@
 #define ACT_GANDALF             76
 #define ACT_MARDA               77
 #define ACT_PALANTIR            78
-#define ACT_MAGLOR              79
-#define ACT_SKY                 80
+/*
+                                79
+                                80
+*/
 #define ACT_CURE_LW             81
 #define ACT_CURE_MW             82
 #define ACT_CURE_POISON         83
@@ -1264,7 +1263,9 @@
 #define ACT_REST_ALL            85
 #define ACT_CURE_700            86
 #define ACT_CURE_1000           87
-#define ACT_DAERON              88
+/*
+                                88
+*/
 #define ACT_EREBOR              89
 #define ACT_DRUEDAIN            90
 #define ACT_ESP                 91
@@ -3431,9 +3432,9 @@
 #define RF8_WILD_MOUNTAIN       0x00000200
 #define RF8_WILD_GRASS          0x00000400
 #define RF8_NO_CUT              0x00000800
-#define RF8_CTHANGBAND          0x00001000
+#define RF8_CTHANGBAND          0x00001000  /* Not used in ToME */
 /* XXX */
-#define RF8_ZANGBAND            0x00004000
+#define RF8_ZANGBAND            0x00004000  /* Not used in ToME */
 #define RF8_JOKEANGBAND         0x00008000
 #define RF8_ANGBAND             0x00010000
 
@@ -3507,7 +3508,8 @@
     (RF6_S_KIN | RF6_S_HI_DEMON | RF6_S_MONSTER | RF6_S_MONSTERS | RF6_S_ANT | \
      RF6_S_SPIDER | RF6_S_HOUND | RF6_S_HYDRA | RF6_S_ANGEL | RF6_S_DEMON | \
      RF6_S_UNDEAD | RF6_S_DRAGON | RF6_S_HI_UNDEAD | RF6_S_HI_DRAGON | \
-     RF6_S_WRAITH | RF6_S_UNIQUE | RF6_S_THUNDERLORD | RF6_S_BUG | RF6_S_RNG)
+     RF6_S_WRAITH | RF6_S_UNIQUE | RF6_S_THUNDERLORD | RF6_S_BUG | RF6_S_RNG | \
+     RF6_S_ANIMALS)
 
 
 /*** Macro Definitions ***/
@@ -4528,7 +4530,8 @@ extern int PlayerUID;
 #define HOOK_CALC_WEIGHT        74
 #define HOOK_FORBID_TRAVEL      75
 #define HOOK_DEBUG_COMMAND      76
-#define MAX_HOOKS               77
+#define HOOK_CALC_BONUS_END     77
+#define MAX_HOOKS               78
 
 #define HOOK_TYPE_C             0
 #define HOOK_TYPE_LUA           1
@@ -4697,6 +4700,8 @@ extern int PlayerUID;
 #define CMD_DUMP_HTML	-8186
 #define CMD_MACRO    	-8185
 #define CMD_QUEST    	-8184
+#define CMD_BLUNDER	-8183
+#define CMD_SHOW_ABILITY -8182
 
 #define CLI_MAX	128
 

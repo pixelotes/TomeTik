@@ -108,33 +108,9 @@
 /*
  * This flag enables the "POSIX" methods for "SAFE_SETUID".
  */
-#ifdef _POSIX_SAVED_IDS
+#if defined(_POSIX_SAVED_IDS) && !(defined(SUNOS) && !defined(SOLARIS)) && !defined(__APPLE__)
 # define SAFE_SETUID_POSIX
 #endif
-
-
-/*
- * Prevent problems on (non-Solaris) Suns using "SAFE_SETUID".
- * The SAFE_SETUID code is weird, use it at your own risk...
- */
-#if defined(SUNOS) && !defined(SOLARIS)
-# undef SAFE_SETUID_POSIX
-#endif
-
-
-
-
-/*
- * OPTION: for the AFS distributed file system, define this to ensure that
- * the program is secure with respect to the setuid code.  This option has
- * not been tested (to the best of my knowledge).  This option may require
- * some weird tricks with "player_uid" and such involving "defines".
- * Note that this option used the AFS library routines Authenticate(),
- * bePlayer(), beGames() to enforce the proper priviledges.
- * You may need to turn "SAFE_SETUID" off to use this option.
- */
-/* #define SECURE */
-
 
 
 /*
@@ -398,7 +374,7 @@
  *
  * Additional note -- if you are planning to use makefile.org, don't bother
  * setting this variable, as it is overridden by a value set near the top of
- * that file. 
+ * that file.
  */
 #ifndef DEFAULT_PATH
 # define DEFAULT_PATH "./lib/"
@@ -408,19 +384,27 @@
 /*
  * OPTION: Create and use a hidden directory in the user's home directory
  * for storing pref-files and character-dumps.
- * Warning: Pern chooses to use a different place from Vanilla 2.9.2
- * and its friends.
  */
 /*
- * TomeTik: DESACTIVADO. Con PRIVATE_USER_PATH, ANGBAND_DIR_USER pasa a ser
- * ~/.tome y los pref-files de usuario (user.prf, con los window flags de las
- * sub-ventanas) se buscan ahí en vez de en lib/user/. Para un build portable
+ * TomeTik: DESACTIVADO (el `0 &&`). Con PRIVATE_USER_PATH, ANGBAND_DIR_USER pasa
+ * a ser ~/.tome y los pref-files de usuario (user.prf, con los window flags de
+ * las sub-ventanas) se buscan ahí en vez de en lib/user/. Para un build portable
  * (Docker / Windows) queremos que lib/user/ del repo sea la fuente de verdad.
+ * (Se conserva la condición de 2.3.5 con NO_HOME_TOME tras el 0 &&.)
  */
-#if 0 && defined(SET_UID) && !defined(MACH_O_CARBON)
+#if 0 && defined(SET_UID) && !defined(MACH_O_CARBON) && !defined(NO_HOME_TOME)
 #define PRIVATE_USER_PATH "~/.tome"
 #endif /* SET_UID && !MACH_O_CARBON */
 
+/*
+ * Where to put the user's files on the Mac
+ */
+#if defined(MACH_O_CARBON)
+#define PRIVATE_USER_PATH "~/Library/Application Support/ToME"
+#define PRIVATE_USER_PATH_DATA
+#define PRIVATE_USER_PATH_APEX
+#define PRIVATE_USER_PATH_MODULES
+#endif
 
 /*
  * On multiuser systems, add the "uid" to savefile names
@@ -598,3 +582,10 @@
  * Panic saves have a different name
  */
 #define SAFER_PANICS
+
+/*
+ * Allow makefiles to override the default file mode
+ */
+#ifndef FILE_MODE
+#define FILE_MODE 0644
+#endif

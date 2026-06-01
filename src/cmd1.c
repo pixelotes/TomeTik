@@ -79,14 +79,14 @@ bool test_hit_norm(int chance, int ac, int vis)
  * Critical hits (from objects thrown by player)
  * Factor in item weight, total plusses, and player level.
  */
-s16b critical_shot(int weight, int plus, int dam)
+s16b critical_shot(int weight, int plus, int dam, int skill)
 {
 	int i, k;
 
 
 	/* Extract "shot" power */
 	i = (weight + ((p_ptr->to_h + plus) * 4) +
-	     get_skill_scale(SKILL_ARCHERY, 100));
+	     get_skill_scale(skill, 100));
 	i += 50 * p_ptr->xtra_crit;
 	i += luck( -100, 100);
 
@@ -866,7 +866,7 @@ static void carried_monster_attack(s16b m_idx, bool *fear, bool *mdeath,
 	ac = t_ptr->ac;
 
 	/* Extract the effective monster level */
-	rlev = ((r_ptr->level >= 1) ? r_ptr->level : 1);
+	rlev = ((o_ptr->elevel >= 1) ? o_ptr->elevel : 1);
 
 	/* Get the monster name (or "it") */
 	monster_desc(t_name, t_ptr, 0);
@@ -2264,29 +2264,31 @@ static void py_attack_hand(int *k, monster_type *m_ptr, s32b *special)
 	if ((r_ptr->flags3 & RF3_UNDEAD) ||
 	                (r_ptr->flags3 & RF3_NONLIVING)) resist_stun += 88;
 
-	/* Attempt 'times' */
-	for (times = 0; times < (plev < 7 ? 1 : plev / 7); times++)
+	if (plev)
 	{
-		do
+		for (times = 0; times < (plev < 7 ? 1 : plev / 7); times++)
 		{
-			ma_ptr = &blow_table[(randint(max)) - 1];
-		}
-		while ((ma_ptr->min_level > plev) || (randint(plev) < ma_ptr->chance));
-
-		/* keep the highest level attack available we found */
-		if ((ma_ptr->min_level > old_ptr->min_level) &&
-		                !(p_ptr->stun || p_ptr->confused))
-		{
-			old_ptr = ma_ptr;
-
-			if (wizard && cheat_xtra)
+			do
 			{
-				msg_print("Attack re-selected.");
+				ma_ptr = &blow_table[(randint(max)) - 1];
 			}
-		}
-		else
-		{
-			ma_ptr = old_ptr;
+			while ((ma_ptr->min_level > plev) || (randint(plev) < ma_ptr->chance));
+
+			/* keep the highest level attack available we found */
+			if ((ma_ptr->min_level > old_ptr->min_level) &&
+			                !(p_ptr->stun || p_ptr->confused))
+			{
+				old_ptr = ma_ptr;
+
+				if (wizard && cheat_xtra)
+				{
+					msg_print("Attack re-selected.");
+				}
+			}
+			else
+			{
+				ma_ptr = old_ptr;
+			}
 		}
 	}
 
@@ -2426,7 +2428,7 @@ void do_nazgul(int *k, int *num, int num_blow, int weap, monster_race *r_ptr,
 			/* 25% chance of getting destroyed */
 			if (magik(25) && allow_shatter)
 			{
-				msg_print("Your weapon is destroyed !");
+				msg_print("Your weapon is destroyed!");
 				inven_item_increase(INVEN_WIELD + weap, -1);
 				inven_item_optimize(INVEN_WIELD + weap);
 
@@ -2448,7 +2450,7 @@ void do_nazgul(int *k, int *num, int num_blow, int weap, monster_race *r_ptr,
 			/* 1/1000 chance of getting destroyed */
 			if (!rand_int(1000) && allow_shatter)
 			{
-				msg_print("Your weapon is destroyed !");
+				msg_print("Your weapon is destroyed!");
 				inven_item_increase(INVEN_WIELD + weap, -1);
 				inven_item_optimize(INVEN_WIELD + weap);
 
@@ -2823,7 +2825,7 @@ void py_attack(int y, int x, int max_blow)
 						/* May it clone the monster ? */
 						if ((f4 & TR4_CLONE) && magik(30))
 						{
-							msg_format("Oh no ! Your weapon clones %^s!",
+							msg_format("Oh no! Your weapon clones %^s!",
 							           m_name);
 							multiply_monster(c_ptr->m_idx, FALSE, TRUE);
 						}
@@ -3237,11 +3239,11 @@ bool player_can_enter(byte feature)
 
 	if (feature == FEAT_TREES)
 	{
-		if ((p_ptr->fly ||
-		                pass_wall ||
-		                (has_ability(AB_TREE_WALK)) ||
-		                (p_ptr->mimic_form == resolve_mimic_name("Ent")) ||
-		                ((p_ptr->grace >= 9000) && (p_ptr->praying) && (p_ptr->pgod == GOD_YAVANNA))))
+		if (p_ptr->fly ||
+		    pass_wall ||
+		    (has_ability(AB_TREE_WALK)) ||
+		    (p_ptr->mimic_form == resolve_mimic_name("Ent")) ||
+		    ((p_ptr->grace >= 9000) && (p_ptr->praying) && (p_ptr->pgod == GOD_YAVANNA)))
 			return (TRUE);
 	}
 
@@ -3515,6 +3517,14 @@ void move_player_aux(int dir, int do_pickup, int run, bool disarm)
 	{
 		(void)do_cmd_disarm_aux(y, x, tmp, do_pickup);
 		return;
+	}
+
+	/* Don't step on known traps. */
+	else if (disarm && (c_ptr->info & (CAVE_TRDT)) && !(p_ptr->confused || p_ptr->stun || p_ptr->image))
+	{
+		msg_print("You stop to avoid triggering the trap.");
+		energy_use = 0;
+		oktomove = FALSE;
 	}
 
 #endif /* ALLOW_EASY_DISARM -- TNB */
@@ -3869,9 +3879,9 @@ void move_player_aux(int dir, int do_pickup, int run, bool disarm)
 	}
 }
 
-void move_player(int dir, int do_pickup)
+void move_player(int dir, int do_pickup, bool disarm)
 {
-	move_player_aux(dir, do_pickup, 0, TRUE);
+	move_player_aux(dir, do_pickup, 0, disarm);
 }
 
 
@@ -5410,7 +5420,7 @@ void do_cmd_pet(void)
 
 	if (p_ptr->confused)
 	{
-		msg_print("You are too confused to command your pets");
+		msg_print("You are too confused to command your pets.");
 		energy_use = 0;
 		return;
 	}
@@ -5635,7 +5645,7 @@ void do_cmd_pet(void)
 
 			if (cave[jj][ii].m_idx)
 			{
-				msg_print("Target selected");
+				msg_print("Target selected.");
 
 				for (i = m_max - 1; i >= 1; i--)
 				{
@@ -5673,18 +5683,44 @@ void do_cmd_pet(void)
 
 				if ((!(r_ptr->flags7 & RF7_NO_DEATH)) && ((m_ptr->status == MSTATUS_PET) || (m_ptr->status == MSTATUS_FRIEND)))	/* Get rid of it! */
 				{
+					bool checked = FALSE;
+					char command;
 					bool delete_this = FALSE;
 
 					if (all_pets)
+					{
 						delete_this = TRUE;
+					}
 					else
 					{
 						char friend_name[80], check_friend[80];
 						monster_desc(friend_name, m_ptr, 0x80);
-						strnfmt(check_friend, 80, "Dismiss %s? ", friend_name);
+						strnfmt(check_friend, 80, "Dismiss %s? (Escape to cancel)", friend_name);
 
-						if (get_check(check_friend))
-							delete_this = TRUE;
+						while (!checked)
+						{
+							if (!get_com(check_friend, &command))
+							{
+								/* get out of loop */
+								checked = TRUE;
+								pet_ctr = 0;
+							}
+							else switch (command)
+							{
+							case 'Y':
+							case 'y':
+								delete_this = TRUE;
+								checked = TRUE;
+								break;
+							case 'n':
+							case 'N':
+								checked = TRUE;
+								break;
+							default:
+								bell();
+								break;
+							}
+						}
 					}
 
 					if (delete_this)
@@ -5805,7 +5841,7 @@ bool do_cmd_integrate_body()
 
 	if (!p_ptr->disembodied)
 	{
-		msg_print("You are already in a body");
+		msg_print("You are already in a body.");
 		return FALSE;
 	}
 
@@ -5821,7 +5857,7 @@ bool do_cmd_integrate_body()
 
 	if (o_ptr->sval != SV_CORPSE_CORPSE)
 	{
-		msg_print("You must select a corpse");
+		msg_print("You must select a corpse.");
 		return FALSE;
 	}
 
@@ -5924,7 +5960,7 @@ bool execute_inscription(byte i, byte y, byte x)
 	{
 	case INSCRIP_LIGHT:
 		{
-			msg_print("The inscription shines in a bright light !");
+			msg_print("The inscription shines in a bright light!");
 			lite_room(y, x);
 
 			break;
@@ -5940,7 +5976,7 @@ bool execute_inscription(byte i, byte y, byte x)
 
 	case INSCRIP_STORM:
 		{
-			msg_print("The inscription releases a powerful storm !");
+			msg_print("The inscription releases a powerful storm!");
 			project(0, 3, y, x, damroll(10, 10),
 			        GF_ELEC, PROJECT_STOP | PROJECT_GRID | PROJECT_ITEM |
 			        PROJECT_KILL | PROJECT_JUMP);
@@ -5989,7 +6025,7 @@ bool execute_inscription(byte i, byte y, byte x)
 				{
 					if (!(r_ptr->flags1 & RF1_UNIQUE))
 					{
-						msg_print("The monster fall in the chasm !");
+						msg_print("The monster falls in the chasm!");
 						delete_monster_idx(cave[ij][ii].m_idx);
 					}
 				}
@@ -6052,7 +6088,7 @@ bool execute_inscription(byte i, byte y, byte x)
 
 	case INSCRIP_BLACK_FIRE:
 		{
-			msg_print("The inscription releases a blast of hellfire !");
+			msg_print("The inscription releases a blast of hellfire!");
 			project(0, 3, y, x, 200,
 			        GF_HELL_FIRE, PROJECT_STOP | PROJECT_GRID | PROJECT_ITEM |
 			        PROJECT_KILL | PROJECT_JUMP);

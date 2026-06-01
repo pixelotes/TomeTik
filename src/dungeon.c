@@ -11,7 +11,7 @@
  */
 
 #include "angband.h"
-#include "lua.h"
+#include "lua/lua.h"
 #include "tolua.h"
 extern lua_State* L;
 
@@ -760,13 +760,12 @@ static void regen_monsters(void)
 	if (o_ptr->k_idx)
 	{
 		monster_race *r_ptr = &r_info[o_ptr->pval];
-		int max = maxroll(r_ptr->hdice, r_ptr->hside);
 
 		/* Allow regeneration (if needed) */
-		if (o_ptr->pval2 < max)
+		if (o_ptr->pval2 < o_ptr->pval3)
 		{
 			/* Hack -- Base regeneration */
-			frac = max / 100;
+			frac = o_ptr->pval3 / 100;
 
 			/* Hack -- Minimal regeneration rate */
 			if (!frac) frac = 1;
@@ -779,7 +778,7 @@ static void regen_monsters(void)
 			o_ptr->pval2 += frac;
 
 			/* Do not over-regenerate */
-			if (o_ptr->pval2 > max) o_ptr->pval2 = max;
+			if (o_ptr->pval2 > o_ptr->pval3) o_ptr->pval2 = o_ptr->pval3;
 
 			/* Redraw (later) */
 			p_ptr->redraw |= (PR_MH);
@@ -943,6 +942,7 @@ static int process_lasting_spell(s16b music)
 	}
 
 	use_mana = tolua_getnumber(L, -(lua_gettop(L) - oldtop), 0);
+	lua_settop(L, oldtop);
 	return use_mana;
 }
 
@@ -954,7 +954,7 @@ static void gere_class_special()
 	case CLASS_MANA_PATH:
 		{
 			/* Does the player have enought mana ? */
-			if (p_ptr->csp < (p_ptr->druid_extra & 255))
+			if (p_ptr->csp < (s32b)(p_ptr->druid_extra & 255))
 			{
 				p_ptr->druid_extra = 0;
 				p_ptr->druid_extra2 = CLASS_NONE;
@@ -996,7 +996,7 @@ static void gere_class_special()
 	case CLASS_WINDS_MANA:
 		{
 			/* Does the player have enought mana ? */
-			if (p_ptr->csp < (p_ptr->druid_extra & 255))
+			if (p_ptr->csp < (s32b)(p_ptr->druid_extra & 255))
 			{
 				p_ptr->druid_extra = CLASS_NONE;
 				msg_print("You stop expulsing mana winds.");
@@ -1060,36 +1060,8 @@ static void gere_class_special()
 static void check_music()
 {
 	int use_mana;
-	object_type *o_ptr = &p_ptr->inventory[INVEN_BOW];
 
-
-	/* Music of the instrument, if any */
-	if (p_ptr->music < 255)
-	{
-		if (o_ptr->tval == TV_INSTRUMENT)
-		{
-			music *m_ptr = &music_info[p_ptr->music];
-
-			if (o_ptr->timeout <
-			                (m_ptr->init_recharge + m_ptr->dur * m_ptr->turn_recharge))
-			{
-				o_ptr->timeout += m_ptr->turn_recharge;
-				process_lasting_spell(m_ptr->music);
-			}
-			else
-			{
-				msg_print("Your instrument stops singing.");
-				p_ptr->music = 255;
-			}
-		}
-		else
-		{
-			msg_print("Your instrument stop singing because you don't wield it anymore.");
-			p_ptr->music = 255;
-		}
-	}
-
-	/* Music singed by player */
+	/* Music sung by player */
 	if (!p_ptr->music_extra) return;
 
 	use_mana = process_lasting_spell(p_ptr->music_extra);
@@ -1290,7 +1262,7 @@ bool is_recall = FALSE;
 /*
  * Handle certain things once every 10 game turns
  *
- * Note that a single movement in the overhead wilderness mode 
+ * Note that a single movement in the overhead wilderness mode
  * consumes 132 times as much energy as a normal one...
  */
 static void process_world(void)
@@ -1403,7 +1375,7 @@ static void process_world(void)
 				closing_flag++;
 
 				/* Message */
-				msg_print("The gates to ANGBAND are closing...");
+				msg_print("The gates to Middle Earth are closing...");
 				msg_print("Please finish up and/or save your game.");
 			}
 
@@ -1411,7 +1383,7 @@ static void process_world(void)
 			else
 			{
 				/* Message */
-				msg_print("The gates to ANGBAND are now closed.");
+				msg_print("The gates to Middle Earth are now closed.");
 
 				/* Stop playing */
 				alive = FALSE;
@@ -1478,7 +1450,7 @@ static void process_world(void)
 			else
 			{
 				/* Message */
-				msg_print("The sun has fallen.");
+				msg_print("The sun has set.");
 
 				/* Hack -- Scan the town */
 				for (y = 0; y < cur_hgt; y++)
@@ -1710,8 +1682,15 @@ static void process_world(void)
 	 */
 	if (!cave_floor_bold(p_ptr->py, p_ptr->px))
 	{
-		/* Player can walk through trees */
-		if (has_ability(AB_TREE_WALK) && (cave[p_ptr->py][p_ptr->px].feat == FEAT_TREES))
+		int feature = cave[p_ptr->py][p_ptr->px].feat;
+
+		/* Player can walk through or fly over trees */
+		if ((has_ability(AB_TREE_WALK) || p_ptr->fly) && (feature == FEAT_TREES))
+		{
+			/* Do nothing */
+		}
+		/* Player can climb over mountains */
+		else if ((p_ptr->climb) && (f_info[feature].flags1 & FF1_CAN_CLIMB))
 		{
 			/* Do nothing */
 		}
@@ -2821,12 +2800,12 @@ static void process_world(void)
 	/* Arg cannot breath? */
 	if ((dungeon_flags2 & DF2_WATER_BREATH) && (!p_ptr->water_breath))
 	{
-		cmsg_print(TERM_L_RED, "You cannot breathe water, you suffocate!");
+		cmsg_print(TERM_L_RED, "You cannot breathe water!  You suffocate!");
 		take_hit(damroll(3, p_ptr->lev), "suffocating");
 	}
 	if ((dungeon_flags2 & DF2_NO_BREATH) && (!p_ptr->magical_breath))
 	{
-		cmsg_print(TERM_L_RED, "There is no air there! You suffocate!");
+		cmsg_print(TERM_L_RED, "There is no air there!  You suffocate!");
 		take_hit(damroll(3, p_ptr->lev), "suffocating");
 	}
 
@@ -2965,12 +2944,20 @@ static void process_world(void)
 	/* Partial summons drain mana */
 	if (p_ptr->maintain_sum)
 	{
-		p_ptr->csp -= p_ptr->maintain_sum / 100;
+		u32b oldcsp = p_ptr->csp;
+		p_ptr->csp -= p_ptr->maintain_sum / 10000;
 
 		if (p_ptr->csp < 0)
 		{
 			p_ptr->csp = 0;
 			disturb(0, 0);
+
+			p_ptr->maintain_sum = 0;
+		}
+		else
+		{
+			/* Leave behind any fractional sp */
+			p_ptr->maintain_sum -= (oldcsp - p_ptr->csp) * 10000;
 		}
 
 		/* Redraw */
@@ -3076,6 +3063,9 @@ static void process_world(void)
 		/* Skip non-objects */
 		if (!o_ptr->k_idx) continue;
 
+		/* Hack: Skip wielded lights that need fuel (already handled above) */
+		if ((i == INVEN_LITE) && (o_ptr->tval == TV_LITE) && (f4 & TR4_FUEL_LITE)) continue;
+
 		/* Recharge activatable objects */
 		if (o_ptr->timeout > 0)
 		{
@@ -3160,7 +3150,11 @@ static void process_world(void)
 			o_ptr->timeout--;
 
 			/* Notice changes */
-			if (o_ptr->timeout == 0) j++;
+			if (o_ptr->timeout == 0)
+			{
+				j++;
+				recharged_notice(o_ptr);
+			}
 		}
 
 		/* Decay objects in pack */
@@ -3201,34 +3195,37 @@ static void process_world(void)
 		{
 			int mx, my;
 
-			if (o_ptr->timeout > 0) o_ptr->pval--;
-
-			/* Notice changes */
-			if (o_ptr->pval <= 0)
+			if (o_ptr->timeout == 0)
 			{
-				monster_type *m_ptr;
-				monster_race *r_ptr;
+				o_ptr->pval--;
 
-				mx = p_ptr->px;
-				my = p_ptr->py + 1;
-				get_pos_player(5, &my, &mx);
-				msg_print("Your egg hatches!");
-				place_monster_aux(my, mx, o_ptr->pval2, FALSE, FALSE, MSTATUS_PET);
-
-				m_ptr = &m_list[cave[my][mx].m_idx];
-				r_ptr = race_inf(m_ptr);
-
-				if ((r_ptr->flags9 & RF9_IMPRESED) && can_create_companion())
+				/* Notice changes */
+				if (o_ptr->pval <= 0)
 				{
-					msg_format("And you have given the imprint to your %s!",
-					           r_name + r_ptr->name);
-					m_ptr->status = MSTATUS_COMPANION;
-				}
+					monster_type *m_ptr;
+					monster_race *r_ptr;
 
-				inven_item_increase(i, -1);
-				inven_item_describe(i);
-				inven_item_optimize(i);
-				j++;
+					mx = p_ptr->px;
+					my = p_ptr->py + 1;
+					get_pos_player(5, &my, &mx);
+					msg_print("Your egg hatches!");
+					place_monster_aux(my, mx, o_ptr->pval2, FALSE, FALSE, MSTATUS_PET);
+
+					m_ptr = &m_list[cave[my][mx].m_idx];
+					r_ptr = race_inf(m_ptr);
+
+					if ((r_ptr->flags9 & RF9_IMPRESED) && can_create_companion())
+					{
+						msg_format("And you have given the imprint to your %s!",
+						           r_name + r_ptr->name);
+						m_ptr->status = MSTATUS_COMPANION;
+					}
+
+					inven_item_increase(i, -1);
+					inven_item_describe(i);
+					inven_item_optimize(i);
+					j++;
+				}
 			}
 		}
 	}
@@ -3359,14 +3356,14 @@ static void process_world(void)
 		/* No recall. sorry */
 		else if (dungeon_flags2 & DF2_NO_RECALL_OUT)
 		{
-			cmsg_print(TERM_L_DARK, "You cannot reacll from here.");
+			cmsg_print(TERM_L_DARK, "You cannot recall from here.");
 			p_ptr->word_recall = 0;
 		}
 
 		/* Cannot WoR out of death fate levels */
 		else if (dungeon_type == DUNGEON_DEATH)
 		{
-			cmsg_print(TERM_L_DARK, "You are fated to die here, FIGHT for your life!");
+			cmsg_print(TERM_L_DARK, "You are fated to die here.  FIGHT for your life!");
 			p_ptr->word_recall = 0;
 		}
 
@@ -3395,6 +3392,12 @@ static void process_world(void)
 				is_autosave = FALSE;
 			}
 
+			/* Make SURE that persistent levels are saved
+			 * I don't know if this is needed, but I'm getting reports,
+			 * so I'm adding this extra save -- Neil
+			 */
+			save_dungeon();
+
 			/* Count down towards recall */
 			p_ptr->word_recall--;
 
@@ -3414,6 +3417,7 @@ static void process_world(void)
 					msg_print("You feel yourself yanked upwards!");
 
 					p_ptr->recall_dungeon = dungeon_type;
+					dungeon_type = DUNGEON_WILDERNESS;
 					dun_level = 0;
 
 					is_recall = TRUE;
@@ -3760,7 +3764,7 @@ static void process_command(void)
 		{
 			if (do_control_walk()) break;
 
-			do_cmd_walk(always_pickup);
+			do_cmd_walk(always_pickup, TRUE);
 
 			break;
 		}
@@ -3770,7 +3774,7 @@ static void process_command(void)
 		{
 			if (do_control_walk()) break;
 
-			do_cmd_walk(!always_pickup);
+			do_cmd_walk(!always_pickup, TRUE);
 
 			break;
 		}
@@ -3855,12 +3859,16 @@ static void process_command(void)
 			object_type *o_ptr;
 			u32b f1 = 0 , f2 = 0 , f3 = 0, f4 = 0, f5 = 0, esp = 0;
 
+
 			/* Check for light being wielded */
 			o_ptr = &p_ptr->inventory[INVEN_LITE];
 			/* Burn some fuel in the current lite */
 			if (o_ptr->tval == TV_LITE)
 				/* Extract the item flags */
 				object_flags(o_ptr, &f1, &f2, &f3, &f4, &f5, &esp);
+
+			/* Cannot move if rooted in place */
+			if (p_ptr->tim_roots) break;
 
 			if (p_ptr->control) break;
 			/* Normal cases */
@@ -3923,6 +3931,9 @@ static void process_command(void)
 		/* Go down staircase */
 	case '>':
 		{
+			/* Cannot move if rooted in place */
+			if (p_ptr->tim_roots) break;
+
 			if (p_ptr->control) break;
 			/* Normal cases */
 			if (!p_ptr->wild_mode)
@@ -4654,6 +4665,13 @@ static void process_command(void)
 			break;
 		}
 
+		/* Check abilities. */
+	case CMD_SHOW_ABILITY:
+		{
+			do_cmd_ability();
+			break;
+		}
+
 		/* Save a html screenshot. */
 	case CMD_DUMP_HTML:
 		{
@@ -4668,7 +4686,12 @@ static void process_command(void)
 			do_cmd_macro_recorder();
 			break;
 		}
-
+	case CMD_BLUNDER:
+		{
+			if (do_control_walk()) break;
+			do_cmd_walk(always_pickup, FALSE);
+			break;
+		}
 		/* Hack -- Unknown command */
 	default:
 		{
@@ -4760,17 +4783,15 @@ void process_player(void)
 			bool stop = TRUE;
 			object_type *o_ptr;
 			monster_race *r_ptr;
-			int max;
 
 			/* Get the carried monster */
 			o_ptr = &p_ptr->inventory[INVEN_CARRY];
 			r_ptr = &r_info[o_ptr->pval];
-			max = maxroll(r_ptr->hdice, r_ptr->hside);
 
 			/* Stop resting */
 			if ((!p_ptr->drain_life) && (p_ptr->chp != p_ptr->mhp)) stop = FALSE;
 			if ((!p_ptr->drain_mana) && (p_ptr->csp != p_ptr->msp)) stop = FALSE;
-			if (o_ptr->pval2 != max) stop = FALSE;
+			if (o_ptr->pval2 < o_ptr->pval3) stop = FALSE;
 			if (p_ptr->blind || p_ptr->confused) stop = FALSE;
 			if (p_ptr->poisoned || p_ptr->afraid) stop = FALSE;
 			if (p_ptr->stun || p_ptr->cut) stop = FALSE;
@@ -5210,6 +5231,8 @@ static void dungeon(void)
 	command_arg = 0;
 	command_dir = 0;
 
+	/* Make sure partial summoning counter is initialized. */
+	p_ptr->maintain_sum = 0;
 
 	/* Cancel the target */
 	target_who = 0;
@@ -5969,11 +5992,11 @@ void play_game(bool new_game)
 				/* You are doomed */
 			case FATE_DIE:
 				{
-					cmsg_print(TERM_L_DARK, "You were fated to die here, DIE!");
+					cmsg_print(TERM_L_DARK, "You were fated to die here.  DIE!");
 
 					/* You shall perish there */
 					dungeon_type = DUNGEON_DEATH;
-					dun_level = 1;
+					dun_level = d_info[dungeon_type].mindepth; /* was 1 */
 
 					fates[i].fate = FATE_NONE;
 					break;
@@ -6101,6 +6124,9 @@ void play_game(bool new_game)
 
 				/* accounting for a new ailment. -LM- */
 				p_ptr->black_breath = FALSE;
+
+				/* Hack -- don't go to undead form */
+				p_ptr->necro_extra &= ~CLASS_UNDEAD;
 
 				/* Hack -- Prevent starvation */
 				(void)set_food(PY_FOOD_MAX - 1);

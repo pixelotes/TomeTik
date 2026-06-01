@@ -5246,7 +5246,9 @@ int random_quest_number()
 {
 	if ((dun_level >= 1) && (dun_level < MAX_RANDOM_QUEST) &&
 	                (dungeon_flags1 & DF1_PRINCIPAL) &&
-	                (random_quests[dun_level].type) && (!is_randhero()))
+	                (random_quests[dun_level].type) &&
+					(!random_quests[dun_level].done) &&
+					(!is_randhero(dun_level)))
 	{
 		return dun_level;
 	}

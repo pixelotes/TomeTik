@@ -93,7 +93,7 @@ bool set_parasite(int v, int r)
 
 				if (place_monster_one(wy, wx, p_ptr->parasite_r_idx, 0, FALSE, MSTATUS_ENEMY))
 				{
-					cmsg_format(TERM_L_BLUE, "Your body convulse and spawn %s.", r_name);
+					cmsg_format(TERM_L_BLUE, "Your body convulses and spawns %s.", r_name);
 					p_ptr->food -= 750;
 					if (p_ptr->food < 100) p_ptr->food = 100;
 				}
@@ -317,7 +317,7 @@ bool set_absorb_soul(int v)
 	{
 		if (!p_ptr->absorb_soul)
 		{
-			cmsg_print(TERM_L_DARK, "You start absorbing souls of your foes.");
+			cmsg_print(TERM_L_DARK, "You start absorbing the souls of your foes.");
 			notice = TRUE;
 		}
 	}
@@ -327,7 +327,7 @@ bool set_absorb_soul(int v)
 	{
 		if (p_ptr->absorb_soul)
 		{
-			cmsg_print(TERM_L_DARK, "You stop absorbing souls of dead foes.");
+			cmsg_print(TERM_L_DARK, "You stop absorbing the souls of dead foes.");
 			notice = TRUE;
 		}
 	}
@@ -852,7 +852,7 @@ bool set_tim_res_time(int v)
 	{
 		if (!p_ptr->tim_res_time)
 		{
-			msg_print("You are now protected against the space-time distortions.");
+			msg_print("You are now protected against space-time distortions.");
 			notice = TRUE;
 		}
 	}
@@ -862,7 +862,7 @@ bool set_tim_res_time(int v)
 	{
 		if (p_ptr->tim_res_time)
 		{
-			msg_print("You are no longer protected against the space-time distortions.");
+			msg_print("You are no longer protected against space-time distortions.");
 			notice = TRUE;
 		}
 	}
@@ -996,7 +996,7 @@ bool set_oppose_ld(int v)
 	{
 		if (!p_ptr->oppose_ld)
 		{
-			msg_print("You feel protected against the light's fluctuation.");
+			msg_print("You feel protected against light's fluctuation.");
 			notice = TRUE;
 		}
 	}
@@ -1006,7 +1006,7 @@ bool set_oppose_ld(int v)
 	{
 		if (p_ptr->oppose_ld)
 		{
-			msg_print("You are no longer protected against the light's fluctuation.");
+			msg_print("You are no longer protected against light's fluctuation.");
 			notice = TRUE;
 		}
 	}
@@ -1206,6 +1206,7 @@ bool set_mimic(int v, int p, int level)
 			if (p == resolve_mimic_name("Bear"))
 			{
 				s_info[SKILL_BEAR].hidden = TRUE;
+				select_default_melee();
 			}
 			p = 0;
 		}
@@ -1981,7 +1982,7 @@ bool set_walk_water(int v)
 	{
 		if (!p_ptr->walk_water)
 		{
-			msg_print("You feel strangely insubmersible!");
+			msg_print("You feel strangely buoyant!");
 			notice = TRUE;
 		}
 	}
@@ -1991,7 +1992,7 @@ bool set_walk_water(int v)
 	{
 		if (p_ptr->walk_water)
 		{
-			msg_print("You are no longer insubmersible.");
+			msg_print("You feel much less buoyant.");
 			notice = TRUE;
 		}
 	}
@@ -2049,7 +2050,7 @@ bool set_shero(int v)
 	{
 		if (p_ptr->shero)
 		{
-			msg_print("You feel less Berserk.");
+			msg_print("You feel less berserk.");
 			notice = TRUE;
 
 			/* Redraw map */
@@ -2888,7 +2889,7 @@ bool set_tim_regen(int v, int p)
 	{
 		if (!p_ptr->tim_regen)
 		{
-			msg_print("Your body regeneration abilities greatly increase!");
+			msg_print("Your body regenerates much more quickly!");
 			notice = TRUE;
 		}
 	}
@@ -2899,7 +2900,7 @@ bool set_tim_regen(int v, int p)
 		if (p_ptr->tim_regen)
 		{
 			p = 0;
-			msg_print("Your body regeneration abilities becomes normal again.");
+			msg_print("Your body regenerates much more slowly.");
 			notice = TRUE;
 		}
 	}
@@ -4320,7 +4321,7 @@ void monster_death(int m_idx)
 		int xx = x, yy = y;
 		int attempts = 100;
 
-		cmsg_print(TERM_VIOLET, "This monster was under the protection of a great wyrm of power!");
+		cmsg_print(TERM_VIOLET, "This monster was under the protection of a Great Wyrm of Power!");
 
 		do
 		{
@@ -4568,7 +4569,7 @@ bool mon_take_hit(int m_idx, int dam, bool *fear, cptr note)
 		{
 			int curses = 2 + randint(5);
 
-			cmsg_format(TERM_VIOLET, "%^s puts a terrible morgothian curse on you!", m_name);
+			cmsg_format(TERM_VIOLET, "%^s puts a terrible Morgothian curse on you!", m_name);
 			curse_equipment_dg(100, 50);
 
 			do
@@ -7613,7 +7614,7 @@ void set_grace(s32b v)
 
 bool test_object_wish(char *name, object_type *o_ptr, object_type *forge, char *what)
 {
-	int i, j, jb;
+	int i, j, jb, save_aware;
 	char buf[200];
 
 	/* try all objects, this *IS* a very ugly and slow method :( */
@@ -7632,20 +7633,23 @@ bool test_object_wish(char *name, object_type *o_ptr, object_type *forge, char *
 		o_ptr->name1 = 0;
 		o_ptr->name2 = 0;
 		apply_magic(o_ptr, dun_level, FALSE, FALSE, FALSE);
+		/* Hack : aware status must be restored after describing the item name */
+		save_aware = k_ptr->aware;
 		object_aware(o_ptr);
 		object_known(o_ptr);
 		object_desc(buf, o_ptr, FALSE, 0);
 		strlower(buf);
+		k_ptr->aware = save_aware;
 
 		if (strstr(name, buf) ||
 		   /* Hack hack hackery */
 		   (o_ptr->tval == TV_ROD_MAIN && strstr(name, "rod of")))
 		{
 #if 0 // DGDGDGDG
-			/* You can't wish for a wish ! */
+			/* You can't wish for a wish! */
 			if ((o_ptr->tval == TV_STAFF) && (o_ptr->sval == SV_STAFF_WISHING))
 			{
-				msg_format("You cannot %s for a wish !", what);
+				msg_format("You cannot %s for a wish!", what);
 				return FALSE;
 			}
 #endif
@@ -7722,6 +7726,11 @@ bool test_object_wish(char *name, object_type *o_ptr, object_type *forge, char *
 						/* Don't search any more */
 						return TRUE;
 					}
+					else
+					{
+						/* Restore again the aware status */
+						k_ptr->aware = save_aware;
+					}
 				}
 			}
 		}
@@ -7780,16 +7789,16 @@ void make_wish(void)
 
 	clean_wish_name(buf, name);
 
-	/* You can't wish for a wish ! */
+	/* You can't wish for a wish! */
 	if (strstr(name, "wish"))
 	{
-		msg_print("You can't wish for a wish !");
+		msg_print("You can't wish for a wish!");
 		return;
 	}
 
 	if (test_object_wish(name, o_ptr, &forge, "wish"))
 	{
-		msg_print("Your wish become truth!");
+		msg_print("Your wish becomes truth!");
 
 		/* Give it to the player */
 		drop_near(o_ptr, -1, p_ptr->py, p_ptr->px);
@@ -7873,7 +7882,7 @@ void make_wish(void)
 
 					/* Create the monster */
 					if (place_monster_one(wy, wx, i, j, FALSE, mstatus))
-						msg_print("Your wish become truth!");
+						msg_print("Your wish becomes truth!");
 
 					/* Don't search any more */
 					return;

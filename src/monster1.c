@@ -283,7 +283,7 @@ static void roff_aux(int r_idx, int ego, int remem)
 			/* But we've also killed it */
 			if (dead)
 			{
-				text_out(format(", but you have avenged them!") );
+				text_out(format(", but you have avenged them!  ") );
 			}
 
 			/* Unavenged (ever) */
@@ -1614,20 +1614,15 @@ static void roff_aux(int r_idx, int ego, int remem)
 	}
 }
 
-
-
-
-
 /*
  * Hack -- Display the "name" and "attr/chars" of a monster race
  */
-static void roff_top(int r_idx, int ego)
+static void roff_name(int r_idx, int ego)
 {
 	monster_race *r_ptr = race_info_idx(r_idx, ego);
 
 	byte	a1, a2;
 	char	c1, c2;
-
 
 	/* Access the chars */
 	c1 = r_ptr->d_char;
@@ -1652,7 +1647,7 @@ static void roff_top(int r_idx, int ego)
 	{
 		int	i, j;
 		for (i = 0; use_bigtile ? i < 2 * arg_zoom : i < arg_zoom; i++)
-			for (j = 0; j < arg_zoom; j++) 
+			for (j = 0; j < arg_zoom; j++)
 				Term_draw(i, j, 255, 255);
 		Term_draw(0, 0, a2, c2);
 		Term_gotoxy(use_bigtile ? 2 * arg_zoom : arg_zoom, 0);
@@ -1702,7 +1697,19 @@ static void roff_top(int r_idx, int ego)
 	 */
 }
 
+/*
+ * Hack -- Display the "name" and "attr/chars" of a monster race on top
+ */
+static void roff_top(int r_idx, int ego)
+{
+	/* Clear the top line */
+	Term_erase(0, 0, 255);
 
+	/* Reset the cursor */
+	Term_gotoxy(0, 0);
+
+	roff_name(r_idx, ego);
+}
 
 /*
  * Hack -- describe the given monster race at the top of the screen
@@ -1729,8 +1736,14 @@ void screen_roff(int r_idx, int ego, int remember)
 	roff_top(r_idx, ego);
 }
 
-
-
+/*
+ * Ddescribe the given monster race at the current pos of the "term" window
+ */
+void monster_description_out(int r_idx, int ego)
+{
+	roff_name(r_idx, ego);
+	roff_aux(r_idx, ego, 0);
+}
 
 /*
  * Hack -- describe the given monster race in the current "term" window

@@ -46,9 +46,9 @@ static cptr comment_2b[MAX_COMMENT_2B] =
 	"That's a pittance!  I want %s gold pieces.",
 	"That's an insult!  I want %s gold pieces.",
 	"As if!  How about %s gold pieces?",
-	"My arse!  How about %s gold pieces?",
+	"My gosh!  How about %s gold pieces?",
 	"May the fleas of 1000 orcs molest you!  Try %s gold pieces.",
-	"May your most favourite parts go moldy!  Try %s gold pieces.",
+	"May your most favourite weapons rust!  Try %s gold pieces.",
 	"May Morgoth find you tasty!  Perhaps %s gold pieces?",
 	"Your mother was an Ogre!  Perhaps %s gold pieces?"
 };
@@ -234,7 +234,7 @@ static void say_comment_6(void)
 static cptr comment_7a[MAX_COMMENT_7A] =
 {
 	"Arrgghh!",
-	"You bastard!",
+	"You moron!",
 	"You hear someone sobbing...",
 	"The shopkeeper howls in agony!"
 };
@@ -243,9 +243,9 @@ static cptr comment_7a[MAX_COMMENT_7A] =
 
 static cptr comment_7b[MAX_COMMENT_7B] =
 {
-	"Damn!",
+	"Darn!",
 	"You fiend!",
-	"The shopkeeper curses at you.",
+	"The shopkeeper yells at you.",
 	"The shopkeeper glares at you."
 };
 
@@ -1607,7 +1607,7 @@ static void display_inventory(void)
 	}
 
 	/* Assume "no current page" */
-	put_str("        ", 5, 20);
+	put_str("         ", 5, 20);
 
 	/* Visual reminder of "more items" */
 	if (st_ptr->stock_num > 12)
@@ -1617,7 +1617,7 @@ static void display_inventory(void)
 		else prt("-more-", k + 6, 3);
 
 		/* Indicate the "current page" */
-		put_str(format("(Page %d)", store_top / 12 + 1), 5, 20);
+		put_str(format("(Page %d) ", store_top / 12 + 1), 5, 20);
 	}
 }
 	/*
@@ -2671,7 +2671,7 @@ void store_purchase(void)
 	/* Museum? */
 	if (st_info[st_ptr->st_idx].flags1 & SF1_MUSEUM)
 	{
-		msg_print("You cannot take items from museum!");
+		msg_print("You cannot take items from the museum!");
 		return;
 	}
 
@@ -2936,9 +2936,6 @@ void store_purchase(void)
 
 					/* Start over */
 					store_top = 0;
-
-					/* Redraw everything */
-					display_inventory();
 				}
 
 				/* The item is gone */
@@ -2946,17 +2943,10 @@ void store_purchase(void)
 				{
 					/* Pick the correct screen */
 					if (store_top >= st_ptr->stock_num) store_top -= 12;
-
-					/* Redraw everything */
-					display_inventory();
 				}
 
-				/* Item is still here */
-				else
-				{
-					/* Redraw the item */
-					display_entry(item);
-				}
+				/* Redraw everything */
+				display_inventory();
 			}
 
 			/* Player cannot afford it */
@@ -3167,7 +3157,7 @@ void store_sell(void)
 	if (!store_check_num(q_ptr))
 	{
 		if (cur_store_num == 7) msg_print("Your home is full.");
-		else if (museum) msg_print("Museum is full.");
+		else if (museum) msg_print("The museum is full.");
 		else msg_print("I have not the room in my store to keep it.");
 		return;
 	}
@@ -3386,7 +3376,7 @@ void store_examine(void)
 	if (st_ptr->stock_num <= 0)
 	{
 		if (cur_store_num == 7) msg_print("Your home is empty.");
-		else if (st_info[st_ptr->st_idx].flags1 & SF1_MUSEUM) msg_print("Museum is empty.");
+		else if (st_info[st_ptr->st_idx].flags1 & SF1_MUSEUM) msg_print("The museum is empty.");
 		else msg_print("I am currently out of stock.");
 		return;
 	}
@@ -3430,13 +3420,15 @@ void store_examine(void)
 	/* Describe */
 	msg_format("Examining %s...", o_name);
 
-	/* Describe it fully */
-	if (o_ptr->tval < TV_BOOK)
+	/* Show the object's powers. */
+	if (!object_out_desc(o_ptr, NULL, FALSE, TRUE))
 	{
-		if (!object_out_desc(o_ptr, NULL, FALSE, TRUE)) msg_print("You see nothing special.");
-		/* Books are read */
+		msg_print("You see nothing special.");
 	}
-	else
+
+	/* Show spell listing for instruments, daemonwear and spellbooks. */
+	if ((o_ptr->tval == TV_INSTRUMENT) || (o_ptr->tval == TV_DAEMON_BOOK)
+	    || (o_ptr->tval == TV_BOOK))
 	{
 		do_cmd_browse_aux(o_ptr);
 	}
@@ -3475,19 +3467,6 @@ static bool store_process_command(void)
 	repeat_check();
 
 #endif /* ALLOW_REPEAT -- TNB */
-
-	if (rogue_like_commands && command_cmd == 'l')
-	{
-		command_cmd = 'x'; 	/* hack! */
-	}
-	if (rogue_like_commands && command_cmd == 'B')
-	{
-		command_cmd = 'f';       /* kwt */
-	}
-	if (rogue_like_commands && command_cmd == 'z')
-	{
-		command_cmd = 'a';       /* kwt */
-	}
 
 	for (i = 0; i < 6; i++)
 	{
@@ -3897,6 +3876,16 @@ void do_cmd_store(void)
 	/* Display the store */
 	display_store();
 
+	/* Mega-Hack -- Ignore keymaps on store action letters */
+	for (i = 0; i < 6; i++)
+	{
+		store_action_type *ba_ptr =
+			&ba_info[st_info[st_ptr->st_idx].actions[i]];
+		request_command_ignore_keymaps[2*i] = ba_ptr->letter;
+		request_command_ignore_keymaps[2*i+1] = ba_ptr->letter_aux;
+
+	}
+
 	/* Do not leave */
 	leave_store = FALSE;
 
@@ -4073,6 +4062,8 @@ void do_cmd_store(void)
 	/* Hack -- Cancel "see" mode */
 	command_see = FALSE;
 
+	/* Mega-Hack -- Clear the 'ignore-keymaps' list */
+	memset(request_command_ignore_keymaps, 0, 12);
 
 	/* Flush messages XXX XXX XXX */
 	msg_print(NULL);
@@ -4382,6 +4373,15 @@ void do_cmd_home_trump(void)
 	/* Display the store */
 	display_store();
 
+	/* Mega-Hack -- Ignore keymaps on store action letters */
+	for (i = 0; i < 6; i++)
+	{
+		store_action_type *ba_ptr =
+			&ba_info[st_info[st_ptr->st_idx].actions[i]];
+		request_command_ignore_keymaps[2*i] = ba_ptr->letter;
+		request_command_ignore_keymaps[2*i+1] = ba_ptr->letter_aux;
+	}
+
 	/* Do not leave */
 	leave_store = FALSE;
 
@@ -4561,6 +4561,8 @@ void do_cmd_home_trump(void)
 	/* Hack -- Cancel "see" mode */
 	command_see = FALSE;
 
+	/* Mega-Hack -- Clear the 'ignore-keymaps' list */
+	memset(request_command_ignore_keymaps, 0, 12);
 
 	/* Flush messages XXX XXX XXX */
 	msg_print(NULL);
@@ -4596,7 +4598,7 @@ static void pay_for_requested_item(int value, object_type *q_ptr)
 		{
 			if (store_carry(q_ptr) != -1)
 			{
-				msg_print("The item has arrived to the Black Market.");
+				msg_print("The item has arrived in the Black Market.");
 				p_ptr->au -= value;
 
 				p_ptr->redraw |= PR_GOLD;
