@@ -29,3 +29,4 @@ lib/user/iso_coverage.txt
 *.bak
 .DS_Store
 origsources/*.o
+*.o
