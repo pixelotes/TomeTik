@@ -3124,6 +3124,15 @@ static void process_menus(WORD wCmd)
 
 	OPENFILENAME ofn;
 
+	/* TomeTik: menú "Action" -- el ID codifica la tecla del comando (2000+tecla).
+	 * Manda la tecla al term si el juego espera un comando (inkey_flag), igual
+	 * que el menú Action de GTK2/OmnibandTk. */
+	if ((wCmd >= 2000) && (wCmd < 2256))
+	{
+		if (character_generated && inkey_flag) Term_keypress(wCmd - 2000);
+		return;
+	}
+
 	/* Analyze */
 	switch (wCmd)
 	{
