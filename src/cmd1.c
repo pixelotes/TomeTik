@@ -4989,6 +4989,68 @@ void travel_step(void)
 
 
 /*
+ * Mouse "do the right thing" on a click at grid (gy, gx):
+ *  - If it holds a VISIBLE monster ADJACENT to the player, queue a single
+ *    step toward it. move_player_aux() then does the natural thing: ATTACK a
+ *    hostile, or "push past" (swap) a friendly/pet.
+ *  - Otherwise, travel there (which stops adjacent to monsters as before).
+ *
+ * Returns TRUE if a command was queued/started (so the frontend can unblock
+ * inkey() with an ESCAPE), FALSE if nothing to do.
+ */
+bool do_cmd_click(int gy, int gx)
+{
+	if (in_bounds2(gy, gx) && cave[gy][gx].m_idx)
+	{
+		monster_type *m_ptr = &m_list[cave[gy][gx].m_idx];
+		int dy = gy - p_ptr->py;
+		int dx = gx - p_ptr->px;
+
+		/* Visible monster on an adjacent tile -> melee / swap toward it. */
+		if (m_ptr->ml && (ABS(dy) <= 1) && (ABS(dx) <= 1) && (dy || dx))
+		{
+			int d;
+
+			/* Cancel any running/resting/travel first. */
+			disturb(0, 0);
+
+			if (p_ptr->confused || p_ptr->image || p_ptr->immovable) return (FALSE);
+
+			for (d = 1; d <= 9; d++)
+			{
+				if (d == 5) continue;
+				if ((p_ptr->py + ddy[d] == gy) && (p_ptr->px + ddx[d] == gx))
+				{
+					click_dir = d;
+					return (TRUE);
+				}
+			}
+			return (FALSE);
+		}
+	}
+
+	/* Not an adjacent monster: walk there. */
+	return (travel_to(gy, gx));
+}
+
+/*
+ * Perform the one-shot move/attack queued by do_cmd_click(). Called from
+ * process_player()'s energy loop, like run_step()/travel_step().
+ */
+void click_act_step(void)
+{
+	int dir = click_dir;
+
+	click_dir = 0;
+	if (!dir) return;
+
+	/* One game turn: move_player_aux attacks a hostile or pushes past an ally. */
+	energy_use = 100;
+	move_player_aux(dir, always_pickup, 0, TRUE);
+}
+
+
+/*
  * Auto-explore (DCSS-style): repeatedly travel to the nearest unexplored part
  * of the level until everything reachable is seen or something interrupts.
  *

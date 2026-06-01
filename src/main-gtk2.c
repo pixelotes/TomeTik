@@ -6312,9 +6312,10 @@ static gboolean button_press_event_handler(
 	if (!gtk_map_pixel_to_cave(td, (int)event->x, (int)event->y, &cy, &cx))
 		return FALSE;
 
-	/* Iniciar el viaje; si hay ruta, desbloquear el inkey para que el bucle de
-	 * turnos empiece a caminar. Si la casilla no es transitable, no se hace nada. */
-	if (travel_to(cy, cx))
+	/* Clic: atacar/intercambiar si hay un monstruo adyacente, o viajar hasta la
+	 * casilla. Si hace algo, desbloquear el inkey para que el bucle de turnos lo
+	 * ejecute (el ESCAPE es un no-op de comando). */
+	if (do_cmd_click(cy, cx))
 	{
 		tooltip_hide();
 		Term_keypress(ESCAPE);

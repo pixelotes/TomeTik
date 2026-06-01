@@ -4952,6 +4952,12 @@ void process_player(void)
 			explore_step();
 		}
 
+		/* One-shot move/attack queued by a mouse click on an adjacent monster */
+		else if (click_dir)
+		{
+			click_act_step();
+		}
+
 		/* Repeated command */
 		else if (command_rep)
 		{
