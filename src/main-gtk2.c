@@ -5511,6 +5511,29 @@ static errr term_data_init(term_data *td, int i)
 
 
 /*
+ * TomeTik: menú "Action" (réplica del de OmnibandTk). Cada entrada manda al
+ * juego la tecla del comando correspondiente; el inkey() bloqueado en
+ * request_command la recoge y ejecuta el comando, igual que si la pulsaras.
+ *
+ * Solo actúa si el juego está esperando un comando de alto nivel (inkey_flag,
+ * el equivalente a INKEY_CMD de OmnibandTk), para no inyectar teclas en medio
+ * de un sub-prompt/menú. La tecla del comando va en callback_action (que el
+ * item factory entrega como user_data, igual que change_graf_mode_*).
+ */
+static void action_event_handler(
+        GtkButton *was_clicked,
+        gpointer user_data)
+{
+	int key = (int)user_data;
+
+	if (!game_in_progress || !character_generated) return;
+	if (!inkey_flag) return;
+
+	Term_keypress(key);
+}
+
+
+/*
  * Neater menu code with GtkItemFactory.
  *
  * Menu bar of the Angband window
@@ -5541,6 +5564,44 @@ static GtkItemFactoryEntry main_menu_items[] =
 	  save_event_handler, 0, NULL },
 	{ "/File/Quit", "<mod1>Q",
 	  quit_event_handler, 0, NULL },
+
+	/* "Action" menu (TomeTik: acciones del juego, jugable con ratón; las teclas
+	 * van entre paréntesis. No se ponen aceleradores para no robarle teclas al
+	 * juego). Réplica del menú Action de OmnibandTk. */
+	{ "/Action", NULL, NULL, 0, "<Branch>" },
+
+	{ "/Action/Movement", NULL, NULL, 0, "<Branch>" },
+	{ "/Action/Movement/Go down (>)", NULL, action_event_handler, '>', NULL },
+	{ "/Action/Movement/Go up (<)", NULL, action_event_handler, '<', NULL },
+	{ "/Action/Movement/Run (.)", NULL, action_event_handler, '.', NULL },
+	{ "/Action/Movement/Walk and pick up (;)", NULL, action_event_handler, ';', NULL },
+	{ "/Action/Movement/Walk (-)", NULL, action_event_handler, '-', NULL },
+
+	{ "/Action/Alter", NULL, NULL, 0, "<Branch>" },
+	{ "/Action/Alter/Alter (+)", NULL, action_event_handler, '+', NULL },
+	{ "/Action/Alter/Open (o)", NULL, action_event_handler, 'o', NULL },
+	{ "/Action/Alter/Close (c)", NULL, action_event_handler, 'c', NULL },
+	{ "/Action/Alter/Disarm (D)", NULL, action_event_handler, 'D', NULL },
+	{ "/Action/Alter/Bash (B)", NULL, action_event_handler, 'B', NULL },
+	{ "/Action/Alter/Tunnel (T)", NULL, action_event_handler, 'T', NULL },
+
+	{ "/Action/Looking", NULL, NULL, 0, "<Branch>" },
+	{ "/Action/Looking/Look (l)", NULL, action_event_handler, 'l', NULL },
+	{ "/Action/Looking/Locate (L)", NULL, action_event_handler, 'L', NULL },
+	{ "/Action/Looking/Full map (M)", NULL, action_event_handler, 'M', NULL },
+	{ "/Action/Looking/Target (*)", NULL, action_event_handler, '*', NULL },
+
+	{ "/Action/Searching", NULL, NULL, 0, "<Branch>" },
+	{ "/Action/Searching/Search (s)", NULL, action_event_handler, 's', NULL },
+	{ "/Action/Searching/Toggle search mode (S)", NULL, action_event_handler, 'S', NULL },
+
+	{ "/Action/Resting", NULL, NULL, 0, "<Branch>" },
+	{ "/Action/Resting/Rest (R)", NULL, action_event_handler, 'R', NULL },
+	{ "/Action/Resting/Stay and pick up (,)", NULL, action_event_handler, ',', NULL },
+	{ "/Action/Resting/Stay (g)", NULL, action_event_handler, 'g', NULL },
+
+	{ "/Action/sep1", NULL, NULL, 0, "<Separator>" },
+	{ "/Action/Take note (:)", NULL, action_event_handler, ':', NULL },
 
 	/* "Terms" menu */
 	{ "/Terms", NULL,
