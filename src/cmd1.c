@@ -4680,10 +4680,28 @@ void run_step(int dir)
  */
 static path_result *travel_route = NULL;
 static int travel_idx = 0;
+static int travel_stuck = 0;   /* pasos seguidos sin movernos (abrir puerta atrancada) */
 
 /* Pause (ms) after each auto-walked step (travel / auto-explore) so the
  * movement is watchable rather than instantaneous. */
 #define TRAVEL_STEP_DELAY 150
+#define TRAVEL_STUCK_MAX  12   /* si no avanzamos en N intentos, abandona el tramo */
+
+/* TomeTik: ¿hay algún monstruo NO aliado a la vista? (para no autoexplorar con
+ * enemigos delante / parar si aparece uno). */
+static bool monster_threat_visible(void)
+{
+	int i;
+	for (i = 1; i < m_max; i++)
+	{
+		monster_type *m_ptr = &m_list[i];
+		if (!m_ptr->r_idx) continue;            /* hueco libre */
+		if (!m_ptr->ml) continue;               /* no visible */
+		if (m_ptr->status >= MSTATUS_FRIEND) continue;  /* aliado/mascota */
+		return (TRUE);
+	}
+	return (FALSE);
+}
 
 /*
  * Per-level "ever seen" bitmap.
@@ -4704,6 +4722,13 @@ static int travel_idx = 0;
 static byte *explore_seen = NULL;
 static int explore_seen_n = 0;
 static s32b explore_seen_stamp = -1;
+static long explore_seen_count = 0;   /* nº de celdas vistas (para medir progreso) */
+
+/* Anti-oscilación: metas (fronteras) que ya intentamos y NO aportaron celdas
+ * nuevas; no se vuelven a elegir (evita ir y venir entre fronteras "muertas"). */
+static byte *explore_bad = NULL;
+static int explore_goal_y = -1, explore_goal_x = -1;
+static long explore_goal_count = -1;  /* celdas vistas cuando fijamos la meta */
 
 /* (Re)allocate for the current level if needed, then fold in everything that is
  * memorized or currently visible. Cheap (one pass); call before pathing. */
@@ -4716,17 +4741,24 @@ static void explore_sync_seen(void)
 	                (explore_seen_stamp != old_turn))
 	{
 		if (explore_seen) C_FREE(explore_seen, explore_seen_n, byte);
+		if (explore_bad) C_FREE(explore_bad, explore_seen_n, byte);
 		explore_seen_n = n;
 		C_MAKE(explore_seen, n, byte);
+		C_MAKE(explore_bad, n, byte);
 		explore_seen_stamp = old_turn;
+		explore_seen_count = 0;
+		explore_goal_y = explore_goal_x = -1;
+		explore_goal_count = -1;
 	}
 
+	explore_seen_count = 0;
 	for (y = 0; y < cur_hgt; y++)
 	{
 		for (x = 0; x < cur_wid; x++)
 		{
 			if (cave[y][x].info & (CAVE_MARK | CAVE_SEEN))
 				explore_seen[y * cur_wid + x] = 1;
+			if (explore_seen[y * cur_wid + x]) explore_seen_count++;
 		}
 	}
 }
@@ -4748,12 +4780,20 @@ static bool explore_is_seen(int y, int x)
  */
 static bool travel_walkable_hook(int y, int x, void *user)
 {
+	int f;
 	(void)user;
 
 	if (!explore_is_seen(y, x)) return (FALSE);
-	if (!cave_floor_bold(y, x)) return (FALSE);
 
-	return (TRUE);
+	/* Suelo transitable. */
+	if (cave_floor_bold(y, x)) return (TRUE);
+
+	/* Puertas cerradas/atrancadas: con easy_open (ON por defecto) el juego las
+	 * abre al andar contra ellas, así que las ruteamos como transitables. */
+	f = cave[y][x].feat;
+	if (easy_open && (f >= FEAT_DOOR_HEAD) && (f <= FEAT_DOOR_TAIL)) return (TRUE);
+
+	return (FALSE);
 }
 
 /*
@@ -4768,6 +4808,7 @@ static void travel_clear(void)
 		travel_route = NULL;
 	}
 	travel_idx = 0;
+	travel_stuck = 0;
 
 	if (travelling)
 	{
@@ -4890,6 +4931,7 @@ bool travel_to(int gy, int gx)
 void travel_step(void)
 {
 	int ny, nx, dir, d;
+	int oy, ox;
 
 	/* Nothing to do / route consumed. */
 	if (!travel_route || (travel_idx >= travel_route->length))
@@ -4915,8 +4957,8 @@ void travel_step(void)
 		return;
 	}
 
-	/* The next tile is no longer enterable (e.g. a door closed on us). */
-	if (!cave_floor_bold(ny, nx))
+	/* The next tile is no longer traversable (suelo o puerta conocidos). */
+	if (!travel_walkable_hook(ny, nx, NULL))
 	{
 		travel_abort("Your way is blocked.");
 		return;
@@ -4942,6 +4984,8 @@ void travel_step(void)
 	/* Take the step: one game turn (monsters act in between). While auto-
 	 * exploring we always grab items in passing; plain travel honours the
 	 * player's always_pickup option. */
+	oy = p_ptr->py;
+	ox = p_ptr->px;
 	energy_use = 100;
 	move_player_aux(dir, (exploring ? TRUE : always_pickup), 1, TRUE);
 
@@ -4954,6 +4998,17 @@ void travel_step(void)
 	/* move_player_aux may have already cancelled us via disturb() (a trap, a
 	 * newly seen monster, ...) and reported it -- respect that. */
 	if (!travelling) return;
+
+	/* No nos movimos: normalmente porque easy_open acaba de ABRIR una puerta
+	 * (cuesta un turno y no avanzas). Reintenta el paso el turno siguiente SIN
+	 * avanzar el índice; si tras varios intentos seguimos clavados (puerta
+	 * atrancada que no cede), abandona el tramo. */
+	if ((p_ptr->py == oy) && (p_ptr->px == ox))
+	{
+		if (++travel_stuck > TRAVEL_STUCK_MAX) travel_abort(NULL);
+		return;
+	}
+	travel_stuck = 0;
 
 	/* Auto-explore: stop and announce when we reach something notable, so the
 	 * player can decide (DCSS-style). Travel-to-click keeps going. */
@@ -5092,8 +5147,10 @@ static bool find_nearest_unexplored(int *gy, int *gx)
 		int cx = cur % cur_wid;
 		int d;
 
-		/* Is this (seen, walkable) grid next to a never-seen one? */
-		if (!((cy == p_ptr->py) && (cx == p_ptr->px)))
+		/* Is this (seen, walkable) grid next to a never-seen one? (Saltamos las
+		 * fronteras en lista negra: ya intentadas sin aportar nada nuevo.) */
+		if (!((cy == p_ptr->py) && (cx == p_ptr->px)) &&
+		                !(explore_bad && explore_bad[cur]))
 		{
 			for (d = 0; d < 8; d++)
 			{
@@ -5158,8 +5215,27 @@ void explore_step(void)
 		return;
 	}
 
+	/* Parar si hay un enemigo a la vista (que el jugador decida). */
+	if (monster_threat_visible())
+	{
+		exploring = 0;
+		p_ptr->redraw |= (PR_STATE);
+		msg_print("There is a monster nearby; auto-explore stopped.");
+		return;
+	}
+
 	/* Fold in everything seen so far before choosing the next frontier. */
 	explore_sync_seen();
+
+	/* Anti-oscilación: si el tramo anterior NO descubrió nada nuevo, mete su
+	 * meta en la lista negra para no volver a elegirla (evita ir y venir). */
+	if ((explore_goal_y >= 0) && (explore_goal_count >= 0) &&
+	                (explore_seen_count <= explore_goal_count) && explore_bad &&
+	                in_bounds2(explore_goal_y, explore_goal_x))
+	{
+		explore_bad[explore_goal_y * cur_wid + explore_goal_x] = 1;
+	}
+	explore_goal_y = explore_goal_x = -1;
 
 	/* Nothing reachable left to uncover. */
 	if (!find_nearest_unexplored(&gy, &gx))
@@ -5169,6 +5245,11 @@ void explore_step(void)
 		msg_print("Done exploring.");
 		return;
 	}
+
+	/* Recordar la meta y el progreso al fijarla (para el chequeo de arriba). */
+	explore_goal_y = gy;
+	explore_goal_x = gx;
+	explore_goal_count = explore_seen_count;
 
 	/* Arm the leg toward it (no disturb/messages: that's our job, not its). */
 	if (!travel_plan(gy, gx))
@@ -5198,6 +5279,13 @@ void do_cmd_explore(void)
 	if (p_ptr->wild_mode)
 	{
 		msg_print("You cannot auto-explore the world map.");
+		return;
+	}
+
+	/* No autoexplorar con un enemigo a la vista. */
+	if (monster_threat_visible())
+	{
+		msg_print("There is a monster nearby.");
 		return;
 	}
 

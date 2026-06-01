@@ -150,7 +150,7 @@ i686-w64-mingw32-windres -i angband.rc -O coff -o angband_res.o
 i686-w64-mingw32-gcc -mwindows -static-libgcc -static -o tometik.exe gods.o skills.o irc.o birth.o bldg.o cave.o cmd1.o cmd2.o cmd3.o cmd4.o cmd5.o cmd6.o cmd7.o cmovie.o dungeon.o files.o generate.o gen_maze.o gen_evol.o ghost.o help.o init1.o init2.o levels.o loadsave.o lua_bind.o main-win.o main.o melee1.o melee2.o modules.o monster1.o monster2.o monster3.o notes.o object1.o object2.o pathfind.o plots.o powers.o randart.o readdib.o script.o spells1.o spells2.o squeltch.o status.o store.o tables.o traps.o util.o variable.o wild.o wizard1.o wizard2.o xtra1.o xtra2.o z-form.o z-rand.o z-term.o z-util.o z-virt.o z-sock.o w_mnster.o w_obj.o w_play_c.o w_player.o w_quest.o w_spells.o w_util.o w_z_pack.o w_dun.o lua/lapi.o lua/lcode.o lua/ldebug.o lua/ldo.o lua/lfunc.o lua/lgc.o lua/llex.o lua/lmem.o lua/lobject.o lua/lparser.o lua/lstate.o lua/lstring.o lua/ltable.o lua/ltests.o lua/ltm.o lua/lundump.o lua/lvm.o lua/lzio.o lua/lauxlib.o lua/lbaselib.o lua/ldblib.o lua/liolib.o lua/lstrlib.o lua/tolua_lb.o lua/tolua_rg.o lua/tolua_tt.o lua/tolua_tm.o lua/tolua_gp.o lua/tolua_eh.o lua/tolua_bd.o angband_res.o -lgdi32 -luser32 -lcomdlg32 -lwinmm -lwinspool -lws2_32 -lcomctl32
 === RESUMEN ===
 build rc=0
--rwxr-xr-x 1 root root 2758066 Jun  1 09:09 /work/src/tometik.exe
--rwxr-xr-x 1 root root 2758066 Jun  1 09:09 /work/tometik.exe
+-rwxr-xr-x 1 root root 2759339 Jun  1 10:20 /work/src/tometik.exe
+-rwxr-xr-x 1 root root 2759339 Jun  1 10:20 /work/tometik.exe
 --- nº de errores ---
 --- primeros 40 errores ---
