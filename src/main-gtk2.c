@@ -5642,6 +5642,7 @@ static GtkItemFactoryEntry main_menu_items[] =
 	{ "/Action/Movement/Run (.)", NULL, action_event_handler, '.', NULL },
 	{ "/Action/Movement/Walk and pick up (;)", NULL, action_event_handler, ';', NULL },
 	{ "/Action/Movement/Walk (-)", NULL, action_event_handler, '-', NULL },
+	{ "/Action/Movement/Auto-explore (^E)", NULL, action_event_handler, KTRL('E'), NULL },
 
 	{ "/Action/Alter", NULL, NULL, 0, "<Branch>" },
 	{ "/Action/Alter/Alter (+)", NULL, action_event_handler, '+', NULL },
