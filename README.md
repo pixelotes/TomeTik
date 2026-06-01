@@ -2,27 +2,40 @@
 
 **TomeTik** is *ToME — Troubles of Middle Earth*, the classic Tolkien-themed
 roguelike, played with **graphical tiles** instead of plain text — including an
-**isometric view**.
+optional **isometric view**.
 
 ![TomeTik in isometric mode](screenshots/shot1.png)
 
 Despite the "Tik" in the name, it has nothing to do with Tcl/Tk.
 
-## What it's based on
+## A fork of the original TomeTik
 
-This project takes **TomeTik 0.3** (a tiles overlay on top of ToME 2.2.2) and
-brings it to modern systems: it now compiles with current toolchains and runs on
-Linux and Windows, with several graphical frontends and a finished isometric
-renderer.
+This is a fork of **TomeTik**, the graphical version of ToME created by
+**Pousse Rapière** around 2004 (homepage: `pousse.rapiere.free.fr/tome/`). The
+original TomeTik is what made ToME playable with David Gervais's tiles and added
+the first isometric mode — all the credit for that work goes to Pousse Rapière.
 
-## Borrowed from OmnibandTk
+What this fork does is take **TomeTik 0.3** (built on ToME 2.2.2) and bring it to
+modern systems: it now compiles with current toolchains and runs on Linux and
+Windows, with several frontends and a finished isometric renderer.
 
-OmnibandTk is a sister port that shares the same ToME 2.2.2 base, so a few data
-pieces are reused between them:
+## How you can play
 
-- The **David Gervais isometric tileset** (`dg_iso32.gif`) used by the iso view.
-- The **`graf-*.prf` tile mapping files** that tell the game which tile to draw
-  for each monster, object and terrain.
+The graphics are optional — you can pick whatever you like:
+
+- **Isometric** tiles (shown above),
+- **2D** top-down tiles, or
+- plain **ASCII** text, the original roguelike look.
+
+![The same town in plain ASCII](screenshots/shot2.png)
+
+## Reused from OmnibandTk
+
+OmnibandTk is a separate Tk frontend for playing many different Angband variants.
+It isn't related to TomeTik, but it shares the same ToME 2.2.2 base, so we reuse
+its **`graf-*.prf` tile-mapping files** (which tell the game what tile to draw for
+each monster, object and terrain), along with the David Gervais isometric tileset
+they use.
 
 ## Frontends
 
@@ -33,9 +46,9 @@ pieces are reused between them:
 - **Docker** — scripts to build any of the above and to *play in your browser*
   via a VNC / noVNC container, no local install needed.
 
-## Some of what's been added
+## Some of what's been added in this fork
 
-- A finished, portable **isometric renderer** (the original one was a stub).
+- A finished, portable **isometric renderer** (the original was a stub).
 - **Click-to-move** with A\* pathfinding and an **autoexplore** option.
 - **Context action on click** (e.g. click a monster to attack it).
 - **Health bars** over the player and visible monsters.
@@ -44,6 +57,9 @@ pieces are reused between them:
 
 ## Credits
 
-ToME by Eric "DarkGod" Stevens and the ToME team; built on the Angband /
-PernAngband lineage. Isometric tiles by David Gervais. See `credits.txt` for the
-full history.
+- **Pousse Rapière** — the original TomeTik.
+- **David Gervais** — the tiles (32×32 and isometric).
+- **Eric "DarkGod" Stevens** and the ToME team — ToME itself, on the Angband /
+  PernAngband lineage.
+
+See `credits.txt` for the full history.
