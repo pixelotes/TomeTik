@@ -1,6 +1,6 @@
 /*
 ** Lua binding: player
-** Generated automatically by tolua 4.0a - angband on Mon Jun  1 10:29:48 2026.
+** Generated automatically by tolua 4.0a - angband on Mon Jun  1 19:19:31 2026.
 */
 
 #include "lua/tolua.h"
@@ -4985,6 +4985,40 @@ static int toluaI_set_player_player_type_body_monster(lua_State* tolua_S)
  return 0;
 }
 
+/* get function: body_parts of class  player_type */
+static int toluaI_get_player_player_type_body_parts(lua_State* tolua_S)
+{
+ int toluaI_index;
+  player_type* self;
+ lua_pushstring(tolua_S,".self");
+ lua_rawget(tolua_S,1);
+ self = (player_type*)  lua_touserdata(tolua_S,-1);
+ if (!tolua_istype(tolua_S,2,LUA_TNUMBER,0))
+ tolua_error(tolua_S,"invalid type in array indexing.");
+ toluaI_index = (int)tolua_getnumber(tolua_S,2,0)-1;
+ if (toluaI_index<0 || toluaI_index>=28)
+ tolua_error(tolua_S,"array indexing out of range.");
+ tolua_pushnumber(tolua_S,(long)self->body_parts[toluaI_index]);
+ return 1;
+}
+
+/* set function: body_parts of class  player_type */
+static int toluaI_set_player_player_type_body_parts(lua_State* tolua_S)
+{
+ int toluaI_index;
+  player_type* self;
+ lua_pushstring(tolua_S,".self");
+ lua_rawget(tolua_S,1);
+ self = (player_type*)  lua_touserdata(tolua_S,-1);
+ if (!tolua_istype(tolua_S,2,LUA_TNUMBER,0))
+ tolua_error(tolua_S,"invalid type in array indexing.");
+ toluaI_index = (int)tolua_getnumber(tolua_S,2,0)-1;
+ if (toluaI_index<0 || toluaI_index>=28)
+ tolua_error(tolua_S,"array indexing out of range.");
+  self->body_parts[toluaI_index] = ((byte)  tolua_getnumber(tolua_S,3,0));
+ return 0;
+}
+
 /* get function: extra_body_parts of class  player_type */
 static int toluaI_get_player_player_type_extra_body_parts(lua_State* tolua_S)
 {
@@ -8574,22 +8608,6 @@ static int toluaI_set_player_has_won(lua_State* tolua_S)
  return 0;
 }
 
-/* get function: zang_monsters */
-static int toluaI_get_player_zang_monsters(lua_State* tolua_S)
-{
- tolua_pushnumber(tolua_S,(long)zang_monsters);
- return 1;
-}
-
-/* set function: zang_monsters */
-static int toluaI_set_player_zang_monsters(lua_State* tolua_S)
-{
- if (!tolua_istype(tolua_S,1,LUA_TNUMBER,0))
- TOLUA_ERR_ASSIGN;
-  zang_monsters = ((bool)  tolua_getnumber(tolua_S,1,0));
- return 0;
-}
-
 /* get function: joke_monsters */
 static int toluaI_get_player_joke_monsters(lua_State* tolua_S)
 {
@@ -8606,19 +8624,29 @@ static int toluaI_set_player_joke_monsters(lua_State* tolua_S)
  return 0;
 }
 
-/* get function: cth_monsters */
-static int toluaI_get_player_cth_monsters(lua_State* tolua_S)
+/* get function: max_dlv */
+static int toluaI_get_player_max_dlv(lua_State* tolua_S)
 {
- tolua_pushnumber(tolua_S,(long)cth_monsters);
+ int toluaI_index;
+ if (!tolua_istype(tolua_S,2,LUA_TNUMBER,0))
+ tolua_error(tolua_S,"invalid type in array indexing.");
+ toluaI_index = (int)tolua_getnumber(tolua_S,2,0)-1;
+ if (toluaI_index<0 || toluaI_index>=999999)
+ tolua_error(tolua_S,"array indexing out of range.");
+ tolua_pushnumber(tolua_S,(long)max_dlv[toluaI_index]);
  return 1;
 }
 
-/* set function: cth_monsters */
-static int toluaI_set_player_cth_monsters(lua_State* tolua_S)
+/* set function: max_dlv */
+static int toluaI_set_player_max_dlv(lua_State* tolua_S)
 {
- if (!tolua_istype(tolua_S,1,LUA_TNUMBER,0))
- TOLUA_ERR_ASSIGN;
-  cth_monsters = ((bool)  tolua_getnumber(tolua_S,1,0));
+ int toluaI_index;
+ if (!tolua_istype(tolua_S,2,LUA_TNUMBER,0))
+ tolua_error(tolua_S,"invalid type in array indexing.");
+ toluaI_index = (int)tolua_getnumber(tolua_S,2,0)-1;
+ if (toluaI_index<0 || toluaI_index>=999999)
+ tolua_error(tolua_S,"array indexing out of range.");
+  max_dlv[toluaI_index] = ((s16b)  tolua_getnumber(tolua_S,3,0));
  return 0;
 }
 
@@ -8969,6 +8997,7 @@ int tolua_player_open (lua_State* tolua_S)
  tolua_tablevar(tolua_S,"player_type","companion_killed",toluaI_get_player_player_type_companion_killed,toluaI_set_player_player_type_companion_killed);
  tolua_tablevar(tolua_S,"player_type","black_breath",toluaI_get_player_player_type_black_breath,toluaI_set_player_player_type_black_breath);
  tolua_tablevar(tolua_S,"player_type","body_monster",toluaI_get_player_player_type_body_monster,toluaI_set_player_player_type_body_monster);
+ tolua_tablearray(tolua_S,"player_type","body_parts",toluaI_get_player_player_type_body_parts,toluaI_set_player_player_type_body_parts);
  tolua_tablearray(tolua_S,"player_type","extra_body_parts",toluaI_get_player_player_type_extra_body_parts,toluaI_set_player_player_type_extra_body_parts);
  tolua_tablearray(tolua_S,"player_type","powers_mod",toluaI_get_player_player_type_powers_mod,toluaI_set_player_player_type_powers_mod);
  tolua_tablearray(tolua_S,"player_type","powers",toluaI_get_player_player_type_powers,toluaI_set_player_player_type_powers);
@@ -9212,9 +9241,8 @@ int tolua_player_open (lua_State* tolua_S)
  tolua_globalvar(tolua_S,"wizard",toluaI_get_player_wizard,toluaI_set_player_wizard);
  tolua_globalvar(tolua_S,"total_winner",toluaI_get_player_total_winner,toluaI_set_player_total_winner);
  tolua_globalvar(tolua_S,"has_won",toluaI_get_player_has_won,toluaI_set_player_has_won);
- tolua_globalvar(tolua_S,"zang_monsters",toluaI_get_player_zang_monsters,toluaI_set_player_zang_monsters);
  tolua_globalvar(tolua_S,"joke_monsters",toluaI_get_player_joke_monsters,toluaI_set_player_joke_monsters);
- tolua_globalvar(tolua_S,"cth_monsters",toluaI_get_player_cth_monsters,toluaI_set_player_cth_monsters);
+ tolua_globalarray(tolua_S,"max_dlv",toluaI_get_player_max_dlv,toluaI_set_player_max_dlv);
  return 1;
 }
 /* Close function */
@@ -9538,12 +9566,7 @@ void tolua_player_close (lua_State* tolua_S)
  lua_pushstring(tolua_S,"has_won"); lua_pushnil(tolua_S); lua_rawset(tolua_S,-3);
  lua_pop(tolua_S,1);
  lua_getglobals(tolua_S);
- lua_pushstring(tolua_S,"zang_monsters"); lua_pushnil(tolua_S); lua_rawset(tolua_S,-3);
- lua_pop(tolua_S,1);
- lua_getglobals(tolua_S);
  lua_pushstring(tolua_S,"joke_monsters"); lua_pushnil(tolua_S); lua_rawset(tolua_S,-3);
  lua_pop(tolua_S,1);
- lua_getglobals(tolua_S);
- lua_pushstring(tolua_S,"cth_monsters"); lua_pushnil(tolua_S); lua_rawset(tolua_S,-3);
- lua_pop(tolua_S,1);
+ lua_pushnil(tolua_S); lua_setglobal(tolua_S,"max_dlv");
 }

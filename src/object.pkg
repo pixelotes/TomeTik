@@ -252,6 +252,7 @@ static obj_theme lua_obj_theme @ theme_forge;
 #define TV_AMULET       40      /* Amulets (including Specials) */
 #define TV_RING         45      /* Rings (including Specials) */
 #define TV_TRAPKIT      46      /* Trapkits */
+#define TV_TOTEM        54      /* Summoner totems */
 #define TV_STAFF        55
 #define TV_WAND         65
 #define TV_ROD          66
@@ -860,6 +861,8 @@ static obj_theme lua_obj_theme @ theme_forge;
 #define OBJ_FOUND_RUBBLE        5
 #define OBJ_FOUND_REWARD        6
 #define OBJ_FOUND_STORE         7
+#define OBJ_FOUND_STOLEN        8
+#define OBJ_FOUND_SELFMADE      9
 
 struct obj_theme
 {
@@ -1163,5 +1166,6 @@ extern byte value_check_aux1_magic(object_type *o_ptr);
 extern byte value_check_aux2(object_type *o_ptr);
 extern byte value_check_aux2_magic(object_type *o_ptr);
 extern byte select_sense(object_type *o_ptr, bool ok_combat, bool ok_magic);
+extern bool psychometry(void);
 
 extern bool remove_curse_object(object_type *o_ptr, bool all);

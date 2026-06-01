@@ -1,6 +1,6 @@
 /*
 ** Lua binding: object
-** Generated automatically by tolua 4.0a - angband on Mon Jun  1 10:29:49 2026.
+** Generated automatically by tolua 4.0a - angband on Mon Jun  1 19:19:31 2026.
 */
 
 #include "lua/tolua.h"
@@ -4170,6 +4170,26 @@ tolua_lerror:
  return 0;
 }
 
+/* function: psychometry */
+static int toluaI_object_psychometry00(lua_State* tolua_S)
+{
+ if (
+ !tolua_isnoobj(tolua_S,1)
+ )
+ goto tolua_lerror;
+ else
+ {
+ {
+  bool toluaI_ret = (bool)  psychometry();
+ tolua_pushnumber(tolua_S,(long)toluaI_ret);
+ }
+ }
+ return 1;
+tolua_lerror:
+ tolua_error(tolua_S,"#ferror in function 'psychometry'.");
+ return 0;
+}
+
 /* function: remove_curse_object */
 static int toluaI_object_remove_curse_object00(lua_State* tolua_S)
 {
@@ -4420,6 +4440,7 @@ int tolua_object_open (lua_State* tolua_S)
  tolua_constant(tolua_S,NULL,"TV_AMULET",TV_AMULET);
  tolua_constant(tolua_S,NULL,"TV_RING",TV_RING);
  tolua_constant(tolua_S,NULL,"TV_TRAPKIT",TV_TRAPKIT);
+ tolua_constant(tolua_S,NULL,"TV_TOTEM",TV_TOTEM);
  tolua_constant(tolua_S,NULL,"TV_STAFF",TV_STAFF);
  tolua_constant(tolua_S,NULL,"TV_WAND",TV_WAND);
  tolua_constant(tolua_S,NULL,"TV_ROD",TV_ROD);
@@ -4939,6 +4960,8 @@ int tolua_object_open (lua_State* tolua_S)
  tolua_constant(tolua_S,NULL,"OBJ_FOUND_RUBBLE",OBJ_FOUND_RUBBLE);
  tolua_constant(tolua_S,NULL,"OBJ_FOUND_REWARD",OBJ_FOUND_REWARD);
  tolua_constant(tolua_S,NULL,"OBJ_FOUND_STORE",OBJ_FOUND_STORE);
+ tolua_constant(tolua_S,NULL,"OBJ_FOUND_STOLEN",OBJ_FOUND_STOLEN);
+ tolua_constant(tolua_S,NULL,"OBJ_FOUND_SELFMADE",OBJ_FOUND_SELFMADE);
  tolua_cclass(tolua_S,"obj_theme","");
  tolua_tablevar(tolua_S,"obj_theme","treasure",toluaI_get_object_obj_theme_treasure,toluaI_set_object_obj_theme_treasure);
  tolua_tablevar(tolua_S,"obj_theme","combat",toluaI_get_object_obj_theme_combat,toluaI_set_object_obj_theme_combat);
@@ -5144,6 +5167,7 @@ int tolua_object_open (lua_State* tolua_S)
  tolua_function(tolua_S,NULL,"value_check_aux2",toluaI_object_value_check_aux200);
  tolua_function(tolua_S,NULL,"value_check_aux2_magic",toluaI_object_value_check_aux2_magic00);
  tolua_function(tolua_S,NULL,"select_sense",toluaI_object_select_sense00);
+ tolua_function(tolua_S,NULL,"psychometry",toluaI_object_psychometry00);
  tolua_function(tolua_S,NULL,"remove_curse_object",toluaI_object_remove_curse_object00);
  return 1;
 }
@@ -5375,6 +5399,7 @@ void tolua_object_close (lua_State* tolua_S)
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"TV_AMULET");
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"TV_RING");
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"TV_TRAPKIT");
+ lua_pushnil(tolua_S); lua_setglobal(tolua_S,"TV_TOTEM");
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"TV_STAFF");
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"TV_WAND");
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"TV_ROD");
@@ -5894,6 +5919,8 @@ void tolua_object_close (lua_State* tolua_S)
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"OBJ_FOUND_RUBBLE");
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"OBJ_FOUND_REWARD");
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"OBJ_FOUND_STORE");
+ lua_pushnil(tolua_S); lua_setglobal(tolua_S,"OBJ_FOUND_STOLEN");
+ lua_pushnil(tolua_S); lua_setglobal(tolua_S,"OBJ_FOUND_SELFMADE");
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"obj_theme");
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"object_kind");
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"artifact_type");
@@ -5983,5 +6010,6 @@ void tolua_object_close (lua_State* tolua_S)
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"value_check_aux2");
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"value_check_aux2_magic");
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"select_sense");
+ lua_pushnil(tolua_S); lua_setglobal(tolua_S,"psychometry");
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"remove_curse_object");
 }
