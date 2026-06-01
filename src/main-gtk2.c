@@ -269,6 +269,14 @@ static gint tooltip_px = 0, tooltip_py = 0;  /* posición (raíz) donde mostrarl
 
 /* Celda del cave resaltada bajo el ratón en modo iso (-1 = ninguna). */
 static int iso_hover_y = -1, iso_hover_x = -1;
+
+/* --- Doble buffer iso: la escena se renderiza a este pixmap offscreen y luego
+ * se vuelca de una sola pasada (evita ver el repintado tile a tile). iso_target
+ * es el destino actual de los blits (el buffer durante el render). --- */
+static GdkPixmap *iso_buffer = NULL;
+static int iso_buf_w = 0, iso_buf_h = 0;
+static GdkDrawable *iso_target = NULL;
+
 static GdkPixbuf *iso_sheet = NULL;  /* dg_iso32.gif (14x15 tiles 54x49, cian transp.) */
 /* Fase 4: lámina Gervais 2D 32x32 (lib/xtra/graf/32x32.bmp) para actores
  * (jugador/monstruos/objetos). map_info da (a,c); tile = fila a&0x7F, col c&0x7F.
@@ -3493,7 +3501,7 @@ static void iso_blit(term_data *td, int idx, int sx, int sy)
 	if (idx < 0) return;
 	col = idx % ISO_SHEET_COLS;
 	row = idx / ISO_SHEET_COLS;
-	gdk_draw_pixbuf(td->drawing_area->window, td->gc, iso_sheet,
+	gdk_draw_pixbuf(iso_target, td->gc, iso_sheet,
 	                col * ISO_TILE_W, row * ISO_TILE_H,
 	                sx, sy, ISO_TILE_W, ISO_TILE_H,
 	                GDK_RGB_DITHER_NONE, 0, 0);
@@ -3507,7 +3515,7 @@ static void do_blit(term_data *td, int idx, int sx, int sy)
 	if (!do_sheet || idx < 0) return;
 	col = idx % DO_COLS;
 	row = idx / DO_COLS;
-	gdk_draw_pixbuf(td->drawing_area->window, td->gc, do_sheet,
+	gdk_draw_pixbuf(iso_target, td->gc, do_sheet,
 	                col * DO_TILE_W, row * DO_TILE_H,
 	                sx, sy + DO_DY, DO_TILE_W, DO_TILE_H,
 	                GDK_RGB_DITHER_NONE, 0, 0);
@@ -3613,7 +3621,7 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 	if (((f == FEAT_RUBBLE) || (f == 206)) && rubble_tile)
 	{
 		iso_blit(td, iso_ground_tile(f), sx, sy);
-		gdk_draw_pixbuf(td->drawing_area->window, td->gc, rubble_tile,
+		gdk_draw_pixbuf(iso_target, td->gc, rubble_tile,
 		                0, 0, sx, sy + DO_DY, DO_TILE_W, DO_TILE_H,
 		                GDK_RGB_DITHER_NONE, 0, 0);
 	}
@@ -3653,7 +3661,7 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 			}
 
 			if (bldg_block && is_building)
-				gdk_draw_pixbuf(td->drawing_area->window, td->gc, bldg_block,
+				gdk_draw_pixbuf(iso_target, td->gc, bldg_block,
 				                0, 0, sx, sy, 54, 49, GDK_RGB_DITHER_NONE, 0, 0);
 			else
 				iso_blit(td, ISO_T_SINGLE, sx, sy);
@@ -3698,7 +3706,7 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 	else if ((f == FEAT_FLOWER) && flower_tile)
 	{
 		/* hierba con flores: tile custom (lib/xtra/iso/grass_flowers.png). */
-		gdk_draw_pixbuf(td->drawing_area->window, td->gc, flower_tile,
+		gdk_draw_pixbuf(iso_target, td->gc, flower_tile,
 		                0, 0, sx, sy, 54, 49, GDK_RGB_DITHER_NONE, 0, 0);
 	}
 	else if (do_sheet && iso_do_tile(f) >= 0)
@@ -3735,7 +3743,7 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 			int dx = sx + (ISO_TILE_W - 32) / 2;
 			int dy = sy + ISO_TILE_H / 2 - 32 + ISO_ACTOR_DROP;
 
-			gdk_draw_pixbuf(td->drawing_area->window, td->gc, gerv_sheet,
+			gdk_draw_pixbuf(iso_target, td->gc, gerv_sheet,
 			                col * 32, row * 32, dx, dy, 32, 32,
 			                GDK_RGB_DITHER_NONE, 0, 0);
 		}
@@ -3778,14 +3786,14 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 
 			/* Marco negro (relleno) como fondo. */
 			gdk_gc_set_rgb_fg_color(td->gc, &col_bg);
-			gdk_draw_rectangle(td->drawing_area->window, td->gc, TRUE,
+			gdk_draw_rectangle(iso_target, td->gc, TRUE,
 			                   bx - 1, by - 1, bw + 2, bh + 2);
 			/* Daño (rojo) y vida restante (verde). */
 			gdk_gc_set_rgb_fg_color(td->gc, &col_red);
-			gdk_draw_rectangle(td->drawing_area->window, td->gc, TRUE,
+			gdk_draw_rectangle(iso_target, td->gc, TRUE,
 			                   bx, by, bw, bh);
 			gdk_gc_set_rgb_fg_color(td->gc, &col_green);
-			gdk_draw_rectangle(td->drawing_area->window, td->gc, TRUE,
+			gdk_draw_rectangle(iso_target, td->gc, TRUE,
 			                   bx, by, gw, bh);
 		}
 	}
@@ -3948,69 +3956,105 @@ static void iso_overlay_text_row(term_data *td, int row)
 	}
 }
 
-/* Pinta la escena isométrica completa sobre la ventana principal. */
-static void iso_draw_scene(term_data *td)
+/*
+ * Geometría de la vista iso: reserva a la IZQUIERDA la barra de stats
+ * (cols 0..COL_MAP-1) y ARRIBA la línea de mensajes (fila 0); el mapa iso vive
+ * en (ox,oy) con tamaño map_w x map_h. (Term diminuto -> pantalla completa.)
+ */
+static void iso_geometry(term_data *td, int *ox, int *oy, int *map_w, int *map_h)
 {
 	int fw = td->font_wid, fh = td->font_hgt;
-	int win_w = td->cols * fw;
-	int win_h = td->rows * fh;
+	int win_w = td->cols * fw, win_h = td->rows * fh;
 
-	/* Reservamos a la IZQUIERDA la barra de stats (cols 0..COL_MAP-1) y ARRIBA
-	 * la línea de mensajes (fila 0), igual que el resto de modos: la escena iso
-	 * se dibuja solo en la región del mapa y esos márgenes se recomponen desde
-	 * el render 2D del term (backing store). */
-	int ox = COL_MAP * fw;
-	int oy = ROW_MAP * fh;
-	int map_w = win_w - ox;
-	int map_h = win_h - oy;
+	*ox = COL_MAP * fw;
+	*oy = ROW_MAP * fh;
+	*map_w = win_w - *ox;
+	*map_h = win_h - *oy;
 
-	GdkRectangle clip;
+	if ((*map_w <= 0) || (*map_h <= 0)) { *ox = *oy = 0; *map_w = win_w; *map_h = win_h; }
+}
+
+/*
+ * Renderiza la escena iso (tiles + actores + barras de vida) al pixmap OFFSCREEN
+ * iso_buffer, en coords locales (0,0). Es la parte cara; se hace solo cuando
+ * cambia el estado del juego (FRESH / expose), no en cada movimiento del ratón.
+ * El pixmap recorta solo: los tiles que se salen de map_w x map_h no invaden la
+ * barra de stats al volcarlo.
+ */
+static void iso_render_to_buffer(term_data *td, int map_w, int map_h)
+{
+	if (!iso_buffer || (iso_buf_w != map_w) || (iso_buf_h != map_h))
+	{
+		if (iso_buffer) g_object_unref(iso_buffer);
+		iso_buffer = gdk_pixmap_new(td->drawing_area->window, map_w, map_h, -1);
+		iso_buf_w = map_w;
+		iso_buf_h = map_h;
+	}
+
+	/* Dibujar AL BUFFER (no a la ventana) -> sin parpadeo de repintado tile a tile. */
+	iso_target = iso_buffer;
+	gdk_draw_rectangle(iso_buffer, td->drawing_area->style->black_gc, TRUE,
+	                   0, 0, map_w, map_h);
+	iso_render_scene(td, p_ptr->px, p_ptr->py, map_w, map_h, 0, 0, iso_cell_cb);
+	iso_target = td->drawing_area->window;
+}
+
+/*
+ * Vuelca el buffer cacheado a la ventana de una sola pasada y dibuja encima el
+ * rombo de resaltado del ratón. Barato: una copia de pixmap + un polígono.
+ */
+static void iso_present(term_data *td, int ox, int oy)
+{
+	if (!iso_buffer) return;
+
+	gdk_draw_pixmap(td->drawing_area->window, td->gc, iso_buffer,
+	                0, 0, ox, oy, iso_buf_w, iso_buf_h);
+
+	/* Rombo del hover ENCIMA de todo, recortado a la región del mapa. */
+	if ((iso_hover_y >= 0) && (iso_hover_x >= 0))
+	{
+		GdkRectangle clip;
+		int hsx, hsy;
+
+		clip.x = ox; clip.y = oy; clip.width = iso_buf_w; clip.height = iso_buf_h;
+		gdk_gc_set_clip_rectangle(td->gc, &clip);
+
+		iso_project(iso_hover_x, iso_hover_y, p_ptr->px, p_ptr->py,
+		            iso_buf_w, iso_buf_h, &hsx, &hsy);
+		iso_hover_outline(td, hsx + ox, hsy + oy);
+
+		gdk_gc_set_clip_rectangle(td->gc, NULL);
+	}
+}
+
+/*
+ * Redibujado COMPLETO de la escena iso (cambió el estado del juego): re-renderiza
+ * los tiles al buffer, lo vuelca, y recompone la barra de stats + la línea de
+ * mensajes desde el render 2D del term (backing store).
+ */
+static void iso_draw_scene(term_data *td)
+{
+	int ox, oy, map_w, map_h;
 
 	if (!iso_sheet || !td->drawing_area->window) return;
 
-	/* Por si el term fuese diminuto: sin sitio para márgenes, pinta a pantalla
-	 * completa (comportamiento anterior). */
-	if (map_w <= 0 || map_h <= 0) { ox = oy = 0; map_w = win_w; map_h = win_h; }
-
-	/* Auditoría de cobertura (una sola vez, bajo TOMETIK_ISO_AUDIT). Aquí los
-	 * x_attr/x_char ya están poblados por el prf de gráficos (estamos pintando
-	 * tiles), a diferencia de init_graphics que corre antes de cargarse. */
+	/* Auditoría de cobertura (una sola vez, bajo TOMETIK_ISO_AUDIT). */
 	if (getenv("TOMETIK_ISO_AUDIT"))
 	{
 		static bool iso_audited = FALSE;
 		if (!iso_audited) { iso_audited = TRUE; iso_audit_coverage(); }
 	}
 
-	/* Fondo negro SOLO en la región del mapa. */
-	gdk_draw_rectangle(td->drawing_area->window,
-	                   td->drawing_area->style->black_gc, TRUE,
-	                   ox, oy, map_w, map_h);
+	iso_geometry(td, &ox, &oy, &map_w, &map_h);
+	iso_render_to_buffer(td, map_w, map_h);
+	iso_present(td, ox, oy);
 
-	/* Recorta los blits del mapa a su región (muros/sprites altos cerca del
-	 * borde no invaden la barra ni la línea de mensajes). */
-	clip.x = ox; clip.y = oy; clip.width = map_w; clip.height = map_h;
-	gdk_gc_set_clip_rectangle(td->gc, &clip);
-
-	iso_render_scene(td, p_ptr->px, p_ptr->py, map_w, map_h, ox, oy, iso_cell_cb);
-
-	/* Rombo de resaltado del tile bajo el ratón, AL FINAL para que quede ENCIMA
-	 * de todo (tiles, muros altos, actores). Se proyecta su celda como hace la
-	 * escena (mismas dimensiones y offset). Aún con el clip del mapa activo. */
-	if ((iso_hover_y >= 0) && (iso_hover_x >= 0))
-	{
-		int hsx, hsy;
-		iso_project(iso_hover_x, iso_hover_y, p_ptr->px, p_ptr->py,
-		            map_w, map_h, &hsx, &hsy);
-		iso_hover_outline(td, hsx + ox, hsy + oy);
-	}
-
-	gdk_gc_set_clip_rectangle(td->gc, NULL);
-
-	/* Recompón la barra de stats y la línea de mensajes desde el backing store
-	 * (la escena iso no las toca). Si no hay backing store, al menos recompón
-	 * el texto de la fila 0 (prompts de wield/quaff/...). */
+	/* Barra de stats + línea de mensajes desde el backing store 2D (la escena
+	 * iso no las toca). Sin backing store, al menos recompón la fila 0. */
 	if (td->backing_store)
 	{
+		int win_w = td->cols * td->font_wid;
+		int win_h = td->rows * td->font_hgt;
 		gdk_draw_pixmap(td->drawing_area->window, td->gc, td->backing_store,
 		                0, 0, 0, 0, win_w, oy);              /* línea de mensajes */
 		gdk_draw_pixmap(td->drawing_area->window, td->gc, td->backing_store,
@@ -4020,6 +4064,28 @@ static void iso_draw_scene(term_data *td)
 	{
 		iso_overlay_text_row(td, 0);
 	}
+}
+
+/*
+ * Refresco BARATO para el movimiento del ratón: solo vuelve a volcar el buffer
+ * cacheado + el rombo del hover (sin re-renderizar tiles ni la barra). Si no hay
+ * buffer o cambió la geometría, hace un redibujado completo.
+ */
+static void iso_refresh_overlay(term_data *td)
+{
+	int ox, oy, map_w, map_h;
+
+	if (!iso_sheet || !td->drawing_area->window) return;
+
+	iso_geometry(td, &ox, &oy, &map_w, &map_h);
+
+	if (!iso_buffer || (iso_buf_w != map_w) || (iso_buf_h != map_h))
+	{
+		iso_draw_scene(td);
+		return;
+	}
+
+	iso_present(td, ox, oy);
 }
 
 static errr Term_xtra_gtk(int n, int v)
@@ -6270,7 +6336,7 @@ static void iso_clear_hover(term_data *td)
 	if ((iso_hover_y == -1) && (iso_hover_x == -1)) return;
 
 	iso_hover_y = iso_hover_x = -1;
-	if (game_in_progress && character_generated) iso_draw_scene(td);
+	if (game_in_progress && character_generated) iso_refresh_overlay(td);
 }
 
 /* Movimiento del ratón sobre el mapa: actualiza el tooltip de casilla. */
@@ -6313,13 +6379,13 @@ static gboolean motion_notify_event_handler(
 		return FALSE;
 	}
 
-	/* Cambiamos de celda: resaltar el tile bajo el ratón (iso) repintando la
-	 * escena con el nuevo rombo marcado. */
+	/* Cambiamos de celda: mover el rombo de resaltado. Refresco BARATO (solo
+	 * re-vuelca el buffer cacheado + el rombo; no re-renderiza tiles). */
 	if (iso_mode && ((cy != iso_hover_y) || (cx != iso_hover_x)))
 	{
 		iso_hover_y = cy;
 		iso_hover_x = cx;
-		iso_draw_scene(td);
+		iso_refresh_overlay(td);
 	}
 
 	/* Pedir al motor el "qué hay aquí". */

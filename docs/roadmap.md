@@ -56,6 +56,9 @@ Mejoras y objetivos futuros (ToME 2.2.2 + tiles, port moderno en Docker).
   bitmap "visto alguna vez" por nivel (reset con `old_turn`) porque ToME no
   memoriza el suelo de pasillos oscuros. Se detiene con `disturb()` (monstruos,
   daño, tecla). Pendiente de pulir: recoger objetos / parar en escaleras y rincones.
+- [ ] **Autoexplore más inteligente.** Mejorar el selector de objetivo (evitar la
+  segunda vuelta por rincones/finales de pasillo sin ver), priorizar objetos/
+  escaleras/features, recoger objetos al pasar, y mejores condiciones de parada.
 
 ## Base de código
 - [ ] **Actualizar la base de ToME a 2.3.5.**
