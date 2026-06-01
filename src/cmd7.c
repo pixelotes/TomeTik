@@ -606,7 +606,7 @@ void do_cmd_mindcraft(void)
 			/* Character Armour */
 		case 6:
 			{
-				set_shield(p_ptr->shield + plev, 50, 0, 0, 0);
+				set_shield(p_ptr->shield + plev, plev, 0, 0, 0);
 				if (plev > 14) set_oppose_acid(p_ptr->oppose_acid + plev);
 				if (plev > 19) set_oppose_fire(p_ptr->oppose_fire + plev);
 				if (plev > 24) set_oppose_cold(p_ptr->oppose_cold + plev);
@@ -619,15 +619,7 @@ void do_cmd_mindcraft(void)
 			/* Psychometry */
 		case 7:
 			{
-				if (plev < 40)
-				{
-					psychometry();
-				}
-				else
-				{
-					ident_spell();
-				}
-
+				ident_spell();
 				break;
 			}
 
@@ -669,11 +661,11 @@ void do_cmd_mindcraft(void)
 				if (!p_ptr->fast)
 				{
 					/* Haste */
-					(void)set_fast(b, 10);
+					(void)set_fast(b, plev / 5);
 				}
 				else
 				{
-					(void)set_fast(p_ptr->fast + b, 10);
+					(void)set_fast(p_ptr->fast + b, plev / 5);
 				}
 
 				break;
@@ -4435,7 +4427,7 @@ int spell_chance_random(random_spell* rspell)
 
 
 	/* Extract the base spell failure rate */
-	chance = rspell->level + 25;
+	chance = rspell->level + 10;
 
 	/* Reduce failure rate by "effective" level adjustment */
 	chance -= 3 * (get_skill(SKILL_THAUMATURGY) - rspell->level);
@@ -5447,6 +5439,13 @@ void do_cmd_set_piercing(void)
 	char ch;
 	char com[80];
 
+	if ((get_skill(SKILL_BOW) <= 25) && (get_skill(SKILL_XBOW) <= 25) &&
+	    (get_skill(SKILL_SLING) <= 25))
+	{
+		msg_print("You can't fire piercing shots yet.");
+		return;
+	}
+
 	strnfmt(com, 80, "Allow shots to pierce? ");
 
 	while (TRUE)
@@ -5459,11 +5458,13 @@ void do_cmd_set_piercing(void)
 		if ((ch == 'Y') || (ch == 'y'))
 		{
 			p_ptr->use_piercing_shots = 1;
+			msg_print("Piercing shots activated.");
 			break;
 		}
 		if ((ch == 'N') || (ch == 'n'))
 		{
 			p_ptr->use_piercing_shots = 0;
+			msg_print("Piercing shots deactivated.");
 			break;
 		}
 	}

@@ -1,6 +1,6 @@
 /*
 ** Lua binding: object
-** Generated automatically by tolua 4.0a - angband on Mon Jun  1 20:16:33 2026.
+** Generated automatically by tolua 4.0a - angband on Mon Jun  1 20:31:45 2026.
 */
 
 #include "lua/tolua.h"
@@ -4144,32 +4144,6 @@ tolua_lerror:
  return 0;
 }
 
-/* function: select_sense */
-static int toluaI_object_select_sense00(lua_State* tolua_S)
-{
- if (
- !tolua_istype(tolua_S,1,tolua_tag(tolua_S,"object_type"),0) ||
- !tolua_istype(tolua_S,2,LUA_TNUMBER,0) ||
- !tolua_istype(tolua_S,3,LUA_TNUMBER,0) ||
- !tolua_isnoobj(tolua_S,4)
- )
- goto tolua_lerror;
- else
- {
-  object_type* o_ptr = ((object_type*)  tolua_getusertype(tolua_S,1,0));
-  bool ok_combat = ((bool)  tolua_getnumber(tolua_S,2,0));
-  bool ok_magic = ((bool)  tolua_getnumber(tolua_S,3,0));
- {
-  byte toluaI_ret = (byte)  select_sense(o_ptr,ok_combat,ok_magic);
- tolua_pushnumber(tolua_S,(long)toluaI_ret);
- }
- }
- return 1;
-tolua_lerror:
- tolua_error(tolua_S,"#ferror in function 'select_sense'.");
- return 0;
-}
-
 /* function: psychometry */
 static int toluaI_object_psychometry00(lua_State* tolua_S)
 {
@@ -5166,7 +5140,6 @@ int tolua_object_open (lua_State* tolua_S)
  tolua_function(tolua_S,NULL,"value_check_aux1_magic",toluaI_object_value_check_aux1_magic00);
  tolua_function(tolua_S,NULL,"value_check_aux2",toluaI_object_value_check_aux200);
  tolua_function(tolua_S,NULL,"value_check_aux2_magic",toluaI_object_value_check_aux2_magic00);
- tolua_function(tolua_S,NULL,"select_sense",toluaI_object_select_sense00);
  tolua_function(tolua_S,NULL,"psychometry",toluaI_object_psychometry00);
  tolua_function(tolua_S,NULL,"remove_curse_object",toluaI_object_remove_curse_object00);
  return 1;
@@ -6009,7 +5982,6 @@ void tolua_object_close (lua_State* tolua_S)
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"value_check_aux1_magic");
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"value_check_aux2");
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"value_check_aux2_magic");
- lua_pushnil(tolua_S); lua_setglobal(tolua_S,"select_sense");
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"psychometry");
  lua_pushnil(tolua_S); lua_setglobal(tolua_S,"remove_curse_object");
 }

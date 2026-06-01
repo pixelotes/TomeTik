@@ -1,6 +1,6 @@
 /*
 ** Lua binding: spells
-** Generated automatically by tolua 4.0a - angband on Mon Jun  1 20:16:33 2026.
+** Generated automatically by tolua 4.0a - angband on Mon Jun  1 20:31:45 2026.
 */
 
 #include "lua/tolua.h"
@@ -3084,7 +3084,7 @@ static int toluaI_spells_get_school_spell00(lua_State* tolua_S)
   cptr check_fct = ((cptr)  tolua_getstring(tolua_S,2,0));
   s16b force_book = ((s16b)  tolua_getnumber(tolua_S,3,0));
  {
-  u32b toluaI_ret = (u32b)  get_school_spell(do_what,check_fct,force_book);
+  s32b toluaI_ret = (s32b)  get_school_spell(do_what,check_fct,force_book);
  tolua_pushnumber(tolua_S,(long)toluaI_ret);
  }
  }

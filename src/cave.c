@@ -4913,7 +4913,7 @@ void place_floor_convert_glass(int y, int x)
 {
 	place_floor(y, x);
 
-	if (cave[y][x].feat == 188) cave[y][x].feat = 217;
+	if (cave[y][x].feat == 188) cave[y][x].feat = 103;
 }
 
 /*

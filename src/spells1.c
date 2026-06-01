@@ -9233,23 +9233,21 @@ void generate_spell(int plev)
 
 	rspell = &random_spells[spell_num];
 
-	power = rand_int(15);
+	power = rand_int(5);
 
-	dice = plev / 5;
-	sides = plev * 2;
+	dice = plev / 2;
+	sides = plev;
 	mana = plev;
 
 	/* Make the spell more or less powerful. */
-	dice += power / 5;
-	sides += power / 2;
-	mana += (plev * power) / 8;
+	dice += power;
+	sides += power;
+	mana += (plev * power) / 15;
 
 	/* Stay within reasonable bounds. */
 	if (dice < 1) dice = 1;
-	if (dice > 10) dice = 10;
 
 	if (sides < 5) sides = 5;
-	if (sides > 100) sides = 100;
 
 	if (mana < 1) mana = 1;
 
@@ -9266,8 +9264,9 @@ void generate_spell(int plev)
 	if (plev == 1 || chance < 25)
 	{
 		rspell->proj_flags |= PROJECT_STOP;
-		rspell->dam_dice = dice;
-		rspell->dam_sides = sides;
+                /* Swap dice and sides for better damage */
+		rspell->dam_dice = sides;
+		rspell->dam_sides = dice;
 		rspell->radius = 0;
 	}
 	else if (chance < 50)
@@ -9280,9 +9279,9 @@ void generate_spell(int plev)
 	else if (chance < 76)
 	{
 		rspell->proj_flags |= PROJECT_STOP;
-		rspell->radius = dice;
-		rspell->dam_dice = sides;
-		rspell->dam_sides = 1;
+		rspell->radius = dice / 3;
+		rspell->dam_dice = dice;
+		rspell->dam_sides = sides;
 		ball_desc = TRUE;
 	}
 	else if (chance < 83)
@@ -9298,8 +9297,9 @@ void generate_spell(int plev)
 	else if (chance < 90)
 	{
 		rspell->proj_flags |= PROJECT_METEOR_SHOWER;
-		rspell->dam_dice = dice;
-		rspell->dam_sides = sides;
+                /* Area effect spells do way less damage "per shot" */
+		rspell->dam_dice = dice / 5;
+		rspell->dam_sides = sides / 5;
 		rspell->radius = sides / 3;
 		if (rspell->radius < 4) rspell->radius = 4;
 
@@ -9308,8 +9308,9 @@ void generate_spell(int plev)
 	else
 	{
 		rspell->proj_flags |= PROJECT_VIEWABLE;
+                /* View spells do less damage */
 		rspell->dam_dice = dice;
-		rspell->dam_sides = sides;
+		rspell->dam_sides = sides / 2;
 	}
 
 	/* Both a destructive and a simple spell requested --
