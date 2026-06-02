@@ -3867,6 +3867,20 @@ static int tip_px = 0, tip_py = 0;    /* posición (pantalla) donde mostrarlo */
 #define TIP_TIMER_ID  1001            /* id del SetTimer del retardo del tooltip */
 #define TIP_DELAY_MS  250             /* espera antes de mostrar el tooltip */
 
+/*
+ * TomeTik: tamaño de TOOLINFO a poner en cbSize. Las cabeceras mingw nuevas dan
+ * sizeof(TOOLINFO)=48 (versión V3, con el campo lpReserved). El comctl32 del
+ * sistema aceptaba TTM_ADDTOOL con 48 pero TTM_UPDATETIPTEXT NO surtía efecto
+ * -> el tooltip se quedaba sin texto (tamaño cero) e INVISIBLE, aunque todas
+ * las llamadas Win32 "tuvieran éxito" (diagnosticado con tip.log). Usamos el
+ * tamaño V2 (44), compatible con todas las versiones de comctl32.
+ */
+#ifdef TTTOOLINFOA_V2_SIZE
+# define TIP_TI_SIZE TTTOOLINFOA_V2_SIZE
+#else
+# define TIP_TI_SIZE sizeof(TOOLINFO)
+#endif
+
 /* Inverso de panel_col_of()/panel_row_of(): píxel cliente -> celda del cave.
  * Devuelve FALSE si el píxel cae fuera del área de mapa (bordes / sidebar). */
 static bool win_map_pixel_to_cave(term_data *td, int px, int py, int *cy, int *cx)
@@ -3897,7 +3911,12 @@ static void win_tooltip_ensure(HWND hwndParent)
 
 	if (hwndTooltip) return;
 
-	InitCommonControls();
+	{
+		INITCOMMONCONTROLSEX icc;
+		icc.dwSize = sizeof(icc);
+		icc.dwICC = ICC_WIN95_CLASSES;   /* incluye la clase de tooltips */
+		if (!InitCommonControlsEx(&icc)) InitCommonControls();
+	}
 
 	hwndTooltip = CreateWindowEx(
 	        WS_EX_TOPMOST, TOOLTIPS_CLASS, NULL,
@@ -3907,7 +3926,7 @@ static void win_tooltip_ensure(HWND hwndParent)
 	if (!hwndTooltip) return;
 
 	memset(&ti, 0, sizeof(ti));
-	ti.cbSize = sizeof(ti);
+	ti.cbSize = TIP_TI_SIZE;
 	ti.uFlags = TTF_TRACK | TTF_ABSOLUTE;
 	ti.hwnd = hwndParent;
 	ti.uId = 1;
@@ -3939,7 +3958,7 @@ static void win_tooltip_show(HWND hwndParent, cptr text, int sx, int sy)
 	ml[j] = '\0';
 
 	memset(&ti, 0, sizeof(ti));
-	ti.cbSize = sizeof(ti);
+	ti.cbSize = TIP_TI_SIZE;
 	ti.hwnd = hwndParent;
 	ti.uId = 1;
 	ti.lpszText = (LPSTR)ml;
@@ -3957,7 +3976,7 @@ static void win_tooltip_arm(HWND hwndParent, cptr text, int sx, int sy)
 	{
 		TOOLINFO ti;
 		memset(&ti, 0, sizeof(ti));
-		ti.cbSize = sizeof(ti);
+		ti.cbSize = TIP_TI_SIZE;
 		ti.hwnd = hwndParent;
 		ti.uId = 1;
 		SendMessage(hwndTooltip, TTM_TRACKACTIVATE, (WPARAM)FALSE, (LPARAM)&ti);
@@ -3979,7 +3998,7 @@ static void win_tooltip_hide(HWND hwndParent)
 	if (!hwndTooltip) return;
 
 	memset(&ti, 0, sizeof(ti));
-	ti.cbSize = sizeof(ti);
+	ti.cbSize = TIP_TI_SIZE;
 	ti.hwnd = hwndParent;
 	ti.uId = 1;
 	SendMessage(hwndTooltip, TTM_TRACKACTIVATE, (WPARAM)FALSE, (LPARAM)&ti);
