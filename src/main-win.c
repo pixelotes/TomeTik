@@ -2017,8 +2017,41 @@ static errr Term_xtra_win_sound(int v)
 
 #ifdef WIN32
 
-	/* Play the sound, catch errors */
-	return (PlaySound(sound_file[v], 0, SND_FILENAME | SND_ASYNC));
+	/*
+	 * TomeTik: el viejo SND_FILENAME releía el .wav del disco en CADA golpe,
+	 * lo que introducía un retardo perceptible. Precargamos cada sonido en
+	 * memoria la primera vez y reproducimos con SND_MEMORY (sin tocar disco
+	 * después). El buffer se cachea para toda la vida del proceso.
+	 */
+	{
+		static char *sound_data[SOUND_MAX];   /* cache de WAVs en memoria */
+
+		if (!sound_data[v])
+		{
+			FILE *fp = fopen(sound_file[v], "rb");
+			if (fp)
+			{
+				long sz;
+				fseek(fp, 0, SEEK_END);
+				sz = ftell(fp);
+				fseek(fp, 0, SEEK_SET);
+				if (sz > 0)
+				{
+					char *buf = (char *)malloc((size_t)sz);
+					if (buf && (fread(buf, 1, (size_t)sz, fp) == (size_t)sz))
+						sound_data[v] = buf;
+					else if (buf)
+						free(buf);
+				}
+				fclose(fp);
+			}
+		}
+
+		/* Reproducir desde memoria; si no se pudo cargar, recurrir al disco. */
+		if (sound_data[v])
+			return (PlaySound(sound_data[v], 0, SND_MEMORY | SND_ASYNC));
+		return (PlaySound(sound_file[v], 0, SND_FILENAME | SND_ASYNC));
+	}
 
 #else /* WIN32 */
 
