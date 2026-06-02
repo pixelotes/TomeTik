@@ -3792,39 +3792,25 @@ ofn.lStructSize = sizeof(OPENFILENAME);
 
 #endif
 
+	/*
+	 * TomeTik: el viejo menú Help llamaba a winhelp.exe con angband.hlp /
+	 * spoilers.hlp (WinHelp binario) desde lib/xtra/help/. Eso está MUERTO en
+	 * Windows moderno (WinHelp fuera desde Vista) y además no distribuimos esos
+	 * ficheros. Redirigimos al navegador de ayuda IN-GAME (la tecla '?', que
+	 * lee lib/help/*.hlp de texto), igual que el menú de recall reinyecta
+	 * KTRL('R'). Si no hay partida en curso, avisamos por log.
+	 */
 	case IDM_HELP_GENERAL:
 		{
-			char buf[1024];
-			char tmp[1024];
-			path_build(tmp, 1024, ANGBAND_DIR_XTRA_HELP, "angband.hlp");
-			if (check_file(tmp))
-			{
-				sprintf(buf, "winhelp.exe %s", tmp);
-				WinExec(buf, SW_NORMAL);
-			}
-			else
-			{
-				plog_fmt("Cannot find help file: %s", tmp);
-				plog("Use the online help files instead.");
-			}
+			if (character_generated && inkey_flag) Term_key_push('?');
+			else plog("La ayuda está disponible dentro del juego con la tecla '?'.");
 			break;
 		}
 
 	case IDM_HELP_SPOILERS:
 		{
-			char buf[1024];
-			char tmp[1024];
-			path_build(tmp, 1024, ANGBAND_DIR_XTRA_HELP, "spoilers.hlp");
-			if (check_file(tmp))
-			{
-				sprintf(buf, "winhelp.exe %s", tmp);
-				WinExec(buf, SW_NORMAL);
-			}
-			else
-			{
-				plog_fmt("Cannot find help file: %s", tmp);
-				plog("Use the online help files instead.");
-			}
+			if (character_generated && inkey_flag) Term_key_push('?');
+			else plog("Los spoilers están en la ayuda in-game ('?') y en lib/help/.");
 			break;
 		}
 	}
