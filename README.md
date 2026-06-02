@@ -1,10 +1,10 @@
 # TomeTik
 
 **TomeTik** is *ToME — Troubles of Middle Earth*, the classic Tolkien-themed
-roguelike, played with **graphical tiles** instead of plain text — including an
-optional **isometric view**.
+roguelike, played with **graphical tiles** instead of plain text — with an
+optional **isometric view** (in the GTK2/Linux build).
 
-![TomeTik in isometric mode](screenshots/shot1.png)
+![TomeTik in isometric mode (GTK2)](screenshots/shot1.png)
 
 Despite the "Tik" in the name, it has nothing to do with Tcl/Tk.
 
@@ -18,13 +18,14 @@ the first isometric mode — all the credit for that work goes to Pousse Rapièr
 What this fork does is take **TomeTik 0.3** (originally built on ToME 2.2.2),
 bring it to modern systems — it now compiles with current toolchains and runs on
 Linux and Windows, with several frontends and a finished isometric renderer — and
-**update the game base to ToME 2.3.5**, the last release of the 2.x line.
+**update the game base to ToME 2.3.11**: the official 2.3.5 plus the community
+("ah") bug-fixes and refinements up to 2.3.11 (the last C release of the 2.x line).
 
 ## How you can play
 
 The graphics are optional — you can pick whatever you like:
 
-- **Isometric** tiles (shown above),
+- **Isometric** tiles (GTK2/Linux build, shown above),
 - **2D** top-down tiles, or
 - plain **ASCII** text, the original roguelike look.
 
@@ -43,17 +44,18 @@ they use.
 - **GTK2** — native multi-window UI with 32×32 tiles and the isometric mode. The
   main way to play on Linux.
 - **GDI (Windows)** — the classic Windows build, producing a standalone
-  `tometik.exe` (cross-compiled with mingw-w64).
+  `tometik.exe` (cross-compiled with mingw-w64). 2D tiles and ASCII; the
+  isometric mode is GTK2-only for now.
 - **Docker** — scripts to build any of the above and to *play in your browser*
   via a VNC / noVNC container, no local install needed.
 
 ## Some of what's been added in this fork
 
-- A finished, portable **isometric renderer** (the original was a stub).
+- A finished, portable **isometric renderer** (the original was a stub) — GTK2.
 - **Click-to-move** with A\* pathfinding and an **autoexplore** option.
 - **Context action on click** (e.g. click a monster to attack it).
-- **Health bars** over the player and visible monsters.
-- **Sound and music** through SDL2_mixer.
+- **Health bars** over the player and visible monsters (iso).
+- **Sound** (GDI via winmm; **music** via SDL2_mixer on GTK2).
 - Arrow keys for movement, wide ("big") tiles on by default, and a modern build.
 
 ## Credits
