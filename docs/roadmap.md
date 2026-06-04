@@ -6,7 +6,7 @@ Mejoras y objetivos futuros (ToME 2.2.2 + tiles, port moderno en Docker).
 - [x] **Finalizar el modo isométrico.**
 - [ ] **Hacer que el tamaño de los tiles sea seleccionable.**
 - [x] **Arreglar el cambio dinámico** isométrico ⇄ tiles 2D ⇄ ASCII.
-- [ ] **Integrar los tiles sueltos en `do_extra.png`** (building_block.png,
+- [X] **Integrar los tiles sueltos en `do_extra.png`** (building_block.png,
   grass_flowers.png, rubble.png → al atlas, en vez de PNGs individuales).
 - [ ] **Mejorar el rendimiento del redibujado iso** (hoy se repinta la escena
   entera en cada FRESH y en cada cambio de celda en hover).
@@ -38,7 +38,7 @@ Mejoras y objetivos futuros (ToME 2.2.2 + tiles, port moderno en Docker).
   suelo), con retardo de aparición y estilo (GTK2 y GDI).
 - [X] **Sidebar de stats en iso**: hecho parcial — se reserva el margen izquierdo y
   se recompone la barra 2D; revisar si el viewport iso queda bien proporcionado.
-- [ ] **Bug: el menú `wield` no aparece en la pantalla principal** (sí salen eat /
+- [X] **Bug: el menú `wield` no aparece en la pantalla principal** (sí salen eat /
   inventory / equip). Posible trigger/refresco que falta al abrirlo.
 - [ ] **Mejoras surtidas de UX** (varias, a definir).
 
@@ -61,8 +61,8 @@ Mejoras y objetivos futuros (ToME 2.2.2 + tiles, port moderno en Docker).
   escaleras/features, recoger objetos al pasar, y mejores condiciones de parada.
 
 ## Base de código
-- [ ] **Actualizar la base de ToME a 2.3.5.**
-- [ ] **Backportear mejoras de ToME 2.4.0ah** (la versión C++).
+- [X] **Actualizar la base de ToME a 2.3.5.**
+- [X] **Backportear mejoras de ToME 2.4.0ah** (la versión C++).
 
 ## Audio
 - [x] **Sonidos.** Backend hecho en ambos frontends, **desactivado por defecto**,
