@@ -4729,12 +4729,21 @@ static long explore_seen_count = 0;   /* nº de celdas vistas (para medir progre
 static byte *explore_bad = NULL;
 static int explore_goal_y = -1, explore_goal_x = -1;
 static long explore_goal_count = -1;  /* celdas vistas cuando fijamos la meta */
-static bool explore_goal_is_gold = FALSE; /* la meta actual es un montón de oro */
+static bool explore_goal_is_loot = FALSE; /* la meta actual es oro / un objeto */
 
-/* Radio (en pasos) dentro del cual el autoexplore se DESVÍA a recoger oro que ya
- * ha visto. El oro más lejos se ignora (no lo perseguimos por todo el mapa).
- * Configurable; 0 lo desactiva. */
+/* Radio (en pasos) dentro del cual el autoexplore se DESVÍA a recoger oro / un
+ * objeto que ya ha visto. Lo más lejos se ignora (no lo perseguimos por todo el
+ * mapa). Configurable; 0 desactiva ese tipo de desvío. */
 int explore_gold_radius = 5;
+int explore_item_radius = 5;
+
+/* Clase de interés de una celda para el autoexplore (modelo del
+ * borg_flow_dark_interesting): se elige la celda de MAYOR prioridad y, a igualdad,
+ * la más cercana. El BFS de find_nearest_goal visita en orden de distancia, así
+ * que el primer LOOT-en-radio gana y, si no hay, la primera frontera. */
+#define EXPLORE_NONE     0   /* nada por lo que desviarse aquí               */
+#define EXPLORE_FRONTIER 1   /* celda vista junto a una nunca vista          */
+#define EXPLORE_LOOT     2   /* oro/objeto visto dentro de su radio (gana)   */
 
 /* (Re)allocate for the current level if needed, then fold in everything that is
  * memorized or currently visible. Cheap (one pass); call before pathing. */
@@ -4793,6 +4802,21 @@ static bool cell_has_gold(int y, int x)
 	return (FALSE);
 }
 
+/* ¿Hay un objeto (ya visto) que NO sea oro en esta celda? Igual que el oro, el
+ * autoexplore se desvía a recogerlo si está dentro de explore_item_radius. */
+static bool cell_has_item(int y, int x)
+{
+	s16b this_o_idx, next_o_idx;
+
+	for (this_o_idx = cave[y][x].o_idx; this_o_idx; this_o_idx = next_o_idx)
+	{
+		object_type *o_ptr = &o_list[this_o_idx];
+		next_o_idx = o_ptr->next_o_idx;
+		if (o_ptr->marked && (o_ptr->tval != TV_GOLD)) return (TRUE);
+	}
+	return (FALSE);
+}
+
 /*
  * Walkability for the travel A*: a grid may be entered iff we have seen it (so
  * we know it is there) and it is a floor-like feature -- no walls, closed doors
@@ -4816,6 +4840,35 @@ static bool travel_walkable_hook(int y, int x, void *user)
 
 	return (FALSE);
 }
+
+/*
+ * Walkability for click-to-move ("go there"). Unlike the auto-explore hook this
+ * does NOT require the grid to have been seen: the whole level lives in cave[][]
+ * (feat is the true terrain even for un-memorized grids, as the rest of the game
+ * already relies on), so we can route over real floor/doors the player hasn't
+ * discovered yet and let them walk into the dark toward the clicked goal,
+ * uncovering it on the way. travel_step still re-validates each step, so a tile
+ * that genuinely turns out blocked stops us cleanly.
+ */
+static bool travel_walkable_real(int y, int x, void *user)
+{
+	int f;
+	(void)user;
+
+	if (cave_floor_bold(y, x)) return (TRUE);
+
+	f = cave[y][x].feat;
+	if (easy_open && (f >= FEAT_DOOR_HEAD) && (f <= FEAT_DOOR_TAIL)) return (TRUE);
+
+	return (FALSE);
+}
+
+/*
+ * Walkability policy of the leg currently armed: seen-gated for auto-explore,
+ * real-terrain for click-to-move. travel_plan() sets it from its caller and
+ * travel_step() reuses it so re-validation matches how the path was planned.
+ */
+static astar_walkable_hook travel_hook = travel_walkable_hook;
 
 /*
  * Silent teardown of the travel state. Used internally (arrival, restart) where
@@ -4882,23 +4935,27 @@ static void travel_abort(cptr msg)
  * auto-explorer) wrap it with their own policy. Returns TRUE if a route of at
  * least one step was armed.
  */
-static bool travel_plan(int gy, int gx)
+static bool travel_plan(int gy, int gx, astar_walkable_hook hook)
 {
 	path_result *route;
 	int sy = p_ptr->py;
 	int sx = p_ptr->px;
 
+	/* Remember the policy of this leg so travel_step() re-validates the same
+	 * way the path was planned. */
+	travel_hook = hook;
+
 	if (!in_bounds2(gy, gx)) return (FALSE);
 	if ((gy == sy) && (gx == sx)) return (FALSE);
 
-	/* Goal must be a tile we could actually reach (walkable, known/seen). */
-	if (!travel_walkable_hook(gy, gx, NULL)) return (FALSE);
+	/* Goal must be a tile we could actually reach under this leg's policy. */
+	if (!hook(gy, gx, NULL)) return (FALSE);
 
 	/* Path over cave[][] without copying it. Allow diagonals to cut corners,
 	 * matching how the player can actually move (otherwise paths through
 	 * corridors come out as orthogonal staircases). */
 	route = astar_find_path_cb(cur_hgt, cur_wid,
-	                           travel_walkable_hook, NULL,
+	                           hook, NULL,
 	                           sy, sx, gy, gx, ASTAR_8DIR_CUT);
 
 	/* steps[0] is the player's own tile, so a real path has length >= 2. */
@@ -4932,12 +4989,38 @@ bool travel_to(int gy, int gx)
 	/* Refresh our "seen" knowledge before pathing. */
 	explore_sync_seen();
 
-	/* Clicking a wall / off-map / our own tile: nothing to do, quietly. */
+	/* Off-map / our own tile: nothing to do, quietly. */
 	if (!in_bounds2(gy, gx) || ((gy == p_ptr->py) && (gx == p_ptr->px))) return (FALSE);
-	if (!travel_walkable_hook(gy, gx, NULL)) return (FALSE);
 
-	/* Walkable but unreachable -> say so. */
-	if (!travel_plan(gy, gx))
+	/* The clicked tile isn't walkable (a wall, or a near-miss on the edge of the
+	 * black): snap to its nearest walkable neighbour so the click still goes
+	 * somewhere sensible instead of doing nothing. */
+	if (!travel_walkable_real(gy, gx, NULL))
+	{
+		static const int dy8[8] = { -1, 1, 0, 0, -1, -1, 1, 1 };
+		static const int dx8[8] = { 0, 0, -1, 1, -1, 1, -1, 1 };
+		int best = -1, best_d = 0, i;
+
+		for (i = 0; i < 8; i++)
+		{
+			int ny = gy + dy8[i], nx = gx + dx8[i], d;
+
+			if (!in_bounds2(ny, nx)) continue;
+			if (!travel_walkable_real(ny, nx, NULL)) continue;
+
+			d = distance(p_ptr->py, p_ptr->px, ny, nx);
+			if ((best < 0) || (d < best_d)) { best = i; best_d = d; }
+		}
+
+		if (best < 0) return (FALSE);   /* nothing walkable next to the click */
+		gy += dy8[best];
+		gx += dx8[best];
+		if ((gy == p_ptr->py) && (gx == p_ptr->px)) return (FALSE);
+	}
+
+	/* Walkable but unreachable -> say so. Routes over real terrain, so the @
+	 * will walk into as-yet-unseen floor toward the goal. */
+	if (!travel_plan(gy, gx, travel_walkable_real))
 	{
 		msg_print("You can't find a path to there.");
 		return (FALSE);
@@ -4981,8 +5064,8 @@ void travel_step(void)
 		return;
 	}
 
-	/* The next tile is no longer traversable (suelo o puerta conocidos). */
-	if (!travel_walkable_hook(ny, nx, NULL))
+	/* The next tile is no longer traversable, under this leg's policy. */
+	if (!travel_hook(ny, nx, NULL))
 	{
 		travel_abort("Your way is blocked.");
 		return;
@@ -5143,7 +5226,36 @@ void click_act_step(void)
  * player over walkable known grids returns the closest such grid (and proves it
  * is reachable in one pass). Returns TRUE and fills (*gy,*gx) if one exists.
  */
-static bool find_nearest_goal(int *gy, int *gx, bool *is_gold)
+static int explore_cell_interest(int y, int x, int dist)
+{
+	static const int dy8[8] = { -1, 1, 0, 0, -1, -1, 1, 1 };
+	static const int dx8[8] = { 0, 0, -1, 1, -1, 1, -1, 1 };
+	int d;
+
+	/* Loot within reach: gold or a dropped item we have already seen. Treated as
+	 * the highest-priority kind so that, on a grid that is both loot and a
+	 * frontier, picking it up wins (matching the old gold-checked-first order). */
+	if ((explore_gold_radius > 0) && (dist <= explore_gold_radius) && cell_has_gold(y, x))
+		return (EXPLORE_LOOT);
+	if ((explore_item_radius > 0) && (dist <= explore_item_radius) && cell_has_item(y, x))
+		return (EXPLORE_LOOT);
+
+	/* Frontier: a seen grid next to one we have never seen -- and not blacklisted
+	 * as a dead frontier that revealed nothing when we reached it last time. */
+	if (!(explore_bad && explore_bad[y * cur_wid + x]))
+	{
+		for (d = 0; d < 8; d++)
+		{
+			int ny = y + dy8[d], nx = x + dx8[d];
+			if ((ny < 0) || (ny >= cur_hgt) || (nx < 0) || (nx >= cur_wid)) continue;
+			if (!explore_is_seen(ny, nx)) return (EXPLORE_FRONTIER);
+		}
+	}
+
+	return (EXPLORE_NONE);
+}
+
+static bool find_nearest_goal(int *gy, int *gx, int *kind)
 {
 	/* 8-directional neighbour offsets. */
 	static const int dy8[8] = { -1, 1, 0, 0, -1, -1, 1, 1 };
@@ -5156,7 +5268,7 @@ static bool find_nearest_goal(int *gy, int *gx, bool *is_gold)
 	int start = p_ptr->py * cur_wid + p_ptr->px;
 	bool found = FALSE;
 
-	*is_gold = FALSE;
+	*kind = EXPLORE_NONE;
 	if (n <= 0) return (FALSE);
 
 	C_MAKE(seen, n, byte);
@@ -5173,32 +5285,17 @@ static bool find_nearest_goal(int *gy, int *gx, bool *is_gold)
 		int cy = cur / cur_wid;
 		int cx = cur % cur_wid;
 		int d;
-		bool here_player = ((cy == p_ptr->py) && (cx == p_ptr->px));
 
-		/* Oro cercano (dentro del radio) -> desviarse a recogerlo. */
-		if (!here_player && (explore_gold_radius > 0) &&
-		                (dist[cur] <= explore_gold_radius) && cell_has_gold(cy, cx))
+		/* The BFS visits in increasing distance, so the first interesting grid we
+		 * pop is the nearest one: take it. (The player's own tile never counts as
+		 * a goal, but we still expand from it.) */
+		if (!((cy == p_ptr->py) && (cx == p_ptr->px)))
 		{
-			*gy = cy; *gx = cx; *is_gold = TRUE; found = TRUE; break;
-		}
-
-		/* Frontera (no en lista negra): celda junto a una nunca vista. */
-		if (!here_player && !(explore_bad && explore_bad[cur]))
-		{
-			for (d = 0; d < 8; d++)
+			int k = explore_cell_interest(cy, cx, dist[cur]);
+			if (k != EXPLORE_NONE)
 			{
-				int ny = cy + dy8[d];
-				int nx = cx + dx8[d];
-
-				if ((ny < 0) || (ny >= cur_hgt) || (nx < 0) || (nx >= cur_wid)) continue;
-
-				if (!explore_is_seen(ny, nx))
-				{
-					*gy = cy; *gx = cx; found = TRUE;
-					break;
-				}
+				*gy = cy; *gx = cx; *kind = k; found = TRUE; break;
 			}
-			if (found) break;
 		}
 
 		/* Expand to walkable, known, not-yet-visited neighbours. */
@@ -5235,7 +5332,7 @@ static bool find_nearest_goal(int *gy, int *gx, bool *is_gold)
 void explore_step(void)
 {
 	int gy = 0, gx = 0;
-	bool is_gold = FALSE;
+	int goal_kind = EXPLORE_NONE;
 
 	/* A travel leg is still running: let it finish (travel branch handles it). */
 	if (travelling) return;
@@ -5263,8 +5360,8 @@ void explore_step(void)
 	/* Anti-oscilación: si LLEGAMOS a una meta-FRONTERA y no descubrió nada nuevo
 	 * (frontera "muerta"), la metemos en la lista negra. Solo si de verdad la
 	 * alcanzamos (estamos sobre ella): un tramo cortado a medias por recoger oro
-	 * no debe descartar una frontera válida. Las metas de oro nunca se blacklistean. */
-	if ((explore_goal_y >= 0) && !explore_goal_is_gold && explore_bad &&
+	 * no debe descartar una frontera válida. Las metas de loot nunca se blacklistean. */
+	if ((explore_goal_y >= 0) && !explore_goal_is_loot && explore_bad &&
 	                (p_ptr->py == explore_goal_y) && (p_ptr->px == explore_goal_x) &&
 	                (explore_seen_count <= explore_goal_count))
 	{
@@ -5273,7 +5370,7 @@ void explore_step(void)
 	explore_goal_y = explore_goal_x = -1;
 
 	/* Nothing reachable left to uncover. */
-	if (!find_nearest_goal(&gy, &gx, &is_gold))
+	if (!find_nearest_goal(&gy, &gx, &goal_kind))
 	{
 		exploring = 0;
 		p_ptr->redraw |= (PR_STATE);
@@ -5285,10 +5382,12 @@ void explore_step(void)
 	explore_goal_y = gy;
 	explore_goal_x = gx;
 	explore_goal_count = explore_seen_count;
-	explore_goal_is_gold = is_gold;
+	explore_goal_is_loot = (goal_kind == EXPLORE_LOOT);
 
-	/* Arm the leg toward it (no disturb/messages: that's our job, not its). */
-	if (!travel_plan(gy, gx))
+	/* Arm the leg toward it (no disturb/messages: that's our job, not its).
+	 * Auto-explore stays seen-gated: we path over known territory toward the
+	 * frontier, unlike click-to-move which may strike into the dark. */
+	if (!travel_plan(gy, gx, travel_walkable_hook))
 	{
 		/* BFS proved reachability, so this is unexpected; stop gracefully. */
 		exploring = 0;
