@@ -922,17 +922,8 @@ static bool item_tester_hook_eatable(object_type *o_ptr)
  */
 void do_cmd_eat_food(void)
 {
-	int item, ident, lev, fval = 0;
-
-	object_type *o_ptr;
-	object_type *q_ptr, forge;
-
-	monster_race *r_ptr;
-
+	int item;
 	cptr q, s;
-
-	bool destroy = TRUE;
-
 
 	/* Restrict choices to food  */
 	item_tester_hook = item_tester_hook_eatable;
@@ -945,6 +936,26 @@ void do_cmd_eat_food(void)
 	q = "Eat which item? ";
 	s = "You have nothing to eat.";
 	if (!get_item(&item, q, s, (USE_INVEN | USE_FLOOR | USE_EXTRA))) return;
+
+	/* Eat it (shared with auto-play, which selects the item itself). */
+	eat_food(item);
+}
+
+/*
+ * Eat the food / corpse in inventory (or floor) slot 'item'. Split out of
+ * do_cmd_eat_food so the auto-player can feed itself without the interactive
+ * item prompt.
+ */
+void eat_food(int item)
+{
+	int ident, lev, fval = 0;
+
+	object_type *o_ptr;
+	object_type *q_ptr, forge;
+
+	monster_race *r_ptr;
+
+	bool destroy = TRUE;
 
 	/* Get the item (in the pack) */
 	if (item >= 0)
@@ -1801,7 +1812,7 @@ static bool item_tester_hook_quaffable(object_type *o_ptr)
 }
 
 
-static bool quaff_potion(int tval, int sval, int pval, int pval2)
+bool quaff_potion(int tval, int sval, int pval, int pval2)
 {
 	int ident = FALSE;
 
