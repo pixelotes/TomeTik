@@ -4824,8 +4824,12 @@ static bool cell_has_item(int y, int x)
 	{
 		object_type *o_ptr = &o_list[this_o_idx];
 		next_o_idx = o_ptr->next_o_idx;
-		/* Corpses are junk we'd only have to drop again: never a loot goal. */
-		if (o_ptr->marked && (o_ptr->tval != TV_GOLD) && (o_ptr->tval != TV_CORPSE))
+		/* Corpses and skeletons are junk for this (melee) bot -- never a loot
+		 * goal. (Skeletons/junk CAN be converted to ammo by an archer with the
+		 * right skill -- item_tester_hook_convertible -- so a ranged-aware brain
+		 * might want them; ours doesn't shoot.) */
+		if (o_ptr->marked && (o_ptr->tval != TV_GOLD) &&
+		                (o_ptr->tval != TV_CORPSE) && (o_ptr->tval != TV_SKELETON))
 			return (TRUE);
 	}
 	return (FALSE);
