@@ -6730,9 +6730,12 @@ void py_pickup_floor(int pickup)
 			continue;
 		}
 
-		/* Auto-play leaves corpses on the floor (e.g. the kobold it just killed)
-		 * instead of hoarding junk it would only have to drop. */
-		if (autoplaying && (o_ptr->tval == TV_CORPSE)) continue;
+		/* Auto-play leaves corpses and skeletons on the floor (e.g. the kobold it
+		 * just killed, or loose bones) instead of hoarding junk it would only
+		 * have to drop. (Skeletons/junk are archer ammo fodder, but this bot
+		 * melees, so it skips them.) */
+		if (autoplaying && ((o_ptr->tval == TV_CORPSE) || (o_ptr->tval == TV_SKELETON)))
+			continue;
 
 		{
 			char testdesc[80];
