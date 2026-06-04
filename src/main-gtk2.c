@@ -292,6 +292,13 @@ static int iso_buf_w = 0, iso_buf_h = 0;
 static GdkDrawable *iso_target = NULL;
 
 static GdkPixbuf *iso_sheet = NULL;  /* dg_iso32.gif (14x15 tiles 54x49, cian transp.) */
+/* TomeTik: niebla de guerra iso. Copia OSCURECIDA de la lámina (mismo alfa que
+ * la normal -> no sangra por los rombos transparentes). Las celdas recordadas
+ * pero NO visibles ahora (sin CAVE_SEEN) se dibujan con esta lámina en vez de la
+ * normal. CAVE_SEEN ya lo mantiene el motor (no se recalcula nada). */
+static GdkPixbuf *iso_sheet_dim = NULL;
+static int iso_dim_cell = 0;    /* la celda en curso se dibuja oscurecida */
+#define ISO_DIM_NUM 200         /* brillo de la niebla /256 (~0.69; menor=más oscuro) */
 /* Fase 4: lámina Gervais 2D 32x32 (lib/xtra/graf/32x32.bmp) para actores
  * (jugador/monstruos/objetos). map_info da (a,c); tile = fila a&0x7F, col c&0x7F.
  * Fondo (24,24,24) -> transparente. */
@@ -2487,6 +2494,29 @@ static bool iso_load_sheets(void)
 	iso_sheet = gdk_pixbuf_add_alpha(raw, TRUE, 0x00, 0xFF, 0xFF);
 	g_object_unref(raw);
 
+	/* Lámina oscurecida para niebla de guerra: copia de iso_sheet con RGB*factor
+	 * (alfa intacto, así conserva la transparencia cian->alfa de cada tile). */
+	iso_sheet_dim = gdk_pixbuf_copy(iso_sheet);
+	if (iso_sheet_dim)
+	{
+		int w = gdk_pixbuf_get_width(iso_sheet_dim);
+		int h = gdk_pixbuf_get_height(iso_sheet_dim);
+		int rs = gdk_pixbuf_get_rowstride(iso_sheet_dim);
+		int nch = gdk_pixbuf_get_n_channels(iso_sheet_dim);
+		guchar *bse = gdk_pixbuf_get_pixels(iso_sheet_dim);
+		int xx, yy;
+		for (yy = 0; yy < h; yy++)
+		{
+			guchar *q = bse + yy * rs;
+			for (xx = 0; xx < w; xx++, q += nch)
+			{
+				q[0] = (guchar)((q[0] * ISO_DIM_NUM) >> 8);
+				q[1] = (guchar)((q[1] * ISO_DIM_NUM) >> 8);
+				q[2] = (guchar)((q[2] * ISO_DIM_NUM) >> 8);
+			}
+		}
+	}
+
 	/* Lámina Gervais 2D para actores. El mismo fichero que usa el render 2D;
 	 * NEGRO PURO (0,0,0) = color de fondo -> alfa transparente. */
 	path_build(path, 1024, ANGBAND_DIR_XTRA_GRAF, "32x32.bmp");
@@ -3479,10 +3509,11 @@ static bool iso_door_we(int y, int x)
 static void iso_blit(term_data *td, int idx, int sx, int sy)
 {
 	int col, row;
+	GdkPixbuf *sheet = (iso_dim_cell && iso_sheet_dim) ? iso_sheet_dim : iso_sheet;
 	if (idx < 0) return;
 	col = idx % ISO_SHEET_COLS;
 	row = idx / ISO_SHEET_COLS;
-	gdk_draw_pixbuf(iso_target, td->gc, iso_sheet,
+	gdk_draw_pixbuf(iso_target, td->gc, sheet,
 	                col * ISO_TILE_W, row * ISO_TILE_H,
 	                sx, sy, ISO_TILE_W, ISO_TILE_H,
 	                GDK_RGB_DITHER_NONE, 0, 0);
@@ -3580,6 +3611,8 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 	term_data *td = (term_data *)ctx;
 	int f;
 
+	iso_dim_cell = 0;   /* niebla: reset por celda (la celda oscura no se atenúa) */
+
 	if (!iso_inb(cy, cx)) return;
 
 	/* Celda ni memorizada ni visible: rombo oscuro (rellena los huecos del
@@ -3593,6 +3626,12 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 		iso_blit(td, ISO_T_DARK, sx, sy);
 		return;
 	}
+
+	/* Niebla de guerra: celda recordada pero NO visible ahora (sin CAVE_SEEN) ->
+	 * sus tiles de terreno se bliten con la lámina oscurecida (iso_blit lo mira).
+	 * La celda del jugador nunca se atenúa. */
+	iso_dim_cell = !(cave[cy][cx].info & CAVE_SEEN) &&
+	               !((cy == p_ptr->py) && (cx == p_ptr->px));
 
 	f = cave[cy][cx].feat;
 
