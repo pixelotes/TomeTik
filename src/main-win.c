@@ -208,6 +208,7 @@
 #define IDM_OPTIONS_BIGTILE		409
 #define IDM_OPTIONS_UNUSED		410
 #define IDM_OPTIONS_SAVER		411
+#define IDM_OPTIONS_ISO			412   /* TomeTik: vista isométrica (GDI) */
 
 #define IDM_HELP_GENERAL		901
 #define IDM_HELP_SPOILERS		902
@@ -514,6 +515,17 @@ static DIBINIT infGraph;
 static DIBINIT infMask;
 
 #endif /* USE_TRANSPARENCY */
+
+/*
+ * TomeTik: vista isométrica en GDI (modo -i del gtk2, portado).
+ * Lámina iso de David Gervais (lib/xtra/iso/dg_iso32.bmp, 54x49 por tile) +
+ * su máscara, cargadas perezosamente al activar el modo. iso_mode conmuta el
+ * render del mapa. Reusa el núcleo portable src/iso/iso_render.{c,h}.
+ */
+static bool iso_mode = FALSE;       /* vista isométrica activa */
+static bool iso_loaded = FALSE;     /* lámina iso ya cargada */
+static DIBINIT isoGraph;            /* lámina iso (color; cian->negro) */
+static DIBINIT isoMask;             /* máscara iso (cian->blanco) */
 
 #endif /* USE_GRAPHICS */
 
@@ -2853,6 +2865,68 @@ static void init_windows(void)
 /*
  * Prepare the menus
  */
+/*
+ * TomeTik (iso GDI): carga perezosa de la lámina iso + su máscara desde
+ * lib/xtra/iso/. Devuelve FALSE si no se pueden leer.
+ */
+static bool win_iso_load(void)
+{
+	char dir[1024], buf[1024];
+
+	if (iso_loaded) return TRUE;
+
+	path_build(dir, sizeof(dir), ANGBAND_DIR_XTRA, "iso");
+
+	path_build(buf, sizeof(buf), dir, "dg_iso32.bmp");
+	if (!ReadDIB(data[0].w, buf, &isoGraph))
+	{
+		plog_fmt("No pude leer la lamina iso '%s'", buf);
+		return FALSE;
+	}
+	isoGraph.CellWidth = 54;
+	isoGraph.CellHeight = 49;
+
+	path_build(buf, sizeof(buf), dir, "dg_iso32_mask.bmp");
+	if (!ReadDIB(data[0].w, buf, &isoMask))
+	{
+		plog_fmt("No pude leer la mascara iso '%s'", buf);
+		return FALSE;
+	}
+
+	iso_loaded = TRUE;
+	return TRUE;
+}
+
+/*
+ * TomeTik (iso GDI) -- HITO 1: blit de UN tile iso para validar la tuberia de
+ * bitmap (carga + blit transparente SRCAND-mascara + SRCPAINT-color). Pinta el
+ * primer tile de la lamina en la esquina del area cliente del mapa.
+ */
+static void win_iso_test_blit(term_data *td)
+{
+	HDC hdc, hdcSrc, hdcMask;
+	HBITMAP oldS, oldM;
+	const int TW = 54, TH = 49;
+
+	if (!win_iso_load()) { iso_mode = FALSE; return; }
+
+	hdc = GetDC(td->w);
+	hdcSrc = CreateCompatibleDC(hdc);
+	hdcMask = CreateCompatibleDC(hdc);
+	oldS = SelectObject(hdcSrc, isoGraph.hBitmap);
+	oldM = SelectObject(hdcMask, isoMask.hBitmap);
+
+	/* tile (col 0, fila 0) de la lamina -> cliente (8,8) con transparencia */
+	BitBlt(hdc, 8, 8, TW, TH, hdcMask, 0, 0, SRCAND);
+	BitBlt(hdc, 8, 8, TW, TH, hdcSrc, 0, 0, SRCPAINT);
+
+	SelectObject(hdcSrc, oldS);
+	SelectObject(hdcMask, oldM);
+	DeleteDC(hdcSrc);
+	DeleteDC(hdcMask);
+	ReleaseDC(td->w, hdc);
+}
+
 static void setup_menus(void)
 {
 	int i;
@@ -3074,6 +3148,8 @@ static void setup_menus(void)
 	              (use_zoom ? MF_CHECKED : MF_UNCHECKED));
 	CheckMenuItem(hm, IDM_OPTIONS_BIGTILE,
 	              (arg_bigtile ? MF_CHECKED : MF_UNCHECKED));
+	CheckMenuItem(hm, IDM_OPTIONS_ISO,
+	              (iso_mode ? MF_CHECKED : MF_UNCHECKED));
 	CheckMenuItem(hm, IDM_OPTIONS_SOUND,
 	              (arg_sound ? MF_CHECKED : MF_UNCHECKED));
 	CheckMenuItem(hm, IDM_AUDIO_MUSIC,
@@ -3756,6 +3832,20 @@ ofn.lStructSize = sizeof(OPENFILENAME);
 			break;
 		}
 
+	case IDM_OPTIONS_ISO:
+		{
+			term_data *td = &data[0];
+
+			/* Conmutar vista isométrica (GDI). Carga perezosa al activar. */
+			iso_mode = !iso_mode;
+			if (iso_mode && !win_iso_load()) iso_mode = FALSE;
+
+			/* Repintar el mapa */
+			InvalidateRect(td->w, NULL, TRUE);
+
+			break;
+		}
+
 	case IDM_OPTIONS_SOUND:
 		{
 			/* Paranoia */
@@ -4089,6 +4179,7 @@ LRESULT FAR PASCAL AngbandWndProc(HWND hWnd, UINT uMsg,
 		{
 			BeginPaint(hWnd, &ps);
 			if (td) term_data_redraw(td);
+			if (iso_mode && td == &data[0]) win_iso_test_blit(td);
 			EndPaint(hWnd, &ps);
 			ValidateRect(hWnd, NULL);
 			return 0;
@@ -4509,6 +4600,7 @@ LRESULT FAR PASCAL AngbandListProc(HWND hWnd, UINT uMsg,
 		{
 			BeginPaint(hWnd, &ps);
 			if (td) term_data_redraw(td);
+			if (iso_mode && td == &data[0]) win_iso_test_blit(td);
 			EndPaint(hWnd, &ps);
 			return 0;
 		}
