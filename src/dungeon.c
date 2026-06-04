@@ -4809,6 +4809,15 @@ void process_player(void)
 				/* Disturb */
 				disturb(0, 0);
 
+				/* disturb() no longer halts auto-explore by itself (so routine
+				 * door-opening / item pickup don't stop it), so a real player
+				 * key press must cancel it explicitly. */
+				if (exploring)
+				{
+					exploring = 0;
+					p_ptr->redraw |= (PR_STATE);
+				}
+
 				/* Hack -- Show a Message */
 				msg_print("Cancelled.");
 			}

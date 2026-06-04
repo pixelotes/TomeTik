@@ -5192,15 +5192,17 @@ void disturb(int stop_search, int unused_flag)
 		p_ptr->update |= (PU_TORCH);
 	}
 
-	/* Cancel auto-travel (click-to-walk / auto-explore) */
+	/* Cancel auto-travel (click-to-walk / one leg of auto-explore).
+	 *
+	 * NOTE: we deliberately do NOT cancel `exploring` here. disturb() fires for
+	 * lots of benign things that happen while auto-exploring -- opening a door,
+	 * stepping onto an item (py_pickup_floor disturbs), spotting something -- and
+	 * stopping on each of those made auto-explore halt every few steps "for no
+	 * reason". Ending the current leg is enough: explore_step() re-plans the next
+	 * one. Auto-explore is stopped instead by explore_step() itself (a visible
+	 * threat, or nothing reachable left) and by an explicit player abort (a key
+	 * press; see process_player()). */
 	if (travelling) travel_cancel();
-
-	/* Cancel auto-explore (between legs travelling may already be 0) */
-	if (exploring)
-	{
-		exploring = 0;
-		p_ptr->redraw |= (PR_STATE);
-	}
 
 	/* Cancel searching if requested */
 	if (stop_search && p_ptr->searching)
