@@ -4526,6 +4526,13 @@ static void process_command(void)
 			break;
 		}
 
+		/* Auto-play (TomeTik) */
+	case KTRL('V'):
+		{
+			do_cmd_autoplay();
+			break;
+		}
+
 		/* Show previous message */
 	case KTRL('O'):
 		{
@@ -4816,7 +4823,7 @@ void process_player(void)
 	if (!avoid_abort)
 	{
 		/* Check for "player abort" (semi-efficiently for resting) */
-		if (running || travelling || exploring || command_rep || (resting && !(resting & 0x0F)))
+		if (running || travelling || exploring || autoplaying || command_rep || (resting && !(resting & 0x0F)))
 		{
 			/* Do not wait */
 			inkey_scan = TRUE;
@@ -4832,10 +4839,11 @@ void process_player(void)
 
 				/* disturb() no longer halts auto-explore by itself (so routine
 				 * door-opening / item pickup don't stop it), so a real player
-				 * key press must cancel it explicitly. */
-				if (exploring)
+				 * key press must cancel it -- and auto-play -- explicitly. */
+				if (exploring || autoplaying)
 				{
 					exploring = 0;
+					autoplaying = 0;
 					p_ptr->redraw |= (PR_STATE);
 				}
 
@@ -4980,6 +4988,20 @@ void process_player(void)
 		else if (exploring)
 		{
 			explore_step();
+		}
+
+		/* Auto-playing: one decision/step per turn (explore + survive + fight) */
+		else if (autoplaying)
+		{
+			autoplay_step();
+
+			/* Animate like travel: redraw and pause so it is watchable. */
+			if (autoplaying)
+			{
+				handle_stuff();
+				Term_fresh();
+				Term_xtra(TERM_XTRA_DELAY, 150);
+			}
 		}
 
 		/* One-shot move/attack queued by a mouse click on an adjacent monster */

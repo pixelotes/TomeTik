@@ -120,6 +120,7 @@ s16b running; 			/* Current counter for running, if any */
 s16b travelling;		/* Steps left while auto-travelling (click-to-walk), or 0 */
 s16b click_dir;			/* One-shot move/attack direction queued by a mouse click, or 0 */
 s16b exploring;			/* TRUE while auto-exploring (drives travel legs), or 0 */
+s16b autoplaying;		/* TRUE while auto-playing (explore + survive + fight), or 0 */
 s16b resting; 			/* Current counter for resting, if any */
 
 s16b cur_hgt; 			/* Current dungeon height */
