@@ -5846,6 +5846,62 @@ static bool autoplay_too_dangerous(monster_type *m)
 	return (FALSE);
 }
 
+/* ---- world navigation (Phase 1: recall-based town <-> dungeon travel) ----
+ *
+ * Recall is the shortcut that lets the bot move between town and a dungeon
+ * without walking the wilderness: a town->dungeon recall drops us in
+ * p_ptr->recall_dungeon at depth max_dlv[that]. We can aim it from code. */
+
+static bool autoplay_in_town(void)
+{
+	return ((dun_level == 0) && !p_ptr->wild_mode && !p_ptr->inside_quest);
+}
+
+/* Backpack index of a Word of Recall scroll, or -1. */
+static int autoplay_find_recall_scroll(void)
+{
+	int i;
+	for (i = 0; i < INVEN_PACK; i++)
+	{
+		object_type *o_ptr = &p_ptr->inventory[i];
+		if (!o_ptr->k_idx) continue;
+		if ((o_ptr->tval == TV_SCROLL) && (o_ptr->sval == SV_SCROLL_WORD_OF_RECALL))
+			return (i);
+	}
+	return (-1);
+}
+
+/* Aim a town->dungeon recall at (dungeon, depth), clamped to the dungeon's range. */
+static void autoplay_set_recall_target(int dungeon, int depth)
+{
+	if (dungeon <= 0) dungeon = DUNGEON_BARROW_DOWNS;
+	if (depth < 1) depth = 1;
+	if (depth > d_info[dungeon].maxdepth) depth = d_info[dungeon].maxdepth;
+
+	p_ptr->recall_dungeon = dungeon;
+	if (max_dlv[dungeon] < depth) max_dlv[dungeon] = depth;
+}
+
+/* Begin a recall: read a Word of Recall scroll if we have one, otherwise invoke
+ * the recall directly (bot convenience -- the shopping phase will keep scrolls
+ * stocked). Returns TRUE if a recall is now pending. The caller must ensure none
+ * is already pending (recall_player toggles an active one off). */
+static bool autoplay_start_recall(void)
+{
+	int s = autoplay_find_recall_scroll();
+
+	energy_use = 100;
+	recall_player(21, 15);
+
+	if ((s >= 0) && (p_ptr->word_recall > 0))
+	{
+		inven_item_increase(s, -1);
+		inven_item_describe(s);
+		inven_item_optimize(s);
+	}
+	return (p_ptr->word_recall > 0);
+}
+
 /*
  * One auto-play decision. Called from process_player()'s energy loop. Evaluates
  * a borg-inspired priority ladder and performs exactly one turn's worth of work
@@ -5896,6 +5952,35 @@ void autoplay_step(void)
 		if ((dangerous || desperate) && autoplay_flee_from(enemy)) return;
 		if (autoplay_step_towards(enemy->fy, enemy->fx, pickup)) return;
 		/* Unreachable (wall between): fall through and keep exploring. */
+	}
+
+	/* In town (and safe): dive back into the dungeon via recall. The choice of
+	 * dungeon/depth is the seam the Lua brain will own; for now continue in the
+	 * dungeon we last recalled from, else a sensible early one (Barrow-downs). */
+	if (autoplay_in_town())
+	{
+		int dn;
+
+		if (p_ptr->word_recall > 0)
+		{
+			energy_use = 100;          /* recall pending: pass turns until yanked */
+			return;
+		}
+
+		dn = p_ptr->recall_dungeon;
+		if (dn <= 0) dn = DUNGEON_BARROW_DOWNS;
+		autoplay_set_recall_target(dn, (max_dlv[dn] > 0) ? max_dlv[dn] : 1);
+
+		if (autoplay_start_recall())
+		{
+			msg_print("Autoplay: recalling into the dungeon.");
+			return;
+		}
+
+		autoplaying = 0;
+		p_ptr->redraw |= (PR_STATE);
+		msg_print("Autoplay: no way to reach the dungeon.");
+		return;
 	}
 
 	/* 3. Eat when hungry -- in a quiet moment, or sooner if about to faint. */
