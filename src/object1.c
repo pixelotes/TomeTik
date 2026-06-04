@@ -6786,6 +6786,12 @@ void py_pickup_floor(int pickup)
 				msg_format("You have no room for %s.", o_name);
 				do_pickup = FALSE;
 			}
+			else if (exploring || autoplaying)
+			{
+				/* Auto-explore / auto-play already decided to grab it: never
+				 * block on a "Pick up X? (y/n)" prompt. */
+				do_pickup = TRUE;
+			}
 			else
 			{
 				char out_val[160];
@@ -6801,6 +6807,14 @@ void py_pickup_floor(int pickup)
 			do_pickup = FALSE;
 		else
 			this_o_idx = floor_o_idx;
+	}
+
+	/* Auto-explore / auto-play: with several items on the tile, grab one without
+	 * the interactive "Get which item?" prompt (the rest follow on later turns). */
+	if (do_ask && (exploring || autoplaying))
+	{
+		this_o_idx = floor_o_idx;
+		do_ask = FALSE;
 	}
 
 	/* Ask */
