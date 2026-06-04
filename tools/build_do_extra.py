@@ -86,6 +86,11 @@ TILES = [
     (('copy', 'Town'),                              'town (203)'),                # 21 DO_TOWN
     (('pad',  'GlyphGreen', (27, 37)),              'glyph of warding (3)'),      # 22 DO_GLYPH_GREEN
     (('pad',  'GlyphRed',   (27, 37)),              'explosive rune (64)'),       # 23 DO_GLYPH_RED
+    # --- tiles antes sueltos (de lib/xtra/iso/, NO de dungeonodyssey) ---
+    (('local', 'building_block.png',     5),        'edificio pueblo'),           # 24 DO_BUILDING
+    (('local', 'rubble.png',             0),        'escombros (FEAT_RUBBLE/206)'),# 25 DO_RUBBLE
+    (('local', 'grass_flowers.png',      5),        'flores BLANCAS (en juego)'), # 26 DO_FLOWERS
+    (('local', 'grass_flowers.old.png',  5),        'flores antiguas (sin usar)'),# 27 DO_FLOWERS_OLD
 ]
 
 
@@ -120,6 +125,13 @@ def make_tile(spec):
         _, base_k, ov_k, (ox, oy), gif = spec
         cell.alpha_composite(load_rgba(base_k), (0, 0))
         cell.alpha_composite(load_rgba(ov_k, gif), (ox, oy))
+    elif kind == 'local':
+        # tile ya presente en lib/xtra/iso/ (NO de dungeonodyssey). RGBA con su
+        # propio alfa -> se compone sobre magenta en el offset y indicado (los de
+        # 54x49 van a y=5 para casar el rombo de suelo con el offset DO_DY=-5).
+        _, fn, yoff = spec
+        im = Image.open(os.path.join('lib/xtra/iso', fn)).convert('RGBA')
+        cell.alpha_composite(im, (0, yoff))
     else:
         raise SystemExit('spec desconocida: ' + repr(spec))
     return cell.convert('RGB')
