@@ -1,0 +1,20 @@
+# Contenedor para EJECUTAR el build de Windows (tometik.exe, PE32 i686) bajo
+# Wine, dentro de Docker. Pensado para correr en Mac arm64 vía emulación amd64
+# (Rosetta/qemu): --platform linux/amd64.
+#
+# OJO: Wine NO es Windows fiel (sobre todo comctl32 / tracking tooltips), así
+# que sirve para smoke-test, sonido, menús, crashes y render general; la palabra
+# final de bugs Win32 finos sigue siendo Windows real.
+FROM --platform=linux/amd64 debian:12-slim
+
+ENV DEBIAN_FRONTEND=noninteractive WINEDEBUG=-all WINEPREFIX=/root/.wine
+
+RUN dpkg --add-architecture i386 && apt-get update && \
+    apt-get install -y --no-install-recommends \
+        wine wine32:i386 \
+        xvfb x11-utils x11-xserver-utils xauth xdotool \
+        x11vnc fluxbox novnc websockify \
+        procps ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /work
