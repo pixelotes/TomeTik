@@ -5375,15 +5375,57 @@ static bool find_nearest_goal(int *gy, int *gx, int *kind)
 }
 
 /*
+ * Pick the next exploration goal and arm a travel leg toward it, including the
+ * anti-oscillation blacklisting of dead frontiers. Shared by auto-explore and
+ * auto-play. Assumes explore_sync_seen() has already run this turn. Returns TRUE
+ * if a leg was armed, FALSE if nothing reachable is left to uncover.
+ */
+static bool explore_pick_goal(int *gy, int *gx)
+{
+	int goal_kind = EXPLORE_NONE;
+
+	/* Anti-oscilación: si LLEGAMOS a una meta-FRONTERA y no descubrió nada nuevo
+	 * (frontera "muerta"), la metemos en la lista negra. Solo si de verdad la
+	 * alcanzamos (estamos sobre ella): un tramo cortado a medias por recoger oro
+	 * no debe descartar una frontera válida. Las metas de loot nunca se blacklistean. */
+	if ((explore_goal_y >= 0) && !explore_goal_is_loot && explore_bad &&
+	                (p_ptr->py == explore_goal_y) && (p_ptr->px == explore_goal_x) &&
+	                (explore_seen_count <= explore_goal_count))
+	{
+		explore_bad[explore_goal_y * cur_wid + explore_goal_x] = 1;
+	}
+	explore_goal_y = explore_goal_x = -1;
+
+	/* Nothing reachable left to uncover. */
+	if (!find_nearest_goal(gy, gx, &goal_kind)) return (FALSE);
+
+	/* Recordar la meta y el progreso al fijarla (para el chequeo de arriba). */
+	explore_goal_y = *gy;
+	explore_goal_x = *gx;
+	explore_goal_count = explore_seen_count;
+	explore_goal_is_loot = (goal_kind == EXPLORE_LOOT);
+
+	return (TRUE);
+}
+
+static bool explore_arm_next_leg(astar_walkable_hook hook)
+{
+	int gy = 0, gx = 0;
+
+	if (!explore_pick_goal(&gy, &gx)) return (FALSE);
+
+	/* Arm the leg toward it (no disturb/messages: that's the caller's job).
+	 * Seen-gated and routing around grids we gave up on (explore_block). */
+	return (travel_plan(gy, gx, hook));
+}
+
+/*
  * One auto-explore decision. Called from process_player()'s energy loop while
  * exploring and not currently mid-leg. Picks the nearest unexplored frontier
  * and arms a travel leg toward it; when none remain, exploration is done.
  */
 void explore_step(void)
 {
-	int gy = 0, gx = 0;
-	int goal_kind = EXPLORE_NONE;
-
 	/* A travel leg is still running: let it finish (travel branch handles it). */
 	if (travelling) return;
 
@@ -5404,46 +5446,14 @@ void explore_step(void)
 		return;
 	}
 
-	/* Fold in everything seen so far before choosing the next frontier. */
+	/* Fold in everything seen so far, then arm the next leg. */
 	explore_sync_seen();
 
-	/* Anti-oscilación: si LLEGAMOS a una meta-FRONTERA y no descubrió nada nuevo
-	 * (frontera "muerta"), la metemos en la lista negra. Solo si de verdad la
-	 * alcanzamos (estamos sobre ella): un tramo cortado a medias por recoger oro
-	 * no debe descartar una frontera válida. Las metas de loot nunca se blacklistean. */
-	if ((explore_goal_y >= 0) && !explore_goal_is_loot && explore_bad &&
-	                (p_ptr->py == explore_goal_y) && (p_ptr->px == explore_goal_x) &&
-	                (explore_seen_count <= explore_goal_count))
-	{
-		explore_bad[explore_goal_y * cur_wid + explore_goal_x] = 1;
-	}
-	explore_goal_y = explore_goal_x = -1;
-
-	/* Nothing reachable left to uncover. */
-	if (!find_nearest_goal(&gy, &gx, &goal_kind))
+	if (!explore_arm_next_leg(explore_walkable_hook))
 	{
 		exploring = 0;
 		p_ptr->redraw |= (PR_STATE);
 		msg_print("Done exploring.");
-		return;
-	}
-
-	/* Recordar la meta y el progreso al fijarla (para el chequeo de arriba). */
-	explore_goal_y = gy;
-	explore_goal_x = gx;
-	explore_goal_count = explore_seen_count;
-	explore_goal_is_loot = (goal_kind == EXPLORE_LOOT);
-
-	/* Arm the leg toward it (no disturb/messages: that's our job, not its).
-	 * Auto-explore stays seen-gated (and routes around grids we gave up on),
-	 * unlike click-to-move which may strike into the dark. */
-	if (!travel_plan(gy, gx, explore_walkable_hook))
-	{
-		/* BFS proved reachability, so this is unexpected; stop gracefully. */
-		exploring = 0;
-		p_ptr->redraw |= (PR_STATE);
-		msg_print("Done exploring.");
-		return;
 	}
 }
 
@@ -5479,6 +5489,430 @@ void do_cmd_explore(void)
 	disturb(0, 0);
 	exploring = 1;
 	p_ptr->redraw |= (PR_STATE);
+}
+
+
+/*
+ * ------------------------------------------------------------------ Auto-play
+ *
+ * "Play the level for me": built on the auto-explore machinery but, instead of
+ * stopping for monsters, it also FIGHTS, FLEES, HEALS, EATS, manages its LIGHT,
+ * and -- once a level is cleared -- walks to a known down staircase and descends
+ * to keep going. Deliberately NOT a borg: melee only (no spells/ranged tactics),
+ * no inventory management, no shopping.
+ *
+ * Unlike auto-explore it never arms a multi-step travel leg: autoplay_step()
+ * takes exactly ONE step/action per turn and re-evaluates its priorities every
+ * turn, so it reacts immediately to a new threat or dropping HP.
+ */
+
+/* Nearest VISIBLE real enemy (not a neutral or a pet); NULL if none. */
+static monster_type *autoplay_nearest_enemy(int *dist)
+{
+	int i, bd = 0;
+	monster_type *best = NULL;
+
+	for (i = 1; i < m_max; i++)
+	{
+		monster_type *m_ptr = &m_list[i];
+		int d;
+
+		if (!m_ptr->r_idx) continue;
+		if (!m_ptr->ml) continue;                       /* must be seen      */
+		if (m_ptr->status != MSTATUS_ENEMY) continue;   /* only real foes    */
+
+		d = distance(p_ptr->py, p_ptr->px, m_ptr->fy, m_ptr->fx);
+		if (!best || (d < bd)) { best = m_ptr; bd = d; }
+	}
+
+	if (best && dist) *dist = bd;
+	return (best);
+}
+
+/* Backpack index of the best healing potion to drink now, or -1. When 'severe'
+ * (HP critical) we reach for a big heal first; otherwise spend a cheap cure. */
+static int autoplay_find_heal(bool severe)
+{
+	static const int heavy[] =
+	{
+		SV_POTION_CURE_CRITICAL, SV_POTION_HEALING, SV_POTION_CURE_SERIOUS,
+		SV_POTION_STAR_HEALING, SV_POTION_LIFE, SV_POTION_CURE_LIGHT
+	};
+	static const int light[] =
+	{
+		SV_POTION_CURE_LIGHT, SV_POTION_CURE_SERIOUS, SV_POTION_CURE_CRITICAL
+	};
+	const int *order = severe ? heavy : light;
+	int n = severe ? 6 : 3;
+	int k, i;
+
+	for (k = 0; k < n; k++)
+	{
+		for (i = 0; i < INVEN_PACK; i++)
+		{
+			object_type *o_ptr = &p_ptr->inventory[i];
+			if (!o_ptr->k_idx) continue;
+			if ((o_ptr->tval == TV_POTION) && (o_ptr->sval == order[k])) return (i);
+		}
+	}
+	return (-1);
+}
+
+/* Backpack index of an edible staple food, or -1. */
+static int autoplay_find_food(void)
+{
+	int i;
+	for (i = 0; i < INVEN_PACK; i++)
+	{
+		object_type *o_ptr = &p_ptr->inventory[i];
+		if (!o_ptr->k_idx) continue;
+		if (o_ptr->tval != TV_FOOD) continue;
+		switch (o_ptr->sval)
+		{
+		case SV_FOOD_RATION:
+		case SV_FOOD_BISCUIT:
+		case SV_FOOD_JERKY:
+		case SV_FOOD_WAYBREAD:
+		case SV_FOOD_SLIME_MOLD:
+			return (i);
+		}
+	}
+	return (-1);
+}
+
+/* Backpack index of a usable spare torch (with fuel left), or -1. */
+static int autoplay_find_torch(void)
+{
+	int i;
+	for (i = 0; i < INVEN_PACK; i++)
+	{
+		object_type *o_ptr = &p_ptr->inventory[i];
+		if (!o_ptr->k_idx) continue;
+		if ((o_ptr->tval == TV_LITE) && (o_ptr->sval == SV_LITE_TORCH) &&
+		                (o_ptr->timeout > 0)) return (i);
+	}
+	return (-1);
+}
+
+/* Backpack index of a flask of oil, or -1. */
+static int autoplay_find_oil(void)
+{
+	int i;
+	for (i = 0; i < INVEN_PACK; i++)
+	{
+		object_type *o_ptr = &p_ptr->inventory[i];
+		if (!o_ptr->k_idx) continue;
+		if (o_ptr->tval == TV_FLASK) return (i);
+	}
+	return (-1);
+}
+
+/* Drink the potion in backpack slot 'item' (one turn). */
+static void autoplay_quaff(int item)
+{
+	object_type *o_ptr = &p_ptr->inventory[item];
+
+	energy_use = 100;
+	(void)quaff_potion(o_ptr->tval, o_ptr->sval, o_ptr->pval, o_ptr->pval2);
+	inven_item_increase(item, -1);
+	inven_item_describe(item);
+	inven_item_optimize(item);
+}
+
+/* Move the torch/lantern in backpack slot 'item' into the light slot. The light
+ * currently worn is dropped on the floor (drop_old) or returned to the pack. */
+static void autoplay_equip_lite(int item, bool drop_old)
+{
+	object_type forge;
+
+	/* Keep a copy, then remove the new light from the pack. */
+	object_copy(&forge, &p_ptr->inventory[item]);
+	forge.number = 1;
+	inven_item_increase(item, -1);
+	inven_item_optimize(item);
+
+	/* Take off whatever is currently lit (to floor or pack). */
+	if (p_ptr->inventory[INVEN_LITE].k_idx)
+		(void)inven_takeoff(INVEN_LITE, 255, drop_old);
+
+	/* Wear the new one. */
+	object_copy(&p_ptr->inventory[INVEN_LITE], &forge);
+	equip_cnt++;
+
+	p_ptr->update |= (PU_BONUS | PU_TORCH | PU_HP);
+	p_ptr->window |= (PW_INVEN | PW_EQUIP | PW_PLAYER);
+	energy_use = 100;
+}
+
+/* Tend the light source. Returns TRUE if it spent the turn doing so. */
+static bool autoplay_manage_light(void)
+{
+	object_type *lite = &p_ptr->inventory[INVEN_LITE];
+	int t, oil;
+
+	/* No light at all: wield a spare torch if we have one. */
+	if (!lite->k_idx)
+	{
+		t = autoplay_find_torch();
+		if (t >= 0)
+		{
+			autoplay_equip_lite(t, FALSE);
+			msg_print("Autoplay: equipping a torch.");
+			return (TRUE);
+		}
+		return (FALSE);
+	}
+
+	if (lite->tval != TV_LITE) return (FALSE);
+
+	/* A burnt-out torch: drop it and light a fresh one. */
+	if (lite->sval == SV_LITE_TORCH)
+	{
+		if (lite->timeout <= 0)
+		{
+			t = autoplay_find_torch();
+			if (t >= 0)
+			{
+				autoplay_equip_lite(t, TRUE);
+				msg_print("Autoplay: replacing the spent torch.");
+				return (TRUE);
+			}
+		}
+		return (FALSE);
+	}
+
+	/* A lantern: refuel from oil when low; if dead and out of oil, fall back to
+	 * a torch (keeping the lamp for later). */
+	if (lite->sval == SV_LITE_LANTERN)
+	{
+		if (lite->timeout < 500)
+		{
+			oil = autoplay_find_oil();
+			if (oil >= 0)
+			{
+				object_type *o_ptr = &p_ptr->inventory[oil];
+
+				lite->timeout += o_ptr->pval;
+				if (lite->timeout >= FUEL_LAMP) lite->timeout = FUEL_LAMP;
+				inven_item_increase(oil, -1);
+				inven_item_optimize(oil);
+				p_ptr->update |= (PU_TORCH);
+				energy_use = 50;
+				msg_print("Autoplay: refuelling the lamp.");
+				return (TRUE);
+			}
+			if (lite->timeout <= 0)
+			{
+				t = autoplay_find_torch();
+				if (t >= 0)
+				{
+					autoplay_equip_lite(t, FALSE);
+					msg_print("Autoplay: out of oil, switching to a torch.");
+					return (TRUE);
+				}
+			}
+		}
+		return (FALSE);
+	}
+
+	return (FALSE);
+}
+
+/* Take one step toward (gy,gx) over known terrain (auto-explore policy), via
+ * move_player_aux -- so stepping onto an adjacent monster ATTACKS it. Returns
+ * TRUE if a step/attack was issued (a turn spent). */
+static bool autoplay_step_towards(int gy, int gx)
+{
+	path_result *route;
+	int dir = 0, d, ny, nx;
+
+	if ((gy == p_ptr->py) && (gx == p_ptr->px)) return (FALSE);
+
+	route = astar_find_path_cb(cur_hgt, cur_wid, explore_walkable_hook, NULL,
+	                           p_ptr->py, p_ptr->px, gy, gx, ASTAR_8DIR_CUT);
+	if (!route || (route->length < 2))
+	{
+		if (route) path_free(route);
+		return (FALSE);
+	}
+
+	ny = route->steps[1].y;
+	nx = route->steps[1].x;
+	path_free(route);
+
+	for (d = 1; d <= 9; d++)
+	{
+		if (d == 5) continue;
+		if ((p_ptr->py + ddy[d] == ny) && (p_ptr->px + ddx[d] == nx)) { dir = d; break; }
+	}
+	if (!dir) return (FALSE);
+
+	energy_use = 100;
+	move_player_aux(dir, TRUE, 1, TRUE);
+	return (TRUE);
+}
+
+/* Step directly away from monster m over known floor with no monster on it.
+ * Returns TRUE only if a step that increases the distance was taken. */
+static bool autoplay_flee_from(monster_type *m)
+{
+	int cur = distance(p_ptr->py, p_ptr->px, m->fy, m->fx);
+	int best = 0, bestd = cur, d;
+
+	for (d = 1; d <= 9; d++)
+	{
+		int ny, nx, dd;
+
+		if (d == 5) continue;
+		ny = p_ptr->py + ddy[d];
+		nx = p_ptr->px + ddx[d];
+		if (!in_bounds2(ny, nx)) continue;
+		if (!cave_floor_bold(ny, nx)) continue;
+		if (cave[ny][nx].m_idx) continue;
+
+		dd = distance(ny, nx, m->fy, m->fx);
+		if (dd > bestd) { bestd = dd; best = d; }
+	}
+
+	if (!best) return (FALSE);
+
+	energy_use = 100;
+	move_player_aux(best, TRUE, 1, TRUE);
+	return (TRUE);
+}
+
+/* Nearest known, reachable-ish down staircase; TRUE and fills (*sy,*sx). */
+static bool autoplay_find_downstair(int *sy, int *sx)
+{
+	int y, x, bestd = -1;
+
+	for (y = 0; y < cur_hgt; y++)
+	{
+		for (x = 0; x < cur_wid; x++)
+		{
+			int f = cave[y][x].feat, d;
+
+			if ((f != FEAT_MORE) && (f != FEAT_WAY_MORE)) continue;
+			if (!explore_is_seen(y, x)) continue;
+
+			d = distance(p_ptr->py, p_ptr->px, y, x);
+			if ((bestd < 0) || (d < bestd)) { bestd = d; *sy = y; *sx = x; }
+		}
+	}
+	return (bestd >= 0);
+}
+
+/* Descend the stairs under the player; auto-play continues on the new level. */
+static void autoplay_descend(void)
+{
+	bool saved = confirm_stairs;
+
+	confirm_stairs = FALSE;     /* don't block on "Really leave the level?" */
+	msg_print("Autoplay: descending.");
+	do_cmd_go_down();
+	confirm_stairs = saved;
+}
+
+/*
+ * One auto-play decision. Called from process_player()'s energy loop. Evaluates
+ * a borg-inspired priority ladder and performs exactly one turn's worth of work
+ * (or stops auto-play when there is nothing left to do).
+ */
+void autoplay_step(void)
+{
+	int chp, mhp, ed = 0;
+	monster_type *enemy;
+
+	/* States where we can't sensibly drive: stop. */
+	if (p_ptr->confused || p_ptr->image || p_ptr->wild_mode)
+	{
+		autoplaying = 0;
+		p_ptr->redraw |= (PR_STATE);
+		msg_print("Autoplay stopped.");
+		return;
+	}
+
+	/* Refresh our "seen" knowledge before any pathing/goal choice. */
+	explore_sync_seen();
+
+	chp = p_ptr->chp;
+	mhp = p_ptr->mhp;
+
+	/* 1. Heal when hurt and we have a potion (cheap cure first; big heal if low). */
+	if (chp * 2 <= mhp)
+	{
+		int it = autoplay_find_heal(chp * 4 <= mhp);
+		if (it >= 0) { autoplay_quaff(it); return; }
+	}
+
+	enemy = autoplay_nearest_enemy(&ed);
+
+	/* 2. Flee when critically low, with no cure left and a foe at hand. */
+	if ((chp * 4 <= mhp) && enemy && (autoplay_find_heal(TRUE) < 0))
+	{
+		if (autoplay_flee_from(enemy)) return;
+	}
+
+	/* 3. Fight: approach / melee the nearest visible enemy. If it can't be
+	 * reached (wall between), fall through and keep exploring rather than freeze. */
+	if (enemy && autoplay_step_towards(enemy->fy, enemy->fx)) return;
+
+	/* 4. Eat when hungry -- in a quiet moment, or sooner if about to faint. */
+	if ((p_ptr->food < PY_FOOD_ALERT) && (!enemy || (p_ptr->food < PY_FOOD_FAINT)))
+	{
+		int it = autoplay_find_food();
+		if (it >= 0) { eat_food(it); return; }
+	}
+
+	/* 5. Tend the light source (only when no foe is pressing). */
+	if (!enemy && autoplay_manage_light()) return;
+
+	/* 6. Explore the rest of the level (one step toward the nearest goal). */
+	{
+		int gy = 0, gx = 0;
+		if (explore_pick_goal(&gy, &gx) && autoplay_step_towards(gy, gx)) return;
+	}
+
+	/* 7. Level cleared: descend if standing on a down stair, else head to one. */
+	{
+		int sy = 0, sx = 0;
+		int here = cave[p_ptr->py][p_ptr->px].feat;
+
+		if ((here == FEAT_MORE) || (here == FEAT_WAY_MORE)) { autoplay_descend(); return; }
+		if (autoplay_find_downstair(&sy, &sx) && autoplay_step_towards(sy, sx)) return;
+	}
+
+	/* Nothing left we can do. */
+	autoplaying = 0;
+	p_ptr->redraw |= (PR_STATE);
+	msg_print("Autoplay: nothing left to do.");
+}
+
+/*
+ * Start auto-playing. Bound to a command key (Ctrl-V) and the GTK2 Action menu.
+ */
+void do_cmd_autoplay(void)
+{
+	if (p_ptr->immovable) return;
+
+	if (p_ptr->wild_mode)
+	{
+		msg_print("You cannot auto-play the world map.");
+		return;
+	}
+
+	if (p_ptr->confused)
+	{
+		msg_print("You are too confused!");
+		return;
+	}
+
+	/* Cancel running/resting/repeat/travel/explore, then take over. */
+	disturb(0, 0);
+	exploring = 0;
+	autoplaying = 1;
+	p_ptr->redraw |= (PR_STATE);
+	msg_print("Autoplay started (press any key to stop).");
 }
 
 

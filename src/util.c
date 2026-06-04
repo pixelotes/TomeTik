@@ -2671,17 +2671,22 @@ static void msg_flush(int x)
 	/* Hack -- fake monochrome */
 	if (!use_color) a = TERM_WHITE;
 
-	/* Pause for response */
-	Term_putstr(x, 0, -1, a, "-more-");
-
-	/* Get an acceptable keypress */
-	while (1)
+	/* While auto-exploring or auto-playing, never block on "-more-": nobody is
+	 * driving each turn, so just clear the line and move on. */
+	if (!(exploring || autoplaying))
 	{
-		int cmd = inkey();
-		if (quick_messages) break;
-		if ((cmd == ESCAPE) || (cmd == ' ')) break;
-		if ((cmd == '\n') || (cmd == '\r')) break;
-		bell();
+		/* Pause for response */
+		Term_putstr(x, 0, -1, a, "-more-");
+
+		/* Get an acceptable keypress */
+		while (1)
+		{
+			int cmd = inkey();
+			if (quick_messages) break;
+			if ((cmd == ESCAPE) || (cmd == ' ')) break;
+			if ((cmd == '\n') || (cmd == '\r')) break;
+			bell();
+		}
 	}
 
 	/* Clear the line */
