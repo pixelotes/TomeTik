@@ -191,6 +191,8 @@ ANGBAND MENU
    MENUITEM SEPARATOR
    MENUITEM "Double size tiles mode", 408
    MENUITEM "&Bigtile mode", 409
+   MENUITEM SEPARATOR
+   MENUITEM "&Isometric view", 412
    }
 	/*
 	 * End TomeTik 0.3
