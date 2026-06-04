@@ -126,11 +126,18 @@ def make_tile(spec):
         cell.alpha_composite(load_rgba(base_k), (0, 0))
         cell.alpha_composite(load_rgba(ov_k, gif), (ox, oy))
     elif kind == 'local':
-        # tile ya presente en lib/xtra/iso/ (NO de dungeonodyssey). RGBA con su
-        # propio alfa -> se compone sobre magenta en el offset y indicado (los de
-        # 54x49 van a y=5 para casar el rombo de suelo con el offset DO_DY=-5).
+        # tile ya presente en lib/xtra/iso/ (NO de dungeonodyssey). Su transp.
+        # puede ser alfa (building_block), magenta (rubble) o CIAN (grass_flowers);
+        # normalizamos cian -> alfa 0 para que al componer sobre magenta quede el
+        # colorkey del sheet. Offset y: los de 54x49 van a y=5 (casar DO_DY=-5).
         _, fn, yoff = spec
         im = Image.open(os.path.join('lib/xtra/iso', fn)).convert('RGBA')
+        px = im.load()
+        for yy in range(im.height):
+            for xx in range(im.width):
+                r, g, b, a = px[xx, yy]
+                if r < 60 and g > 200 and b > 200:
+                    px[xx, yy] = (r, g, b, 0)
         cell.alpha_composite(im, (0, yoff))
     else:
         raise SystemExit('spec desconocida: ' + repr(spec))
