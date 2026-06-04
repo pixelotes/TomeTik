@@ -303,16 +303,10 @@ static int gerv_cols = 0, gerv_rows = 0;
  * Sheet ensamblada en lib/xtra/iso/do_extra.png (7 cols). Se blitean con offset -5
  * en Y para alinear el rombo de suelo (DO 54px vs dg_iso32 49px). Ver iso_do_tile(). */
 static GdkPixbuf *do_sheet = NULL;
-/* TomeTik: sprite especial (PNG con alfa, 54x49) para los edificios del pueblo;
- * más alto que el cubo 70 y con la tapa tintada. lib/xtra/iso/building_block.png.
- * Si falta, se cae al cubo de piedra normal (ISO_T_SINGLE). */
-static GdkPixbuf *bldg_block = NULL;
-/* TomeTik: tile custom de hierba con flores (FEAT_FLOWER), 54x49, cian transp.
- * lib/xtra/iso/grass_flowers.png. Si falta, FEAT_FLOWER cae al suelo de hierba (0). */
-static GdkPixbuf *flower_tile = NULL;
-/* TomeTik: tile custom de escombros (FEAT_RUBBLE 49 y 206 "pile of rubble"),
- * 54x54, magenta #FF00FF transp., overlay sobre el suelo. lib/xtra/iso/rubble.png. */
-static GdkPixbuf *rubble_tile = NULL;
+/* TomeTik: los antiguos tiles sueltos (building_block / grass_flowers / rubble)
+ * se integraron en do_extra.png (celdas 24-27, enum DO_BUILDING/DO_RUBBLE/
+ * DO_FLOWERS/DO_FLOWERS_OLD) y se blitean con do_blit(). Se incluyen las DOS
+ * versiones de flores; en juego se usa la blanca (DO_FLOWERS). */
 #define DO_TILE_W   54
 #define DO_TILE_H   54
 #define DO_COLS      7
@@ -325,7 +319,9 @@ enum {
 	DO_ALTAR_BEING, DO_ALTAR_WINDS, DO_ALTAR_FORCE, DO_ALTAR_DARK, DO_ALTAR_NATURE,
 	DO_NETHER, DO_MIRKY, DO_WATER, DO_EMBERS,
 	DO_GRAVEYARD, DO_DARKWATER, DO_GRAVE_POOF, DO_DARKWATER_CORRUPT,
-	DO_TUNNEL, DO_PORTAL, DO_FLOORSTONE, DO_TOWN, DO_GLYPH_GREEN, DO_GLYPH_RED
+	DO_TUNNEL, DO_PORTAL, DO_FLOORSTONE, DO_TOWN, DO_GLYPH_GREEN, DO_GLYPH_RED,
+	/* tiles antes sueltos, ahora en do_extra.png celdas 24-27 */
+	DO_BUILDING, DO_RUBBLE, DO_FLOWERS, DO_FLOWERS_OLD
 };
 
 /*
@@ -2521,37 +2517,8 @@ static bool iso_load_sheets(void)
 		plog_fmt("iso: no pude cargar %s; features extra como suelo gris", path);
 	}
 
-	/* Sprite especial de edificio (PNG con canal alfa propio; opcional). */
-	path_build(path, 1024, ANGBAND_DIR_XTRA, "iso/building_block.png");
-	bldg_block = gdk_pixbuf_new_from_file(path, NULL);
-	if (!bldg_block)
-		plog_fmt("iso: no pude cargar %s; edificios como cubo 70", path);
-
-	/* Tile custom de hierba con flores (cian #00FFFF -> alfa; opcional). */
-	path_build(path, 1024, ANGBAND_DIR_XTRA, "iso/grass_flowers.png");
-	raw = gdk_pixbuf_new_from_file(path, NULL);
-	if (raw)
-	{
-		flower_tile = gdk_pixbuf_add_alpha(raw, TRUE, 0x00, 0xFF, 0xFF);
-		g_object_unref(raw);
-	}
-	else
-	{
-		plog_fmt("iso: no pude cargar %s; FEAT_FLOWER como hierba", path);
-	}
-
-	/* Tile custom de escombros (magenta #FF00FF -> alfa; opcional). */
-	path_build(path, 1024, ANGBAND_DIR_XTRA, "iso/rubble.png");
-	raw = gdk_pixbuf_new_from_file(path, NULL);
-	if (raw)
-	{
-		rubble_tile = gdk_pixbuf_add_alpha(raw, TRUE, 0xFF, 0x00, 0xFF);
-		g_object_unref(raw);
-	}
-	else
-	{
-		plog_fmt("iso: no pude cargar %s; escombros como overlay 58", path);
-	}
+	/* building_block / grass_flowers / rubble: integrados en do_extra.png
+	 * (celdas 24-27), ya no se cargan por separado. Se usan vía do_blit(). */
 
 	return TRUE;
 }
@@ -3632,12 +3599,10 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 	/* Escombros (FEAT_RUBBLE 49 y 206 "pile of rubble"): tile custom como overlay
 	 * sobre el suelo. Antes del check de muro para que mande aunque la feature
 	 * tenga el flag WALL. */
-	if (((f == FEAT_RUBBLE) || (f == 206)) && rubble_tile)
+	if (((f == FEAT_RUBBLE) || (f == 206)) && do_sheet)
 	{
 		iso_blit(td, iso_ground_tile(f), sx, sy);
-		gdk_draw_pixbuf(iso_target, td->gc, rubble_tile,
-		                0, 0, sx, sy + DO_DY, DO_TILE_W, DO_TILE_H,
-		                GDK_RGB_DITHER_NONE, 0, 0);
+		do_blit(td, DO_RUBBLE, sx, sy);
 	}
 	else if (iso_is_wall_feat(f))
 	{
@@ -3674,9 +3639,8 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 				}
 			}
 
-			if (bldg_block && is_building)
-				gdk_draw_pixbuf(iso_target, td->gc, bldg_block,
-				                0, 0, sx, sy, 54, 49, GDK_RGB_DITHER_NONE, 0, 0);
+			if (do_sheet && is_building)
+				do_blit(td, DO_BUILDING, sx, sy);
 			else
 				iso_blit(td, ISO_T_SINGLE, sx, sy);
 		}
@@ -3717,11 +3681,11 @@ static void iso_cell_cb(void *ctx, int cx, int cy, int sx, int sy)
 		iso_blit(td, iso_ground_tile(f), sx, sy);
 		iso_blit(td, ISO_T_STAIR + 1, sx, sy);
 	}
-	else if ((f == FEAT_FLOWER) && flower_tile)
+	else if ((f == FEAT_FLOWER) && do_sheet)
 	{
-		/* hierba con flores: tile custom (lib/xtra/iso/grass_flowers.png). */
-		gdk_draw_pixbuf(iso_target, td->gc, flower_tile,
-		                0, 0, sx, sy, 54, 49, GDK_RGB_DITHER_NONE, 0, 0);
+		/* hierba con flores: en juego usamos la versión BLANCA (DO_FLOWERS); la
+		 * antigua queda en el sheet como DO_FLOWERS_OLD, sin usar. */
+		do_blit(td, DO_FLOWERS, sx, sy);
 	}
 	else if (do_sheet && iso_do_tile(f) >= 0)
 	{
