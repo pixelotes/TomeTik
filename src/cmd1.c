@@ -4753,6 +4753,10 @@ static bool explore_goal_is_loot = FALSE; /* la meta actual es oro / un objeto *
 int explore_gold_radius = 5;
 int explore_item_radius = 5;
 
+/* Auto-play raises this while its backpack is full: the goal-picker then stops
+ * detouring for items. Gold costs no inventory slot, so it is still collected. */
+static bool explore_no_items = FALSE;
+
 /* Clase de interés de una celda para el autoexplore (modelo del
  * borg_flow_dark_interesting): se elige la celda de MAYOR prioridad y, a igualdad,
  * la más cercana. El BFS de find_nearest_goal visita en orden de distancia, así
@@ -4830,7 +4834,9 @@ static bool cell_has_item(int y, int x)
 	{
 		object_type *o_ptr = &o_list[this_o_idx];
 		next_o_idx = o_ptr->next_o_idx;
-		if (o_ptr->marked && (o_ptr->tval != TV_GOLD)) return (TRUE);
+		/* Corpses are junk we'd only have to drop again: never a loot goal. */
+		if (o_ptr->marked && (o_ptr->tval != TV_GOLD) && (o_ptr->tval != TV_CORPSE))
+			return (TRUE);
 	}
 	return (FALSE);
 }
@@ -5287,7 +5293,8 @@ static int explore_cell_interest(int y, int x, int dist)
 	 * frontier, picking it up wins (matching the old gold-checked-first order). */
 	if ((explore_gold_radius > 0) && (dist <= explore_gold_radius) && cell_has_gold(y, x))
 		return (EXPLORE_LOOT);
-	if ((explore_item_radius > 0) && (dist <= explore_item_radius) && cell_has_item(y, x))
+	if (!explore_no_items && (explore_item_radius > 0) &&
+	                (dist <= explore_item_radius) && cell_has_item(y, x))
 		return (EXPLORE_LOOT);
 
 	/* Frontier: a seen grid next to one we have never seen -- and not blacklisted
@@ -5721,7 +5728,7 @@ static bool autoplay_manage_light(void)
 /* Take one step toward (gy,gx) over known terrain (auto-explore policy), via
  * move_player_aux -- so stepping onto an adjacent monster ATTACKS it. Returns
  * TRUE if a step/attack was issued (a turn spent). */
-static bool autoplay_step_towards(int gy, int gx)
+static bool autoplay_step_towards(int gy, int gx, bool do_pickup)
 {
 	path_result *route;
 	int dir = 0, d, ny, nx;
@@ -5748,7 +5755,7 @@ static bool autoplay_step_towards(int gy, int gx)
 	if (!dir) return (FALSE);
 
 	energy_use = 100;
-	move_player_aux(dir, TRUE, 1, TRUE);
+	move_player_aux(dir, do_pickup, 1, TRUE);
 	return (TRUE);
 }
 
@@ -5813,6 +5820,32 @@ static void autoplay_descend(void)
 	confirm_stairs = saved;
 }
 
+/* Is the backpack full (no free general slot)? The pack is kept compact, so a
+ * full pack means the last general slot is occupied. */
+static bool autoplay_pack_full(void)
+{
+	return (p_ptr->inventory[INVEN_PACK - 1].k_idx != 0);
+}
+
+/* Is monster m too dangerous to melee right now (out-of-depth / much higher
+ * native level than us)? When so, auto-play tries to flee/avoid rather than
+ * trade blows -- a crude stand-in for the borg's per-monster danger model;
+ * the exact policy is a good thing to push into Lua later. */
+static bool autoplay_too_dangerous(monster_type *m)
+{
+	monster_race *r_ptr = &r_info[m->r_idx];
+	int plev = p_ptr->lev;
+
+	/* A unique noticeably above our level: don't pick the fight. */
+	if ((r_ptr->flags1 & RF1_UNIQUE) && (r_ptr->level > plev + 3)) return (TRUE);
+
+	/* Any monster whose native level roughly doubles ours (and is well above
+	 * it in absolute terms): treat as out-of-depth and avoid. */
+	if ((r_ptr->level >= plev * 2) && (r_ptr->level > plev + 5)) return (TRUE);
+
+	return (FALSE);
+}
+
 /*
  * One auto-play decision. Called from process_player()'s energy loop. Evaluates
  * a borg-inspired priority ladder and performs exactly one turn's worth of work
@@ -5822,6 +5855,8 @@ void autoplay_step(void)
 {
 	int chp, mhp, ed = 0;
 	monster_type *enemy;
+	bool full;
+	bool pickup;
 
 	/* States where we can't sensibly drive: stop. */
 	if (p_ptr->confused || p_ptr->image || p_ptr->wild_mode)
@@ -5837,6 +5872,8 @@ void autoplay_step(void)
 
 	chp = p_ptr->chp;
 	mhp = p_ptr->mhp;
+	full = autoplay_pack_full();
+	pickup = !full;                 /* don't grab loot when the pack is full */
 
 	/* 1. Heal when hurt and we have a potion (cheap cure first; big heal if low). */
 	if (chp * 2 <= mhp)
@@ -5847,30 +5884,51 @@ void autoplay_step(void)
 
 	enemy = autoplay_nearest_enemy(&ed);
 
-	/* 2. Flee when critically low, with no cure left and a foe at hand. */
-	if ((chp * 4 <= mhp) && enemy && (autoplay_find_heal(TRUE) < 0))
+	/* 2. Deal with a visible enemy: flee from danger, else close and melee.
+	 * We flee when (a) critically low with no cure left, or (b) the foe is too
+	 * dangerous to trade blows with (out-of-depth / a strong unique). If we can't
+	 * get away (cornered), we fight as a last resort instead of standing still. */
+	if (enemy)
 	{
-		if (autoplay_flee_from(enemy)) return;
+		bool dangerous = autoplay_too_dangerous(enemy);
+		bool desperate = (chp * 4 <= mhp) && (autoplay_find_heal(TRUE) < 0);
+
+		if ((dangerous || desperate) && autoplay_flee_from(enemy)) return;
+		if (autoplay_step_towards(enemy->fy, enemy->fx, pickup)) return;
+		/* Unreachable (wall between): fall through and keep exploring. */
 	}
 
-	/* 3. Fight: approach / melee the nearest visible enemy. If it can't be
-	 * reached (wall between), fall through and keep exploring rather than freeze. */
-	if (enemy && autoplay_step_towards(enemy->fy, enemy->fx)) return;
-
-	/* 4. Eat when hungry -- in a quiet moment, or sooner if about to faint. */
+	/* 3. Eat when hungry -- in a quiet moment, or sooner if about to faint. */
 	if ((p_ptr->food < PY_FOOD_ALERT) && (!enemy || (p_ptr->food < PY_FOOD_FAINT)))
 	{
 		int it = autoplay_find_food();
 		if (it >= 0) { eat_food(it); return; }
 	}
 
-	/* 5. Tend the light source (only when no foe is pressing). */
+	/* 4. Tend the light source (only when no foe is pressing). */
 	if (!enemy && autoplay_manage_light()) return;
 
-	/* 6. Explore the rest of the level (one step toward the nearest goal). */
+	/* 5. Rest to recover when wounded, safe (no foe) and not starving. The
+	 * resting branch of process_player() takes over until HP/SP are full or a
+	 * disturbance (e.g. a monster appearing) hands control back to us. */
+	if (!enemy && (chp < mhp) && (p_ptr->food >= PY_FOOD_ALERT))
+	{
+		resting = -1;
+		p_ptr->redraw |= (PR_STATE);
+		return;
+	}
+
+	/* 6. Explore the rest of the level (one step toward the nearest goal). While
+	 * the pack is full, stop detouring for items (gold still counts). */
 	{
 		int gy = 0, gx = 0;
-		if (explore_pick_goal(&gy, &gx) && autoplay_step_towards(gy, gx)) return;
+		bool got;
+
+		explore_no_items = full;
+		got = explore_pick_goal(&gy, &gx);
+		explore_no_items = FALSE;
+
+		if (got && autoplay_step_towards(gy, gx, pickup)) return;
 	}
 
 	/* 7. Level cleared: descend if standing on a down stair, else head to one. */
@@ -5879,7 +5937,7 @@ void autoplay_step(void)
 		int here = cave[p_ptr->py][p_ptr->px].feat;
 
 		if ((here == FEAT_MORE) || (here == FEAT_WAY_MORE)) { autoplay_descend(); return; }
-		if (autoplay_find_downstair(&sy, &sx) && autoplay_step_towards(sy, sx)) return;
+		if (autoplay_find_downstair(&sy, &sx) && autoplay_step_towards(sy, sx, pickup)) return;
 	}
 
 	/* Nothing left we can do. */
