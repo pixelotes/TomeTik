@@ -5902,6 +5902,133 @@ static bool autoplay_start_recall(void)
 	return (p_ptr->word_recall > 0);
 }
 
+/* ---- inventory upkeep: identify unknowns, equip the best gear ---- */
+
+/* Backpack index of a Scroll of Identify, or -1. */
+static int autoplay_find_identify_scroll(void)
+{
+	int i;
+	for (i = 0; i < INVEN_PACK; i++)
+	{
+		object_type *o_ptr = &p_ptr->inventory[i];
+		if (!o_ptr->k_idx) continue;
+		if ((o_ptr->tval == TV_SCROLL) && (o_ptr->sval == SV_SCROLL_IDENTIFY))
+			return (i);
+	}
+	return (-1);
+}
+
+/* Worth spending a Scroll of Identify on? Only gear and magic devices -- not
+ * potions/scrolls/food, which become known through use. */
+static bool autoplay_id_worthy(object_type *o_ptr)
+{
+	if (object_known_p(o_ptr)) return (FALSE);
+	if (wield_slot(o_ptr) >= INVEN_WIELD) return (TRUE);
+	if ((o_ptr->tval == TV_WAND) || (o_ptr->tval == TV_STAFF) ||
+	                (o_ptr->tval == TV_ROD)) return (TRUE);
+	return (FALSE);
+}
+
+/* If we have a Scroll of Identify and an unidentified piece of gear/device,
+ * read it on that item. Returns TRUE if a turn was spent. */
+static bool autoplay_identify_step(void)
+{
+	int sc = autoplay_find_identify_scroll();
+	int i, it = -1;
+
+	if (sc < 0) return (FALSE);
+
+	for (i = 0; i < INVEN_PACK; i++)
+	{
+		object_type *o_ptr = &p_ptr->inventory[i];
+		if (!o_ptr->k_idx) continue;
+		if (autoplay_id_worthy(o_ptr)) { it = i; break; }
+	}
+	if (it < 0) return (FALSE);
+
+	/* Identify the item (flags only; reorder is deferred, so sc stays valid). */
+	{
+		object_type *o_ptr = &p_ptr->inventory[it];
+		object_aware(o_ptr);
+		object_known(o_ptr);
+		o_ptr->ident |= (IDENT_MENTAL);
+	}
+
+	/* Consume one Scroll of Identify. */
+	inven_item_increase(sc, -1);
+	inven_item_optimize(sc);
+
+	p_ptr->update |= (PU_BONUS);
+	p_ptr->notice |= (PN_COMBINE | PN_REORDER);
+	p_ptr->window |= (PW_INVEN | PW_EQUIP | PW_PLAYER);
+	energy_use = 100;
+	msg_print("Autoplay: identifying an item.");
+	return (TRUE);
+}
+
+/* Slots the bot will auto-equip into (armour + weapon/shield). Rings, amulets,
+ * bow and ammo are left out for now -- their value/slot logic is situational. */
+static bool autoplay_slot_autoequippable(int slot)
+{
+	return ((slot == INVEN_WIELD) || (slot == INVEN_BODY) ||
+	        (slot == INVEN_OUTER) || (slot == INVEN_ARM) ||
+	        (slot == INVEN_HEAD)  || (slot == INVEN_HANDS) ||
+	        (slot == INVEN_FEET));
+}
+
+/* Equip the item in backpack slot 'item' into its wield slot; the gear it
+ * replaces goes back to the pack. One turn. */
+static void autoplay_wield(int item)
+{
+	object_type forge;
+	int slot = wield_slot(&p_ptr->inventory[item]);
+
+	if (slot < INVEN_WIELD) return;
+
+	object_copy(&forge, &p_ptr->inventory[item]);
+	forge.number = 1;
+	inven_item_increase(item, -1);
+	inven_item_optimize(item);
+
+	if (p_ptr->inventory[slot].k_idx)
+		(void)inven_takeoff(slot, 255, FALSE);
+
+	object_copy(&p_ptr->inventory[slot], &forge);
+	equip_cnt++;
+
+	p_ptr->update |= (PU_BONUS | PU_HP | PU_MANA | PU_SPELLS | PU_TORCH);
+	p_ptr->window |= (PW_INVEN | PW_EQUIP | PW_PLAYER);
+	energy_use = 100;
+}
+
+/* Wear a pack item that is strictly more valuable than what occupies its slot.
+ * Only items we have some knowledge of (known or sensed) and that aren't cursed,
+ * so we never blindly don an unknown cursed item. Returns TRUE if it equipped. */
+static bool autoplay_autoequip_step(void)
+{
+	int i;
+	for (i = 0; i < INVEN_PACK; i++)
+	{
+		object_type *o_ptr = &p_ptr->inventory[i];
+		int slot;
+
+		if (!o_ptr->k_idx) continue;
+		if (!(object_known_p(o_ptr) || (o_ptr->ident & IDENT_SENSE))) continue;
+		if (cursed_p(o_ptr)) continue;
+
+		slot = wield_slot(o_ptr);
+		if (!autoplay_slot_autoequippable(slot)) continue;
+
+		if (object_value(o_ptr) > object_value(&p_ptr->inventory[slot]))
+		{
+			autoplay_wield(i);
+			msg_print("Autoplay: equipping better gear.");
+			return (TRUE);
+		}
+	}
+	return (FALSE);
+}
+
 /*
  * One auto-play decision. Called from process_player()'s energy loop. Evaluates
  * a borg-inspired priority ladder and performs exactly one turn's worth of work
@@ -5992,6 +6119,11 @@ void autoplay_step(void)
 
 	/* 4. Tend the light source (only when no foe is pressing). */
 	if (!enemy && autoplay_manage_light()) return;
+
+	/* 4b. Inventory upkeep in a quiet moment: identify unknown gear with scrolls,
+	 * then wear anything better than what we have on. */
+	if (!enemy && autoplay_identify_step()) return;
+	if (!enemy && autoplay_autoequip_step()) return;
 
 	/* 5. Rest to recover when wounded, safe (no foe) and not starving. The
 	 * resting branch of process_player() takes over until HP/SP are full or a
