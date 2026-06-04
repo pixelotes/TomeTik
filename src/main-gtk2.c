@@ -3482,27 +3482,49 @@ static int iso_wall_shape(int y, int x)
 }
 
 /*
- * Orientación de una puerta: TRUE = "we" (la puerta forma parte de una línea de
- * muro horizontal W-E, se cruza N-S), FALSE = "ns" (línea de muro vertical, se
- * cruza W-E). Se decide por el eje con más muros/puertas flanqueando la celda;
- * así funciona también cuando solo hay muro a un lado o en juntas (antes exigía
- * muro a AMBOS lados W y E y, si no, caía siempre a "ns" -> puertas torcidas). */
+ * Orientación de una puerta/arco: TRUE = variante "we" (la puerta forma parte de
+ * una línea de muro este-oeste, muros a izquierda/derecha), FALSE = "ns".
+ *
+ * Port de door_vertical() de OmnibandTk (src/common/icon1.c): a diferencia de la
+ * vieja heurística por conteo de vecinos (que mezclaba muro+puerta y miraba ±2 ->
+ * torcía arcos en cruces y extremos), esto DISTINGUE muro de puerta y decide con
+ * solo los 4 vecinos inmediatos en un orden de prioridad claro. El caso común
+ * (puerta embutida en muro horizontal) da el mismo tile que antes, pero los
+ * cruces/juntas quedan bien. (Nuestro tile +1 = "we", +0 = "ns".) */
+static bool iso_wall_at(int y, int x)
+{
+	/* ¿barrera que forma "línea" para orientar la puerta? Cualquier feature con
+	 * FF1_WALL, INCLUIDO el terreno overlay (montañas/árboles/escombros) que
+	 * iso_is_wall_feat descarta para el dibujo de cubos pero que SÍ flanquea y
+	 * orienta una puerta (p.ej. un arco entre dos montañas). Borde del mapa =
+	 * muro. Mira el feat real, sin exigir CAVE_MARK. Las puertas van aparte. */
+	int f;
+	if (!iso_inb(y, x)) return TRUE;
+	f = cave[y][x].feat;
+	if ((f < 0) || (f >= max_f_idx)) return FALSE;
+	if (f == FEAT_ILLUS_WALL) return TRUE;       /* FLOOR pero se ve como muro */
+	if (iso_is_door_feat(f)) return FALSE;
+	return (f_info[f].flags1 & FF1_WALL) != 0;
+}
+static bool iso_door_at(int y, int x)
+{
+	if (!iso_inb(y, x)) return FALSE;
+	return iso_is_door_feat(cave[y][x].feat);
+}
 static bool iso_door_we(int y, int x)
 {
-	/* Suma muros/puertas a lo largo de cada eje mirando DOS celdas a cada lado:
-	 * una línea de muro real continúa más allá del vecino inmediato, así que
-	 * esto detecta la dirección de la pared mucho mejor que solo radio 1 (que
-	 * fallaba en cruces y extremos -> arcos torcidos). */
-	int we = (iso_walldoor(y, x - 1) ? 1 : 0) + (iso_walldoor(y, x + 1) ? 1 : 0) +
-	         (iso_walldoor(y, x - 2) ? 1 : 0) + (iso_walldoor(y, x + 2) ? 1 : 0);
-	int ns = (iso_walldoor(y - 1, x) ? 1 : 0) + (iso_walldoor(y + 1, x) ? 1 : 0) +
-	         (iso_walldoor(y - 2, x) ? 1 : 0) + (iso_walldoor(y + 2, x) ? 1 : 0);
+	bool wl = iso_wall_at(y, x - 1), wr = iso_wall_at(y, x + 1);
+	bool wu = iso_wall_at(y - 1, x), wd = iso_wall_at(y + 1, x);
+	bool dl, dr;
 
-	/* Eje dominante de la línea de muro. */
-	if (we != ns) return (we > ns);
+	if (wl && wr) return TRUE;     /* muros izq+der    -> we */
+	if (wu && wd) return FALSE;    /* muros arriba+abajo -> ns */
 
-	/* Empate (esquina real / aislada): usa los vecinos inmediatos como antes. */
-	return (iso_walldoor(y, x - 1) && iso_walldoor(y, x + 1));
+	dl = iso_door_at(y, x - 1); dr = iso_door_at(y, x + 1);
+	if (dl && dr) return TRUE;                   /* puertas izq+der        -> we */
+	if ((dl && wr) || (dr && wl)) return TRUE;   /* puerta+muro horizontal -> we */
+
+	return FALSE;                                /* por defecto -> ns */
 }
 
 /* Blit de un tile de la lámina por índice (col = idx%14, fila = idx/14). */
