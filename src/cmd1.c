@@ -4727,6 +4727,12 @@ static long explore_seen_count = 0;   /* nº de celdas vistas (para medir progre
 /* Anti-oscilación: metas (fronteras) que ya intentamos y NO aportaron celdas
  * nuevas; no se vuelven a elegir (evita ir y venir entre fronteras "muertas"). */
 static byte *explore_bad = NULL;
+
+/* Celdas que el autoexplore ABANDONA este nivel: una puerta que no logra abrir
+ * (atrancada / cerradura imposible), un tramo que se queda bloqueado. Se tratan
+ * como intransitables SOLO para el autoexplore, de modo que rodea en vez de
+ * pararse. El click-to-move no las consulta (el jugador puede ir a mano). */
+static byte *explore_block = NULL;
 static int explore_goal_y = -1, explore_goal_x = -1;
 static long explore_goal_count = -1;  /* celdas vistas cuando fijamos la meta */
 static bool explore_goal_is_loot = FALSE; /* la meta actual es oro / un objeto */
@@ -4757,9 +4763,11 @@ static void explore_sync_seen(void)
 	{
 		if (explore_seen) C_FREE(explore_seen, explore_seen_n, byte);
 		if (explore_bad) C_FREE(explore_bad, explore_seen_n, byte);
+		if (explore_block) C_FREE(explore_block, explore_seen_n, byte);
 		explore_seen_n = n;
 		C_MAKE(explore_seen, n, byte);
 		C_MAKE(explore_bad, n, byte);
+		C_MAKE(explore_block, n, byte);
 		explore_seen_stamp = old_turn;
 		explore_seen_count = 0;
 		explore_goal_y = explore_goal_x = -1;
@@ -4864,9 +4872,30 @@ static bool travel_walkable_real(int y, int x, void *user)
 }
 
 /*
- * Walkability policy of the leg currently armed: seen-gated for auto-explore,
- * real-terrain for click-to-move. travel_plan() sets it from its caller and
- * travel_step() reuses it so re-validation matches how the path was planned.
+ * Walkability for auto-explore (frontier search and the legs toward it): the
+ * seen-gated policy, plus any grid we have given up on this level (explore_block)
+ * is treated as impassable so we route around it instead of halting. Click-to-
+ * move does NOT consult this, so the player can still order a trip by hand.
+ */
+static bool explore_walkable_hook(int y, int x, void *user)
+{
+	if (explore_block && explore_block[y * cur_wid + x]) return (FALSE);
+	return (travel_walkable_hook(y, x, user));
+}
+
+/* Give up on grid (y,x) for the rest of this level's auto-explore: from now on we
+ * route around it (and never sit a frontier goal on it, since the BFS no longer
+ * reaches it). */
+static void explore_block_cell(int y, int x)
+{
+	if (explore_block && in_bounds2(y, x)) explore_block[y * cur_wid + x] = 1;
+}
+
+/*
+ * Walkability policy of the leg currently armed: seen-gated (auto-explore),
+ * real-terrain (click-to-move), or the explore variant above. travel_plan() sets
+ * it from its caller and travel_step() reuses it so re-validation matches how the
+ * path was planned.
  */
 static astar_walkable_hook travel_hook = travel_walkable_hook;
 
@@ -5064,9 +5093,12 @@ void travel_step(void)
 		return;
 	}
 
-	/* The next tile is no longer traversable, under this leg's policy. */
+	/* The next tile is no longer traversable, under this leg's policy. While
+	 * auto-exploring don't abandon the sweep: give up on this grid and let
+	 * explore_step re-route around it. */
 	if (!travel_hook(ny, nx, NULL))
 	{
+		if (exploring) { explore_block_cell(ny, nx); travel_clear(); return; }
 		travel_abort("Your way is blocked.");
 		return;
 	}
@@ -5084,6 +5116,7 @@ void travel_step(void)
 	}
 	if (!dir)
 	{
+		if (exploring) { explore_block_cell(ny, nx); travel_clear(); return; }
 		travel_abort(NULL);
 		return;
 	}
@@ -5107,12 +5140,19 @@ void travel_step(void)
 	if (!travelling) return;
 
 	/* No nos movimos: normalmente porque easy_open acaba de ABRIR una puerta
-	 * (cuesta un turno y no avanzas). Reintenta el paso el turno siguiente SIN
-	 * avanzar el índice; si tras varios intentos seguimos clavados (puerta
-	 * atrancada que no cede), abandona el tramo. */
+	 * (cuesta un turno y no avanzas) o está reintentando forzar una cerradura.
+	 * Reintenta el paso el turno siguiente SIN avanzar el índice; así se insiste
+	 * en el comando "open" varias veces. Si tras TRAVEL_STUCK_MAX intentos
+	 * seguimos clavados (puerta atrancada que no cede, cerradura imposible): en
+	 * autoexplore se ABANDONA esa celda y se reencamina (sin parar la exploración);
+	 * en travel-a-click se corta el tramo. */
 	if ((p_ptr->py == oy) && (p_ptr->px == ox))
 	{
-		if (++travel_stuck > TRAVEL_STUCK_MAX) travel_abort(NULL);
+		if (++travel_stuck > TRAVEL_STUCK_MAX)
+		{
+			if (exploring) { explore_block_cell(ny, nx); travel_clear(); return; }
+			travel_abort(NULL);
+		}
 		return;
 	}
 	travel_stuck = 0;
@@ -5309,7 +5349,7 @@ static bool find_nearest_goal(int *gy, int *gx, int *kind)
 
 			ncell = ny * cur_wid + nx;
 			if (seen[ncell]) continue;
-			if (!travel_walkable_hook(ny, nx, NULL)) continue;
+			if (!explore_walkable_hook(ny, nx, NULL)) continue;
 
 			seen[ncell] = 1;
 			dist[ncell] = dist[cur] + 1;
@@ -5385,9 +5425,9 @@ void explore_step(void)
 	explore_goal_is_loot = (goal_kind == EXPLORE_LOOT);
 
 	/* Arm the leg toward it (no disturb/messages: that's our job, not its).
-	 * Auto-explore stays seen-gated: we path over known territory toward the
-	 * frontier, unlike click-to-move which may strike into the dark. */
-	if (!travel_plan(gy, gx, travel_walkable_hook))
+	 * Auto-explore stays seen-gated (and routes around grids we gave up on),
+	 * unlike click-to-move which may strike into the dark. */
+	if (!travel_plan(gy, gx, explore_walkable_hook))
 	{
 		/* BFS proved reachability, so this is unexpected; stop gracefully. */
 		exploring = 0;
