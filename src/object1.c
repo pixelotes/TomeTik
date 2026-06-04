@@ -6730,6 +6730,10 @@ void py_pickup_floor(int pickup)
 			continue;
 		}
 
+		/* Auto-play leaves corpses on the floor (e.g. the kobold it just killed)
+		 * instead of hoarding junk it would only have to drop. */
+		if (autoplaying && (o_ptr->tval == TV_CORPSE)) continue;
+
 		{
 			char testdesc[80];
 
