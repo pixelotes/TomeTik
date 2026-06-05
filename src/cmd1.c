@@ -5729,6 +5729,27 @@ static bool autoplay_manage_light(void)
 	return (FALSE);
 }
 
+/* Read-only: would autoplay_manage_light() do something right now? (Mirrors its
+ * act-conditions so the decision layer / oracle can check without acting.) */
+static bool autoplay_light_needs(void)
+{
+	object_type *lite = &p_ptr->inventory[INVEN_LITE];
+
+	if (!lite->k_idx) return (autoplay_find_torch() >= 0);
+	if (lite->tval != TV_LITE) return (FALSE);
+
+	if (lite->sval == SV_LITE_TORCH)
+		return ((lite->timeout <= 0) && (autoplay_find_torch() >= 0));
+
+	if (lite->sval == SV_LITE_LANTERN)
+	{
+		if (lite->timeout >= 500) return (FALSE);
+		if (autoplay_find_oil() >= 0) return (TRUE);
+		return ((lite->timeout <= 0) && (autoplay_find_torch() >= 0));
+	}
+	return (FALSE);
+}
+
 /* Take one step toward (gy,gx) over known terrain (auto-explore policy), via
  * move_player_aux -- so stepping onto an adjacent monster ATTACKS it. Returns
  * TRUE if a step/attack was issued (a turn spent). */
@@ -5763,11 +5784,11 @@ static bool autoplay_step_towards(int gy, int gx, bool do_pickup)
 	return (TRUE);
 }
 
-/* Step directly away from monster m over known floor with no monster on it.
- * Returns TRUE only if a step that increases the distance was taken. */
-static bool autoplay_flee_from(monster_type *m)
+/* Step directly away from the threat at (ty,tx) over known floor with no monster
+ * on it. Returns TRUE only if a step that increases the distance was taken. */
+static bool autoplay_flee_from(int ty, int tx)
 {
-	int cur = distance(p_ptr->py, p_ptr->px, m->fy, m->fx);
+	int cur = distance(p_ptr->py, p_ptr->px, ty, tx);
 	int best = 0, bestd = cur, d;
 
 	for (d = 1; d <= 9; d++)
@@ -5781,7 +5802,7 @@ static bool autoplay_flee_from(monster_type *m)
 		if (!cave_floor_bold(ny, nx)) continue;
 		if (cave[ny][nx].m_idx) continue;
 
-		dd = distance(ny, nx, m->fy, m->fx);
+		dd = distance(ny, nx, ty, tx);
 		if (dd > bestd) { bestd = dd; best = d; }
 	}
 
@@ -5933,41 +5954,42 @@ static bool autoplay_id_worthy(object_type *o_ptr)
 	return (FALSE);
 }
 
-/* If we have a Scroll of Identify and an unidentified piece of gear/device,
- * read it on that item. Returns TRUE if a turn was spent. */
-static bool autoplay_identify_step(void)
+/* Read-only: if we have a Scroll of Identify and an unidentified piece of
+ * gear/device, return that item's pack index (else -1). */
+static int autoplay_find_unknown_id(void)
 {
-	int sc = autoplay_find_identify_scroll();
-	int i, it = -1;
-
-	if (sc < 0) return (FALSE);
-
+	int i;
+	if (autoplay_find_identify_scroll() < 0) return (-1);
 	for (i = 0; i < INVEN_PACK; i++)
 	{
 		object_type *o_ptr = &p_ptr->inventory[i];
 		if (!o_ptr->k_idx) continue;
-		if (autoplay_id_worthy(o_ptr)) { it = i; break; }
+		if (autoplay_id_worthy(o_ptr)) return (i);
 	}
-	if (it < 0) return (FALSE);
+	return (-1);
+}
+
+/* Identify pack item 'item' and spend one Scroll of Identify. One turn. */
+static void autoplay_do_identify(int item)
+{
+	int sc = autoplay_find_identify_scroll();
+	object_type *o_ptr = &p_ptr->inventory[item];
 
 	/* Identify the item (flags only; reorder is deferred, so sc stays valid). */
-	{
-		object_type *o_ptr = &p_ptr->inventory[it];
-		object_aware(o_ptr);
-		object_known(o_ptr);
-		o_ptr->ident |= (IDENT_MENTAL);
-	}
+	object_aware(o_ptr);
+	object_known(o_ptr);
+	o_ptr->ident |= (IDENT_MENTAL);
 
-	/* Consume one Scroll of Identify. */
-	inven_item_increase(sc, -1);
-	inven_item_optimize(sc);
+	if (sc >= 0)
+	{
+		inven_item_increase(sc, -1);
+		inven_item_optimize(sc);
+	}
 
 	p_ptr->update |= (PU_BONUS);
 	p_ptr->notice |= (PN_COMBINE | PN_REORDER);
 	p_ptr->window |= (PW_INVEN | PW_EQUIP | PW_PLAYER);
 	energy_use = 100;
-	msg_print("Autoplay: identifying an item.");
-	return (TRUE);
 }
 
 /* Slots the bot will auto-equip into (armour + weapon/shield). Rings, amulets,
@@ -6005,10 +6027,11 @@ static void autoplay_wield(int item)
 	energy_use = 100;
 }
 
-/* Wear a pack item that is strictly more valuable than what occupies its slot.
- * Only items we have some knowledge of (known or sensed) and that aren't cursed,
- * so we never blindly don an unknown cursed item. Returns TRUE if it equipped. */
-static bool autoplay_autoequip_step(void)
+/* Read-only: pack index of an item strictly more valuable than what occupies its
+ * slot (a worthwhile upgrade), or -1. Only items we have some knowledge of (known
+ * or sensed) and that aren't cursed, so we never blindly don an unknown cursed
+ * item. (object_value is 0 for cursed, so they never win anyway.) */
+static int autoplay_find_upgrade(void)
 {
 	int i;
 	for (i = 0; i < INVEN_PACK; i++)
@@ -6023,14 +6046,9 @@ static bool autoplay_autoequip_step(void)
 		slot = wield_slot(o_ptr);
 		if (!autoplay_slot_autoequippable(slot)) continue;
 
-		if (object_value(o_ptr) > object_value(&p_ptr->inventory[slot]))
-		{
-			autoplay_wield(i);
-			msg_print("Autoplay: equipping better gear.");
-			return (TRUE);
-		}
+		if (object_value(o_ptr) > object_value(&p_ptr->inventory[slot])) return (i);
 	}
-	return (FALSE);
+	return (-1);
 }
 
 /* ---- shopping & resupply (Phase 2b): tour the town's shops, sell junk, buy
@@ -6045,6 +6063,7 @@ static bool autoplay_autoequip_step(void)
 
 static bool autoplay_shopping = FALSE;     /* mid town-shopping trip */
 static byte autoplay_shop_visited[32];     /* by store index, this trip */
+static s32b autoplay_no_resupply_until = 0; /* don't go back to town before this turn */
 
 /* Units of (tval[,sval]) in the backpack. sval < 0 matches any sval. */
 static int autoplay_inv_count(int tval, int sval)
@@ -6150,11 +6169,16 @@ static void autoplay_shop_buy_needs(int town, int store)
 	autoplay_buy_one(town, store, TV_SCROLL, SV_SCROLL_IDENTIFY, AP_WANT_ID,
 	                 autoplay_inv_count(TV_SCROLL, SV_SCROLL_IDENTIFY));
 
-	/* Cure wounds: prefer the cheaper kinds toward the combined target. */
+	/* Cure wounds: buy whatever kind the store stocks, toward the combined target. */
 	autoplay_buy_one(town, store, TV_POTION, SV_POTION_CURE_LIGHT, AP_WANT_CURE, autoplay_count_cure());
 	autoplay_buy_one(town, store, TV_POTION, SV_POTION_CURE_SERIOUS, AP_WANT_CURE, autoplay_count_cure());
+	autoplay_buy_one(town, store, TV_POTION, SV_POTION_CURE_CRITICAL, AP_WANT_CURE, autoplay_count_cure());
 
+	/* Food: any staple this store carries. */
 	autoplay_buy_one(town, store, TV_FOOD, SV_FOOD_RATION, AP_WANT_FOOD, autoplay_count_food());
+	autoplay_buy_one(town, store, TV_FOOD, SV_FOOD_BISCUIT, AP_WANT_FOOD, autoplay_count_food());
+	autoplay_buy_one(town, store, TV_FOOD, SV_FOOD_JERKY, AP_WANT_FOOD, autoplay_count_food());
+	autoplay_buy_one(town, store, TV_FOOD, SV_FOOD_WAYBREAD, AP_WANT_FOOD, autoplay_count_food());
 
 	if (lite->k_idx && (lite->tval == TV_LITE) && (lite->sval == SV_LITE_LANTERN))
 		autoplay_buy_one(town, store, TV_FLASK, -1, AP_WANT_OIL, autoplay_inv_count(TV_FLASK, -1));
@@ -6244,8 +6268,11 @@ static bool autoplay_town_step(void)
 		autoplay_shop_visited[sidx] = 1;
 	}
 
-	/* All shops done -> recall back into the dungeon. */
+	/* All shops done -> recall back into the dungeon. Hold off on the next town
+	 * trip for a while so we actually dive rather than yo-yo to the shops (and
+	 * don't thrash if we couldn't buy what we wanted). */
 	autoplay_shopping = FALSE;
+	autoplay_no_resupply_until = turn + 3000;
 	dn = p_ptr->recall_dungeon;
 	if (dn <= 0) dn = DUNGEON_BARROW_DOWNS;
 	autoplay_set_recall_target(dn, (max_dlv[dn] > 0) ? max_dlv[dn] : 1);
@@ -6265,6 +6292,8 @@ static bool autoplay_town_step(void)
 /* In the dungeon, time to head back to town to restock? */
 static bool autoplay_needs_resupply(void)
 {
+	/* Cooldown after a town trip: stay in the dungeon for a while. */
+	if (turn < autoplay_no_resupply_until) return (FALSE);
 	if (autoplay_pack_full()) return (TRUE);
 	if (autoplay_inv_count(TV_SCROLL, SV_SCROLL_WORD_OF_RECALL) < 1) return (TRUE);
 	if (autoplay_count_cure() < 1) return (TRUE);
@@ -6272,19 +6301,276 @@ static bool autoplay_needs_resupply(void)
 	return (FALSE);
 }
 
+/* ---- decision / execution split ----
+ *
+ * autoplay_decide() runs the priority ladder and fills an action descriptor
+ * WITHOUT executing it (and with a human-readable English `advice`).
+ * autoplay_perform() executes a descriptor. The bot does perform(decide()); the
+ * Oracle just shows decide()->advice; and the Lua brain will later plug in at
+ * decide(). decide() is side-effect-light (only benign explore bookkeeping), so
+ * it is safe to call on demand for advice. */
+
+#define AP_NONE     0
+#define AP_QUAFF    1   /* drink heal potion (item)            */
+#define AP_FLEE     2   /* step away from threat at (y,x)       */
+#define AP_FIGHT    3   /* approach / melee enemy at (y,x)      */
+#define AP_TOWN     4   /* town shopping step                  */
+#define AP_EAT      5   /* eat food (item)                     */
+#define AP_LIGHT    6   /* tend the light source               */
+#define AP_IDENTIFY 7   /* identify unknown gear (item)        */
+#define AP_EQUIP    8   /* wear a better item (item)           */
+#define AP_RECALL   9   /* recall to town for resupply         */
+#define AP_REST     10  /* rest to recover                     */
+#define AP_EXPLORE  11  /* step toward exploration goal (y,x)  */
+#define AP_DESCEND  12  /* take the down stair underfoot       */
+#define AP_GOSTAIR  13  /* head to the down stair at (y,x)     */
+
+typedef struct autoplay_action autoplay_action;
+struct autoplay_action
+{
+	int type;
+	int item;          /* pack index for quaff/eat/identify/equip */
+	int y, x;          /* target cell                             */
+	bool pickup;       /* grab loot while stepping?               */
+	char advice[80];   /* English, human-readable                 */
+};
+
+/* Read-only: is (gy,gx) reachable over known terrain? (A* probe, frees path.) */
+static bool autoplay_can_reach(int gy, int gx)
+{
+	path_result *r = astar_find_path_cb(cur_hgt, cur_wid, explore_walkable_hook,
+	                                    NULL, p_ptr->py, p_ptr->px, gy, gx, ASTAR_8DIR_CUT);
+	bool ok = (r && (r->length >= 2));
+	if (r) path_free(r);
+	return (ok);
+}
+
+/* Read-only: is a fleeing step (away from (ty,tx), onto empty known floor)
+ * available right now? */
+static bool autoplay_can_flee(int ty, int tx)
+{
+	int cur = distance(p_ptr->py, p_ptr->px, ty, tx), d;
+	for (d = 1; d <= 9; d++)
+	{
+		int ny, nx;
+		if (d == 5) continue;
+		ny = p_ptr->py + ddy[d];
+		nx = p_ptr->px + ddx[d];
+		if (!in_bounds2(ny, nx)) continue;
+		if (!cave_floor_bold(ny, nx)) continue;
+		if (cave[ny][nx].m_idx) continue;
+		if (distance(ny, nx, ty, tx) > cur) return (TRUE);
+	}
+	return (FALSE);
+}
+
+static void autoplay_decide(autoplay_action *a)
+{
+	int chp = p_ptr->chp, mhp = p_ptr->mhp, ed = 0;
+	monster_type *enemy;
+	bool full = autoplay_pack_full();
+	int it;
+
+	a->type = AP_NONE;
+	a->item = -1;
+	a->y = a->x = 0;
+	a->pickup = !full;
+	strcpy(a->advice, "Nothing to do.");
+
+	if (p_ptr->confused || p_ptr->image || p_ptr->wild_mode)
+	{
+		strcpy(a->advice, "Wait -- you can't act sensibly right now.");
+		return;
+	}
+
+	explore_sync_seen();
+
+	/* 1. Heal when hurt and a potion is at hand (cheap cure first; big heal if low). */
+	if (chp * 2 <= mhp)
+	{
+		it = autoplay_find_heal(chp * 4 <= mhp);
+		if (it >= 0)
+		{
+			char nm[80];
+			object_desc(nm, &p_ptr->inventory[it], TRUE, 3);
+			a->type = AP_QUAFF; a->item = it;
+			strnfmt(a->advice, 80, "Quaff %s to heal.", nm);
+			return;
+		}
+	}
+
+	/* 2. A visible enemy: flee the dangerous/desperate cases, else close and melee.
+	 * Only commit to flee/fight when the move is actually possible, so an
+	 * unreachable foe behind a wall doesn't stall us -- we explore instead. */
+	enemy = autoplay_nearest_enemy(&ed);
+
+	/* On the surface (town/world) ignore any foe that isn't right next to us: out
+	 * there hostiles wander in and out of view and chasing them just stalls the
+	 * shopping/travel. We still defend against something adjacent. */
+	if (enemy && (dun_level == 0) &&
+	                ((ABS(enemy->fy - p_ptr->py) > 1) || (ABS(enemy->fx - p_ptr->px) > 1)))
+		enemy = NULL;
+
+	if (enemy)
+	{
+		bool dangerous = autoplay_too_dangerous(enemy);
+		bool desperate = (chp * 4 <= mhp) && (autoplay_find_heal(TRUE) < 0);
+		char nm[80];
+		monster_desc(nm, enemy, 0);
+		a->y = enemy->fy; a->x = enemy->fx;
+
+		if ((dangerous || desperate) && autoplay_can_flee(enemy->fy, enemy->fx))
+		{
+			a->type = AP_FLEE;
+			strnfmt(a->advice, 80, "Flee from %s.", nm);
+			return;
+		}
+		if (autoplay_can_reach(enemy->fy, enemy->fx))
+		{
+			a->type = AP_FIGHT;
+			strnfmt(a->advice, 80, "Fight %s.", nm);
+			return;
+		}
+		/* Unreachable: ignore it and carry on. */
+	}
+
+	/* 3. In town: shop, then recall back down. */
+	if (autoplay_in_town())
+	{
+		a->type = AP_TOWN;
+		strcpy(a->advice, "Shop in town for supplies, then recall down.");
+		return;
+	}
+
+	/* 4. Eat when hungry (any quiet moment; sooner if about to faint). */
+	if ((p_ptr->food < PY_FOOD_ALERT) && (!enemy || (p_ptr->food < PY_FOOD_FAINT)))
+	{
+		it = autoplay_find_food();
+		if (it >= 0)
+		{
+			char nm[80];
+			object_desc(nm, &p_ptr->inventory[it], TRUE, 3);
+			a->type = AP_EAT; a->item = it;
+			strnfmt(a->advice, 80, "Eat %s -- you are hungry.", nm);
+			return;
+		}
+	}
+
+	/* The rest only happen with no foe pressing. */
+	if (!enemy)
+	{
+		/* 5. Tend the light source. */
+		if (autoplay_light_needs())
+		{
+			a->type = AP_LIGHT;
+			strcpy(a->advice, "Tend your light source.");
+			return;
+		}
+
+		/* 6. Identify unknown gear with a scroll. */
+		it = autoplay_find_unknown_id();
+		if (it >= 0)
+		{
+			char nm[80];
+			object_desc(nm, &p_ptr->inventory[it], TRUE, 3);
+			a->type = AP_IDENTIFY; a->item = it;
+			strnfmt(a->advice, 80, "Identify %s.", nm);
+			return;
+		}
+
+		/* 7. Wear a better item. */
+		it = autoplay_find_upgrade();
+		if (it >= 0)
+		{
+			char nm[80];
+			object_desc(nm, &p_ptr->inventory[it], TRUE, 3);
+			a->type = AP_EQUIP; a->item = it;
+			strnfmt(a->advice, 80, "Equip %s.", nm);
+			return;
+		}
+
+		/* 8. Out of supplies: recall back to town (no progress lost). */
+		if ((dun_level > 0) && (p_ptr->word_recall == 0) && autoplay_needs_resupply())
+		{
+			a->type = AP_RECALL;
+			strcpy(a->advice, "Low on supplies -- recall to town.");
+			return;
+		}
+
+		/* 9. Rest to recover when wounded and not starving. */
+		if ((chp < mhp) && (p_ptr->food >= PY_FOOD_ALERT))
+		{
+			a->type = AP_REST;
+			strcpy(a->advice, "Rest to recover.");
+			return;
+		}
+	}
+
+	/* 10. Explore. */
+	{
+		int gy = 0, gx = 0;
+		bool got;
+		explore_no_items = full;
+		got = explore_pick_goal(&gy, &gx);
+		explore_no_items = FALSE;
+		if (got && autoplay_can_reach(gy, gx))
+		{
+			a->type = AP_EXPLORE; a->y = gy; a->x = gx;
+			strcpy(a->advice, "Keep exploring.");
+			return;
+		}
+	}
+
+	/* 11. Level cleared: descend, or head to a known down staircase. */
+	{
+		int here = cave[p_ptr->py][p_ptr->px].feat;
+		int sy = 0, sx = 0;
+		if ((here == FEAT_MORE) || (here == FEAT_WAY_MORE))
+		{
+			a->type = AP_DESCEND;
+			strcpy(a->advice, "Descend the staircase.");
+			return;
+		}
+		if (autoplay_find_downstair(&sy, &sx) && autoplay_can_reach(sy, sx))
+		{
+			a->type = AP_GOSTAIR; a->y = sy; a->x = sx;
+			strcpy(a->advice, "Head to the down staircase.");
+			return;
+		}
+	}
+
+	a->type = AP_NONE;
+	strcpy(a->advice, "Nothing left to do.");
+}
+
+static void autoplay_perform(autoplay_action *a)
+{
+	switch (a->type)
+	{
+	case AP_QUAFF:    autoplay_quaff(a->item); break;
+	case AP_EAT:      eat_food(a->item); break;
+	case AP_IDENTIFY: autoplay_do_identify(a->item); break;
+	case AP_EQUIP:    autoplay_wield(a->item); break;
+	case AP_FLEE:     (void)autoplay_flee_from(a->y, a->x); break;
+	case AP_FIGHT:    (void)autoplay_step_towards(a->y, a->x, a->pickup); break;
+	case AP_EXPLORE:  (void)autoplay_step_towards(a->y, a->x, a->pickup); break;
+	case AP_GOSTAIR:  (void)autoplay_step_towards(a->y, a->x, a->pickup); break;
+	case AP_DESCEND:  autoplay_descend(); break;
+	case AP_TOWN:     (void)autoplay_town_step(); break;
+	case AP_RECALL:   (void)autoplay_start_recall(); break;
+	case AP_REST:     resting = -1; p_ptr->redraw |= (PR_STATE); break;
+	default:          break;
+	}
+}
+
 /*
- * One auto-play decision. Called from process_player()'s energy loop. Evaluates
- * a borg-inspired priority ladder and performs exactly one turn's worth of work
- * (or stops auto-play when there is nothing left to do).
+ * One auto-play decision. Called from process_player()'s energy loop: decide the
+ * single best action and perform it (or stop when there is nothing left to do).
  */
 void autoplay_step(void)
 {
-	int chp, mhp, ed = 0;
-	monster_type *enemy;
-	bool full;
-	bool pickup;
+	autoplay_action a;
 
-	/* States where we can't sensibly drive: stop. */
 	if (p_ptr->confused || p_ptr->image || p_ptr->wild_mode)
 	{
 		autoplaying = 0;
@@ -6293,104 +6579,28 @@ void autoplay_step(void)
 		return;
 	}
 
-	/* Refresh our "seen" knowledge before any pathing/goal choice. */
-	explore_sync_seen();
+	autoplay_decide(&a);
 
-	chp = p_ptr->chp;
-	mhp = p_ptr->mhp;
-	full = autoplay_pack_full();
-	pickup = !full;                 /* don't grab loot when the pack is full */
-
-	/* 1. Heal when hurt and we have a potion (cheap cure first; big heal if low). */
-	if (chp * 2 <= mhp)
+	if (a.type == AP_NONE)
 	{
-		int it = autoplay_find_heal(chp * 4 <= mhp);
-		if (it >= 0) { autoplay_quaff(it); return; }
-	}
-
-	enemy = autoplay_nearest_enemy(&ed);
-
-	/* 2. Deal with a visible enemy: flee from danger, else close and melee.
-	 * We flee when (a) critically low with no cure left, or (b) the foe is too
-	 * dangerous to trade blows with (out-of-depth / a strong unique). If we can't
-	 * get away (cornered), we fight as a last resort instead of standing still. */
-	if (enemy)
-	{
-		bool dangerous = autoplay_too_dangerous(enemy);
-		bool desperate = (chp * 4 <= mhp) && (autoplay_find_heal(TRUE) < 0);
-
-		if ((dangerous || desperate) && autoplay_flee_from(enemy)) return;
-		if (autoplay_step_towards(enemy->fy, enemy->fx, pickup)) return;
-		/* Unreachable (wall between): fall through and keep exploring. */
-	}
-
-	/* In town (and safe): tour the shops -- sell junk, buy supplies -- then recall
-	 * back into the dungeon. */
-	if (autoplay_in_town()) { autoplay_town_step(); return; }
-
-	/* 3. Eat when hungry -- in a quiet moment, or sooner if about to faint. */
-	if ((p_ptr->food < PY_FOOD_ALERT) && (!enemy || (p_ptr->food < PY_FOOD_FAINT)))
-	{
-		int it = autoplay_find_food();
-		if (it >= 0) { eat_food(it); return; }
-	}
-
-	/* 4. Tend the light source (only when no foe is pressing). */
-	if (!enemy && autoplay_manage_light()) return;
-
-	/* 4b. Inventory upkeep in a quiet moment: identify unknown gear with scrolls,
-	 * then wear anything better than what we have on. */
-	if (!enemy && autoplay_identify_step()) return;
-	if (!enemy && autoplay_autoequip_step()) return;
-
-	/* 4c. Out of supplies in the dungeon: arm a recall back to town (we keep
-	 * playing until yanked). Recall returns us to max depth, so no progress lost.
-	 * Don't re-arm if one is already pending (recall_player would toggle it off). */
-	if (!enemy && (dun_level > 0) && (p_ptr->word_recall == 0) && autoplay_needs_resupply())
-	{
-		if (autoplay_start_recall())
-		{
-			msg_print("Autoplay: low on supplies; recalling to town.");
-			return;
-		}
-	}
-
-	/* 5. Rest to recover when wounded, safe (no foe) and not starving. The
-	 * resting branch of process_player() takes over until HP/SP are full or a
-	 * disturbance (e.g. a monster appearing) hands control back to us. */
-	if (!enemy && (chp < mhp) && (p_ptr->food >= PY_FOOD_ALERT))
-	{
-		resting = -1;
+		autoplaying = 0;
 		p_ptr->redraw |= (PR_STATE);
+		msg_print("Autoplay: nothing left to do.");
 		return;
 	}
 
-	/* 6. Explore the rest of the level (one step toward the nearest goal). While
-	 * the pack is full, stop detouring for items (gold still counts). */
-	{
-		int gy = 0, gx = 0;
-		bool got;
+	autoplay_perform(&a);
+}
 
-		explore_no_items = full;
-		got = explore_pick_goal(&gy, &gx);
-		explore_no_items = FALSE;
-
-		if (got && autoplay_step_towards(gy, gx, pickup)) return;
-	}
-
-	/* 7. Level cleared: descend if standing on a down stair, else head to one. */
-	{
-		int sy = 0, sx = 0;
-		int here = cave[p_ptr->py][p_ptr->px].feat;
-
-		if ((here == FEAT_MORE) || (here == FEAT_WAY_MORE)) { autoplay_descend(); return; }
-		if (autoplay_find_downstair(&sy, &sx) && autoplay_step_towards(sy, sx, pickup)) return;
-	}
-
-	/* Nothing left we can do. */
-	autoplaying = 0;
-	p_ptr->redraw |= (PR_STATE);
-	msg_print("Autoplay: nothing left to do.");
+/*
+ * The Oracle: say what auto-play WOULD do next, without doing it. Bound to a key
+ * (Ctrl-N) and the GTK2 Action menu; works whether or not auto-play is running.
+ */
+void do_cmd_oracle(void)
+{
+	autoplay_action a;
+	autoplay_decide(&a);
+	msg_format("Oracle: %s", a.advice);
 }
 
 /*
@@ -6417,6 +6627,7 @@ void do_cmd_autoplay(void)
 	exploring = 0;
 	autoplaying = 1;
 	autoplay_shopping = FALSE;     /* fresh shopping trip bookkeeping */
+	autoplay_no_resupply_until = 0;
 	p_ptr->redraw |= (PR_STATE);
 	msg_print("Autoplay started (press any key to stop).");
 }
