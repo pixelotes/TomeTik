@@ -167,6 +167,26 @@ Funciones nuevas que reusan los helpers `static` locales (`price_item`, `store_w
 4. **Stuck en el primer turno de un nivel nuevo** (no había nada "visto" porque la vista aún
    no estaba aplicada). **RESUELTO**: `update_stuff()` al inicio de `autoplay_decide` + fallback
    `AP_DELVE` (empuja hacia suelo real no visto con `travel_walkable_real`).
+5b. **Antorcha agotada → se quedaba parado, incluso con antorchas nuevas en la mochila.**
+   **RESUELTO (causa raíz: faltaba el `case AP_LIGHT` en `autoplay_perform`).** Al partir
+   decisión/ejecución (Paso B/Oráculo) se quedó fuera el caso de la luz: `autoplay_decide`
+   elegía `AP_LIGHT` con prioridad (paso 5, antes de explorar) y detectaba bien las antorchas
+   (`autoplay_find_torch` — verificado en vivo con gdb que devolvía el slot correcto), pero
+   `autoplay_perform` caía en `default: break;` → no equipaba **ni gastaba turno** →
+   `process_player` repetía la misma decisión en su `while (energy>=100)` = **bucle infinito**
+   (el "se queda parado"). Fix: `case AP_LIGHT: (void)autoplay_manage_light(); break;`.
+   Diagnóstico clave: el **Oráculo/mensaje de stall** decía "Tend your light source", que
+   apuntaba a ejecución, no a detección.
+   - **Guarda anti-stall** (`autoplay_step`): se pone `energy_use=0` antes de `perform`; si tras
+     ejecutar sigue a 0 (acción no-op) y no es `AP_REST` (que delega al subsistema de descanso),
+     se **para limpio nombrando la acción** en vez de colgarse. Convierte cualquier futuro no-op
+     en diagnóstico en vez de cuelgue.
+   - **Red de seguridad de luz**: `autoplay_no_spare_light()` / `autoplay_light_dark()` + **paso
+     5b**: sin luz y sin repuesto/aceite → `AP_RECALL` al pueblo (o `AP_WAIT` si recall pendiente)
+     ANTES de explorar; y `autoplay_needs_resupply` dispara viaje cuando la luz baja
+     (`timeout<500`) sin repuesto, **antes del gold-gate** (antorchas baratas, ir a oscuras es
+     letal). El `else` de `autoplay_shop_buy_needs` ya compra antorchas aunque no haya luz puesta.
+
 5. **[POR ARREGLAR BIEN] Selección de objetivo en oscuridad total.** El núcleo de exploración
    usa **fronteras vistas** (celda vista junto a una no vista); si el `@` **no ve nada**
    (habitación a oscuras / sin fuente de luz), no hay frontera → no elige objetivo → se
@@ -264,6 +284,10 @@ Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
 13. `feat(autoplay)`: **ruta/estrategia** (Paso C) — tabla `autoplay_route` en Lua (espina
     principal + raids de quest por nivel); `autoplay_objective` dirige el recall y el salto
     entre mazmorras al limpiar una.
+14. `fix(autoplay)`: **fijar escalera objetivo** (no oscilar entre equidistantes) — `autoplay_pick_stair`
+    se compromete con una y elige por alcanzabilidad A*, no línea recta.
+15. `fix(autoplay)`: **equipar/repostar luz** — faltaba el `case AP_LIGHT` en `autoplay_perform`
+    (regresión del split); + guarda anti-stall + red de seguridad de luz (recall si sin repuesto).
 
 ## Pendiente
 - **Fase 1b**: navegación por wilderness (descubrir mazmorras a pie) — recall cubre casi todo.
