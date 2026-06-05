@@ -6090,6 +6090,76 @@ static void autoplay_set_recall_target(int dungeon, int depth)
 	if (max_dlv[dungeon] < depth) max_dlv[dungeon] = depth;
 }
 
+/* ---- strategic route (Paso C): which dungeon to be in ----
+ *
+ * The plan lives in lib/scpt/autoplay.lua as autoplay_route (an ordered list of
+ * {dungeon, plev, depth}). We walk it and take the first entry we haven't
+ * finished (max_dlv[dungeon] < target depth) and are strong enough for
+ * (p_ptr->lev >= plev). Entries we're too weak for are skipped now and retried
+ * once we level up; finished ones are skipped for good. If Lua is absent or the
+ * list is exhausted we fall back to the deepest PRINCIPAL dungeon we may enter
+ * and haven't bottomed (Barrow -> Mirkwood -> Mordor -> Angband).
+ *
+ * Fills *dungeon and *depth (the depth to aim a town->dungeon recall at:
+ * wherever we left off, clamped into [mindepth, target]). If `name` is non-NULL
+ * it gets a human-readable label for the objective (Oracle / recall messages). */
+static void autoplay_objective(int *dungeon, int *depth, char *name)
+{
+	int i, best = -1, best_depth = 0, best_ridx = -1;
+
+	if (autoplay_lua_ok())
+	{
+		for (i = 1; i <= 200; i++)   /* 1-based; guard against a runaway list */
+		{
+			s32b dn = -1, plev = 0, tgt = 0;
+			if (!call_lua("autoplay_route_at", "(d)", "ddd", i, &dn, &plev, &tgt))
+				break;
+			if (dn < 0) break;                              /* end of the list */
+			if ((dn <= 0) || (dn >= max_d_idx)) continue;   /* wilderness/bogus */
+			if (max_dlv[dn] >= tgt) continue;               /* already finished */
+			if (p_ptr->lev < plev) continue;                /* too weak: retry later */
+			best = (int)dn; best_depth = (int)tgt; best_ridx = i;
+			break;
+		}
+	}
+
+	if (best < 0)
+	{
+		/* Fallback: deepest principal dungeon we may enter and haven't bottomed. */
+		for (i = 0; i < max_d_idx; i++)
+		{
+			if (!(d_info[i].flags1 & DF1_PRINCIPAL)) continue;
+			if (i == DUNGEON_WILDERNESS) continue;
+			if (p_ptr->lev < d_info[i].min_plev) continue;
+			if (max_dlv[i] >= d_info[i].maxdepth) continue;
+			if ((best < 0) || (d_info[i].mindepth > d_info[best].mindepth)) best = i;
+		}
+		if (best < 0) best = DUNGEON_BARROW_DOWNS;
+		best_depth = d_info[best].maxdepth;
+	}
+
+	*dungeon = best;
+
+	/* Aim the recall where we left off, but never above the target or below the
+	 * dungeon's entrance. */
+	{
+		int d = max_dlv[best];
+		if (d < d_info[best].mindepth) d = d_info[best].mindepth;
+		if (d > best_depth) d = best_depth;
+		if (d < 1) d = 1;
+		*depth = d;
+	}
+
+	if (name)
+	{
+		cptr nm = NULL;
+		if ((best_ridx > 0) && autoplay_lua_ok())
+			(void)call_lua("autoplay_route_name", "(d)", "s", best_ridx, &nm);
+		if (nm && nm[0]) strnfmt(name, 80, "%s", nm);
+		else strnfmt(name, 80, "%s", d_name + d_info[best].name);
+	}
+}
+
 /* Begin a recall: read a Word of Recall scroll if we have one, otherwise invoke
  * the recall directly (bot convenience -- the shopping phase will keep scrolls
  * stocked). Returns TRUE if a recall is now pending. The caller must ensure none
@@ -6420,7 +6490,7 @@ static bool autoplay_shop_neighbor(int sy, int sx, int *ny, int *nx)
 static bool autoplay_town_step(void)
 {
 	int town = p_ptr->town_num;
-	int sy = 0, sx = 0, sidx = -1, ny = 0, nx = 0, guard, dn;
+	int sy = 0, sx = 0, sidx = -1, ny = 0, nx = 0, guard;
 
 	if (!autoplay_shopping)
 	{
@@ -6477,14 +6547,21 @@ static bool autoplay_town_step(void)
 	 * yo-yo to the shops (and don't thrash if we couldn't buy what we wanted). */
 	autoplay_shopping = FALSE;
 	autoplay_no_resupply_until = turn + autoplay_cfg("resupply_cooldown", 3000);
-	dn = p_ptr->recall_dungeon;
-	if (dn <= 0) dn = DUNGEON_BARROW_DOWNS;
-	autoplay_set_recall_target(dn, (max_dlv[dn] > 0) ? max_dlv[dn] : 1);
 
-	if (autoplay_start_recall())
+	/* Strategic plan (Paso C): recall to wherever the route says we should be,
+	 * not just back to the last dungeon. */
 	{
-		msg_print("Autoplay: done shopping, recalling down.");
-		return (TRUE);
+		int obj_dn = 0, obj_depth = 0;
+		char obj_name[80];
+		autoplay_objective(&obj_dn, &obj_depth, obj_name);
+		autoplay_set_recall_target(obj_dn, obj_depth);
+
+		if (autoplay_start_recall())
+		{
+			msg_format("Autoplay: done shopping, recalling to %s (L%d).",
+			           obj_name, obj_depth);
+			return (TRUE);
+		}
 	}
 
 	autoplaying = 0;
@@ -6798,6 +6875,30 @@ static void autoplay_decide(autoplay_action *a)
 			a->type = AP_GOSTAIR; a->y = sy; a->x = sx;
 			strcpy(a->advice, "Head to the down staircase.");
 			return;
+		}
+
+		/* 11b. Route says move on? If this level is exhausted and the strategic
+		 * objective (Paso C) is a *different* dungeon -- this one is cleared, or
+		 * we're off-plan -- recall to town and switch, rather than scumming this
+		 * dungeon forever. (If we're still meant to be here, fall through and
+		 * scum to regenerate a level with a way down.) */
+		if (dun_level > 0)
+		{
+			int obj_dn = 0, obj_depth = 0;
+			char obj_name[80];
+			autoplay_objective(&obj_dn, &obj_depth, obj_name);
+			if (obj_dn != dungeon_type)
+			{
+				if (p_ptr->word_recall > 0)
+				{
+					a->type = AP_WAIT;
+					strnfmt(a->advice, 80, "Cleared -- waiting for recall (next: %s).", obj_name);
+					return;
+				}
+				a->type = AP_RECALL;
+				strnfmt(a->advice, 80, "Cleared this dungeon -- recall to town (next: %s).", obj_name);
+				return;
+			}
 		}
 
 		/* 12. Dead end: nothing left to explore and no way down. Scum the level --
