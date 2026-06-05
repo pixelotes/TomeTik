@@ -309,6 +309,12 @@ Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
     arrows/bolts que no podemos disparar), y flasks de oil (no si son fuel de linterna).
     Economía: `autoplay_shop_buy_needs` compra flasks de oil para todos (lanzables) y **munición**
     del lanzador (`AP_WANT_AMMO=40`) si hay arco. *Pendiente v3*: recoger ammo tirado del suelo.
+- **Gestión de religión / piedad (PRIO BAJA)**: el bot hoy ignora al dios. La piedad
+  (`p_ptr->grace`) se drena sola con el tiempo para casi todos los dioses (Manwë/Tulkas −4,
+  Melkor −8, Yavanna −5 cada 300-400 game-turns; Eru sube) — es WAI de ToME, NO un bug.
+  Tarea: que el bot **rece / haga sacrificios para que la piedad no caiga por debajo de 0**
+  (la piedad negativa = enfado del dios, penalizaciones). Mientras se mantenga ≥0 no urge.
+  Subir Sabiduría también reduce el decay.
 - **Fase 1b**: navegación por wilderness (descubrir mazmorras a pie) — recall cubre casi todo.
 - **Tabla de amenaza real — HECHO**: `autoplay_monster_danger(m)` = daño esperado/turno
   (suma de blows × ~60% acierto + extra por casters/breathers según HP×freq + bump por
