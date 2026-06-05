@@ -7103,10 +7103,16 @@ void autoplay_step(void)
 	energy_use = 0;
 	autoplay_perform(&a);
 
-	/* AP_REST doesn't spend energy here -- it hands off to the resting subsystem
-	 * (resting = -1), which is dispatched ahead of autoplay and burns the turns.
-	 * Every other action must consume a turn; if one didn't, stop cleanly. */
-	if (autoplaying && (energy_use == 0) && (a.type != AP_REST))
+	/* Some actions legitimately don't leave energy spent yet still make progress:
+	 *   - AP_REST hands off to the resting subsystem (resting = -1), dispatched
+	 *     ahead of autoplay, which burns the turns.
+	 *   - Taking stairs (AP_ASCEND/AP_DESCEND) sets p_ptr->leaving and regenerates
+	 *     the level; do_cmd_go_up even zeroes energy_use on purpose (so monsters
+	 *     don't get to act first). That's a level change, not a stall.
+	 * Any other action must consume a turn; if one didn't it's a genuine no-op (a
+	 * step that found no route, a missing perform case, ...) -- stop cleanly so
+	 * process_player's `while (energy >= 100)` loop can't spin on it forever. */
+	if (autoplaying && (energy_use == 0) && !p_ptr->leaving && (a.type != AP_REST))
 	{
 		autoplaying = 0;
 		p_ptr->redraw |= (PR_STATE);
