@@ -5623,6 +5623,25 @@ static void autoplay_clear_stuck(void) { ap_stuck_y = ap_stuck_x = -1; ap_stuck_
 
 static bool autoplay_too_dangerous(monster_type *m);   /* fwd: threat verdict */
 
+/* A foe not worth chasing: an erratic bouncer (fruit bats etc. -- RAND_25/50,
+ * impossible to corner) or something that simply can't hurt us (no melee blows
+ * AND casts nothing). We still hit one that wanders adjacent; we just won't run
+ * after it across the level (the silliest chases) or waste ammo on it. */
+static bool autoplay_low_value_foe(monster_type *m)
+{
+	monster_race *r_ptr = &r_info[m->r_idx];
+	int b;
+	bool has_blow = FALSE;
+
+	if (r_ptr->flags1 & (RF1_RAND_25 | RF1_RAND_50)) return (TRUE);
+
+	for (b = 0; b < 4; b++)
+		if (r_ptr->blow[b].method) { has_blow = TRUE; break; }
+
+	if (!has_blow && !r_ptr->freq_inate && !r_ptr->freq_spell) return (TRUE);
+	return (FALSE);
+}
+
 /* Nearest VISIBLE real enemy worth engaging; NULL if none. Skips a foe we gave
  * up chasing, a frightened one fleeing in the distance, and one judged too
  * dangerous to melee (paralysers, out-of-depth) -- so the bot routes past those
@@ -5649,9 +5668,11 @@ static monster_type *autoplay_nearest_enemy(int *dist)
 
 		d = distance(p_ptr->py, p_ptr->px, m_ptr->fy, m_ptr->fx);
 
-		/* Ignore the give-up target and frightened fleers -- unless adjacent. */
+		/* Ignore the give-up target, frightened fleers, and low-value foes
+		 * (erratic bats / harmless things) -- unless they're adjacent. */
 		if ((i == ap_ignore_idx) && (d > 1)) continue;
 		if (m_ptr->monfear && (d > 1)) continue;
+		if (autoplay_low_value_foe(m_ptr) && (d > 1)) continue;
 
 		/* Never melee a foe judged too dangerous (paralyser, out-of-depth): the
 		 * bot routes past it instead of dying on its gaze/claws. */
@@ -5846,6 +5867,7 @@ static monster_type *autoplay_nearest_ranged(void)
 		d = distance(p_ptr->py, p_ptr->px, m_ptr->fy, m_ptr->fx);
 		if (d <= 1) continue;                  /* adjacent: melee/flee handles it */
 		if (m_ptr->monfear) continue;          /* let fleers flee */
+		if (autoplay_low_value_foe(m_ptr)) continue;   /* don't waste ammo on bats/harmless */
 		if (!projectable(p_ptr->py, p_ptr->px, m_ptr->fy, m_ptr->fx)) continue;
 		if (!best || (d < bd)) { best = m_ptr; bd = d; }
 	}
