@@ -139,10 +139,30 @@ Funciones nuevas que reusan los helpers `static` locales (`price_item`, `store_w
   `autoplay_town_step` (tour de tiendas → recall abajo), `autoplay_needs_resupply` (disparo
   en mazmorra → recall arriba). Venta **agresiva**: vende todo lo no-equipable y no-consumible
   de la lista. Navegación: **camina** a cada tienda.
-- **`autoplay_step()`** — escalera de prioridades (1 acción/turno):
-  curar → combate/huida → (en pueblo) recall a mazmorra → comer → luz → identificar →
-  auto-equipar → descansar → explorar → bajar escaleras.
+- Split decisión/ejecución + oráculo: descriptor `autoplay_action` (`AP_*`),
+  `autoplay_decide()` (rellena acción + `advice` en INGLÉS, sin ejecutar; probes read-only
+  `autoplay_can_reach`/`autoplay_can_flee`), `autoplay_perform()` (ejecuta),
+  `autoplay_step()` = decide→perform, y `do_cmd_oracle()` (tecla `^N` + menú; dice qué haría
+  sin hacerlo). Helpers read-only para el split: `autoplay_light_needs`,
+  `autoplay_find_unknown_id`+`autoplay_do_identify`, `autoplay_find_upgrade`,
+  `autoplay_flee_from(ty,tx)` (antes tomaba el monstruo).
 - **`do_cmd_autoplay()`** — arranca (cancela explore/travel, `autoplaying=1`).
+- Oráculo: `externs.h` `do_cmd_oracle`; `dungeon.c` `case KTRL('N')`; `main-gtk2.c` menú
+  "Oracle: advice (^N)". Mensajes del oráculo **en inglés**.
+
+## Issues conocidas / por arreglar (reportadas al probar)
+1. **Superficie: se quedaba stuck** con enemigos que entran/salen de vista. **Mitigado**:
+   en `dun_level==0` se ignora cualquier foe no adyacente (`autoplay_decide`); solo defiende
+   si está pegado.
+2. **Compras compulsivas / recorría tiendas sin comprar casi nada.** **Mitigado**: cooldown
+   `autoplay_no_resupply_until` (turn+3000) tras cada viaje, y se amplían los svals de compra
+   (cura CLW/CSW/CCW, varias comidas). **PENDIENTE investigar la causa raíz** del "no compra":
+   ¿oro insuficiente?, ¿el stock de la tienda no tiene el item en ese momento?, ¿no alcanza
+   las tiendas por pathing en el pueblo? Verificar `store_bot_find/buy` con logging.
+3. **No para inmediatamente al pulsar tecla.** Probable latencia de UI: el delay de animación
+   (~150 ms/paso en la rama autoplay de `process_player`) + input bufferizado; el abort se
+   chequea al inicio del siguiente `process_player`. **ABIERTO**: posible mitigación — sondear
+   `inkey_scan` en la rama autoplay antes del delay, o bajar el delay.
 
 ## Historial de commits (lógicos)
 
@@ -157,6 +177,8 @@ Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
 8. `fix(autoplay)`: no recoger esqueletos (TV_SKELETON); `docs`: estas notas.
 9. `feat(autoplay)`: Fase 2b — tiendas (vender agresivo / comprar suministros / resupply),
    `store.c` API no-interactiva + flujo de pueblo en cmd1.c.
+10. `feat(autoplay)`: split decisión/ejecución + **Oráculo** (^N, consejos en inglés); fixes:
+    ignorar foes no adyacentes en superficie, cooldown de resupply, ampliar svals de compra.
 
 ## Pendiente
 - **Cerebro Lua**: ruta/estrategia ("a qué mazmorra ir") como datos; bindings tolua. Modelo
