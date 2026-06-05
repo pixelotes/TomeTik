@@ -19,6 +19,12 @@ autoplay_config_table =
 	resupply_cooldown = 3000, -- turns to dive before another town trip
 	avoid_paralyze    = 1,    -- 1 = don't melee paralysers without Free Action
 	                          --     (floating eyes etc. -- a melee death trap)
+	want_ammo         = 40,   -- missiles to keep for the launcher
+	-- threat model (real danger = expected damage/turn):
+	danger_turns      = 2,    -- avoid meleeing a foe that could kill us in this
+	                          --   many turns (single-monster "too dangerous")
+	pack_flee_turns   = 4,    -- flee a PACK if its combined damage/turn * this >= HP
+	cluster_range     = 8,    -- tiles around us that count as the same pack
 }
 
 function autoplay_config(key)
