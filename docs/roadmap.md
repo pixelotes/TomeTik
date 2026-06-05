@@ -8,7 +8,7 @@ Mejoras y objetivos futuros (ToME 2.2.2 + tiles, port moderno en Docker).
 - [x] **Arreglar el cambio dinámico** isométrico ⇄ tiles 2D ⇄ ASCII.
 - [X] **Integrar los tiles sueltos en `do_extra.png`** (building_block.png,
   grass_flowers.png, rubble.png → al atlas, en vez de PNGs individuales).
-- [ ] **Mejorar el rendimiento del redibujado iso** (hoy se repinta la escena
+- [x] **Mejorar el rendimiento del redibujado iso** (hoy se repinta la escena
   entera en cada FRESH y en cada cambio de celda en hover).
 
 ## Ratón
