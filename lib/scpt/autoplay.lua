@@ -17,6 +17,8 @@ autoplay_config_table =
 	min_gold          = 100,  -- below this, don't bother shopping (keep diving)
 	chase_turns       = 15,   -- give up chasing a foe after this many turns
 	resupply_cooldown = 3000, -- turns to dive before another town trip
+	avoid_paralyze    = 1,    -- 1 = don't melee paralysers without Free Action
+	                          --     (floating eyes etc. -- a melee death trap)
 }
 
 function autoplay_config(key)
