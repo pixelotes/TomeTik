@@ -735,6 +735,7 @@ extern void do_cmd_explore(void);
 extern void explore_step(void);
 extern void do_cmd_autoplay(void);
 extern void autoplay_step(void);
+extern void do_cmd_oracle(void);
 extern void step_effects(int y, int x, int do_pickup);
 extern void do_cmd_pet(void);
 extern bool do_cmd_integrate_body(void);
