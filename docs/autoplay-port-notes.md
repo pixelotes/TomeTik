@@ -154,11 +154,17 @@ Funciones nuevas que reusan los helpers `static` locales (`price_item`, `store_w
 1. **Superficie: se quedaba stuck** con enemigos que entran/salen de vista. **Mitigado**:
    en `dun_level==0` se ignora cualquier foe no adyacente (`autoplay_decide`); solo defiende
    si está pegado.
-2. **Compras compulsivas / recorría tiendas sin comprar casi nada.** **Mitigado**: cooldown
-   `autoplay_no_resupply_until` (turn+3000) tras cada viaje, y se amplían los svals de compra
-   (cura CLW/CSW/CCW, varias comidas). **PENDIENTE investigar la causa raíz** del "no compra":
-   ¿oro insuficiente?, ¿el stock de la tienda no tiene el item en ese momento?, ¿no alcanza
-   las tiendas por pathing en el pueblo? Verificar `store_bot_find/buy` con logging.
+2. **Compras compulsivas / recorría tiendas sin comprar casi nada.** **RESUELTO (D v1)**:
+   la causa de "compra poco" era que SOLO compraba consumibles (cura/comida/ID/recall/luz);
+   no tocaba armas ni armaduras. `autoplay_buy_best_gear` (cmd1.c) ahora compra, tras los
+   consumibles, la mayor mejora de equipo del stock (`object_value` > la del slot, no maldita,
+   asequible dejando reserva `min_gold`) vía `store_bot_price`+`store_bot_buy`; el pase de
+   equipar la viste. Cooldown `autoplay_no_resupply_until` (turn+3000) sigue evitando el
+   yo-yo. *Pendiente v2*: stock/pathing edge-cases, black market, vender mejor.
+2b. **Persecuciones tontas (fruit bats, etc.).** **RESUELTO**: `autoplay_low_value_foe` =
+   erráticos (`RF1_RAND_25|50`, imposibles de acorralar) o inofensivos (sin blows y sin
+   spells). `autoplay_nearest_enemy` los salta si no son adyacentes; `autoplay_nearest_ranged`
+   los salta siempre (no malgastar munición en un murciélago que rebota).
 3. **No para inmediatamente al pulsar tecla/clic.** **RESUELTO**: intercept en
    `keypress_event_handler`/`button_press_event_handler` (main-gtk2.c) — cualquier tecla/clic
    para el bot al instante y se descarta; y `TERM_XTRA_DELAY` ahora drena TODOS los eventos
