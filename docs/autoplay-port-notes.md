@@ -159,10 +159,29 @@ Funciones nuevas que reusan los helpers `static` locales (`price_item`, `store_w
    (cura CLW/CSW/CCW, varias comidas). **PENDIENTE investigar la causa raíz** del "no compra":
    ¿oro insuficiente?, ¿el stock de la tienda no tiene el item en ese momento?, ¿no alcanza
    las tiendas por pathing en el pueblo? Verificar `store_bot_find/buy` con logging.
-3. **No para inmediatamente al pulsar tecla.** Probable latencia de UI: el delay de animación
-   (~150 ms/paso en la rama autoplay de `process_player`) + input bufferizado; el abort se
-   chequea al inicio del siguiente `process_player`. **ABIERTO**: posible mitigación — sondear
-   `inkey_scan` en la rama autoplay antes del delay, o bajar el delay.
+3. **No para inmediatamente al pulsar tecla/clic.** **RESUELTO**: intercept en
+   `keypress_event_handler`/`button_press_event_handler` (main-gtk2.c) — cualquier tecla/clic
+   para el bot al instante y se descarta; y `TERM_XTRA_DELAY` ahora drena TODOS los eventos
+   GTK (`DrainEvents`) alrededor del `usleep` (antes solo `inkey` drenaba 1 evento/iter, y un
+   clic quedaba detrás de la avalancha de eventos de movimiento → no se procesaba a tiempo).
+4. **Stuck en el primer turno de un nivel nuevo** (no había nada "visto" porque la vista aún
+   no estaba aplicada). **RESUELTO**: `update_stuff()` al inicio de `autoplay_decide` + fallback
+   `AP_DELVE` (empuja hacia suelo real no visto con `travel_walkable_real`).
+5. **[POR ARREGLAR BIEN] Selección de objetivo en oscuridad total.** El núcleo de exploración
+   usa **fronteras vistas** (celda vista junto a una no vista); si el `@` **no ve nada**
+   (habitación a oscuras / sin fuente de luz), no hay frontera → no elige objetivo → se
+   bloquea. Es un **problema lógico del algoritmo de selección de objetivo**. *Workaround*
+   actual: equipar antorcha antes del recall (ver abajo) + `AP_DELVE` (terreno real) lo
+   mitiga, pero una sala **cerrada con solo puertas secretas** (necesita buscar) o el caso de
+   cero luz siguen siendo flojos. Fix propio: que la selección de objetivo no dependa solo de
+   "visto" (p.ej. delve siempre como objetivo válido, o buscar puertas secretas).
+6. **Bot perseguía a perpetuidad a evasivos / NPCs (fruit bat, Blubbering idiot, Farmer
+   Maggot).** **RESUELTO**: give-up por **turnos totales** (`ap_chase_turns > 15` ⇒ se mete en
+   `ap_ignore_idx` y explora; el progreso-based reseteaba con la fluctuación de distancia).
+   `autoplay_nearest_enemy` también ignora `monfear` (asustados) salvo si están adyacentes.
+   **Workaround de equipo:** en `autoplay_town_step`, antes del recall-abajo, se identifica +
+   auto-equipa + asegura luz (descender ya pertrechado, no depender del upkeep in-dungeon que
+   se gatea con `!enemy`).
 
 ## Historial de commits (lógicos)
 
