@@ -6033,6 +6033,245 @@ static bool autoplay_autoequip_step(void)
 	return (FALSE);
 }
 
+/* ---- shopping & resupply (Phase 2b): tour the town's shops, sell junk, buy
+ * supplies, then recall back down. Targets below are tunable. ---- */
+
+#define AP_WANT_WOR    3   /* Word of Recall scrolls to keep */
+#define AP_WANT_CURE   5   /* cure-wounds potions to keep    */
+#define AP_WANT_FOOD   5   /* staple food to keep            */
+#define AP_WANT_ID     5   /* Scroll of Identify to keep     */
+#define AP_WANT_OIL    3   /* flasks of oil (if lantern)     */
+#define AP_WANT_TORCH  2   /* spare torches (if torch)       */
+
+static bool autoplay_shopping = FALSE;     /* mid town-shopping trip */
+static byte autoplay_shop_visited[32];     /* by store index, this trip */
+
+/* Units of (tval[,sval]) in the backpack. sval < 0 matches any sval. */
+static int autoplay_inv_count(int tval, int sval)
+{
+	int i, n = 0;
+	for (i = 0; i < INVEN_PACK; i++)
+	{
+		object_type *o_ptr = &p_ptr->inventory[i];
+		if (!o_ptr->k_idx) continue;
+		if (o_ptr->tval != tval) continue;
+		if ((sval >= 0) && (o_ptr->sval != sval)) continue;
+		n += o_ptr->number;
+	}
+	return (n);
+}
+
+static bool autoplay_is_cure(int sval)
+{
+	return ((sval == SV_POTION_CURE_LIGHT) || (sval == SV_POTION_CURE_SERIOUS) ||
+	        (sval == SV_POTION_CURE_CRITICAL) || (sval == SV_POTION_HEALING) ||
+	        (sval == SV_POTION_STAR_HEALING) || (sval == SV_POTION_LIFE));
+}
+
+static bool autoplay_is_staple(int sval)
+{
+	return ((sval == SV_FOOD_RATION) || (sval == SV_FOOD_BISCUIT) ||
+	        (sval == SV_FOOD_JERKY) || (sval == SV_FOOD_WAYBREAD) ||
+	        (sval == SV_FOOD_SLIME_MOLD));
+}
+
+static int autoplay_count_cure(void)
+{
+	int i, n = 0;
+	for (i = 0; i < INVEN_PACK; i++)
+	{
+		object_type *o_ptr = &p_ptr->inventory[i];
+		if (o_ptr->k_idx && (o_ptr->tval == TV_POTION) && autoplay_is_cure(o_ptr->sval))
+			n += o_ptr->number;
+	}
+	return (n);
+}
+
+static int autoplay_count_food(void)
+{
+	int i, n = 0;
+	for (i = 0; i < INVEN_PACK; i++)
+	{
+		object_type *o_ptr = &p_ptr->inventory[i];
+		if (o_ptr->k_idx && (o_ptr->tval == TV_FOOD) && autoplay_is_staple(o_ptr->sval))
+			n += o_ptr->number;
+	}
+	return (n);
+}
+
+/* Keep this pack item (never sell it)? Equippable gear (a possible upgrade or
+ * worth identifying), our consumables, and lamp oil are kept; everything else is
+ * fair game to sell (aggressive). */
+static bool autoplay_keep_item(object_type *o_ptr)
+{
+	if (wield_slot(o_ptr) >= INVEN_WIELD) return (TRUE);
+
+	switch (o_ptr->tval)
+	{
+	case TV_POTION: return (autoplay_is_cure(o_ptr->sval));
+	case TV_SCROLL: return ((o_ptr->sval == SV_SCROLL_WORD_OF_RECALL) ||
+		                        (o_ptr->sval == SV_SCROLL_IDENTIFY));
+	case TV_FOOD:   return (autoplay_is_staple(o_ptr->sval));
+	case TV_FLASK:  return (TRUE);
+	}
+	return (FALSE);
+}
+
+/* Sell every non-keep pack item this store will buy. */
+static void autoplay_shop_sell_junk(int town, int store)
+{
+	int i, guard = 0;
+	for (i = 0; i < INVEN_PACK; )
+	{
+		object_type *o_ptr = &p_ptr->inventory[i];
+		if (!o_ptr->k_idx) { i++; continue; }
+		if (autoplay_keep_item(o_ptr)) { i++; continue; }
+		if (store_bot_sell(town, store, i) <= 0) { i++; continue; }
+		/* sold one unit; stay on i to clear the rest of the stack */
+		if (++guard > 500) break;
+	}
+}
+
+/* Buy the shortfall of one supply type if this store stocks it. */
+static void autoplay_buy_one(int town, int store, int tval, int sval, int target, int have)
+{
+	int need = target - have, idx;
+	if (need <= 0) return;
+	idx = store_bot_find(town, store, tval, sval);
+	if (idx >= 0) (void)store_bot_buy(town, store, idx, need);
+}
+
+static void autoplay_shop_buy_needs(int town, int store)
+{
+	object_type *lite = &p_ptr->inventory[INVEN_LITE];
+
+	autoplay_buy_one(town, store, TV_SCROLL, SV_SCROLL_WORD_OF_RECALL, AP_WANT_WOR,
+	                 autoplay_inv_count(TV_SCROLL, SV_SCROLL_WORD_OF_RECALL));
+	autoplay_buy_one(town, store, TV_SCROLL, SV_SCROLL_IDENTIFY, AP_WANT_ID,
+	                 autoplay_inv_count(TV_SCROLL, SV_SCROLL_IDENTIFY));
+
+	/* Cure wounds: prefer the cheaper kinds toward the combined target. */
+	autoplay_buy_one(town, store, TV_POTION, SV_POTION_CURE_LIGHT, AP_WANT_CURE, autoplay_count_cure());
+	autoplay_buy_one(town, store, TV_POTION, SV_POTION_CURE_SERIOUS, AP_WANT_CURE, autoplay_count_cure());
+
+	autoplay_buy_one(town, store, TV_FOOD, SV_FOOD_RATION, AP_WANT_FOOD, autoplay_count_food());
+
+	if (lite->k_idx && (lite->tval == TV_LITE) && (lite->sval == SV_LITE_LANTERN))
+		autoplay_buy_one(town, store, TV_FLASK, -1, AP_WANT_OIL, autoplay_inv_count(TV_FLASK, -1));
+	else
+		autoplay_buy_one(town, store, TV_LITE, SV_LITE_TORCH, AP_WANT_TORCH,
+		                 autoplay_inv_count(TV_LITE, SV_LITE_TORCH));
+}
+
+/* Nearest town shop tile we haven't done this trip (skipping the Home). */
+static bool autoplay_find_shop(int *sy, int *sx, int *sidx)
+{
+	int y, x, bestd = -1;
+	for (y = 0; y < cur_hgt; y++)
+	{
+		for (x = 0; x < cur_wid; x++)
+		{
+			int idx, d;
+			if (cave[y][x].feat != FEAT_SHOP) continue;
+			idx = cave[y][x].special;
+			if ((idx < 0) || (idx >= 32)) continue;
+			if (idx == STORE_HOME) continue;
+			if (autoplay_shop_visited[idx]) continue;
+			d = distance(p_ptr->py, p_ptr->px, y, x);
+			if ((bestd < 0) || (d < bestd)) { bestd = d; *sy = y; *sx = x; *sidx = idx; }
+		}
+	}
+	return (bestd >= 0);
+}
+
+/* A walkable floor tile next to the shop entrance (we transact from there rather
+ * than step onto the entrance, which would open the interactive store UI). */
+static bool autoplay_shop_neighbor(int sy, int sx, int *ny, int *nx)
+{
+	static const int dy8[8] = { -1, 1, 0, 0, -1, -1, 1, 1 };
+	static const int dx8[8] = { 0, 0, -1, 1, -1, 1, -1, 1 };
+	int d, bestd = -1;
+	for (d = 0; d < 8; d++)
+	{
+		int y = sy + dy8[d], x = sx + dx8[d], dd;
+		if (!in_bounds2(y, x)) continue;
+		if (!explore_walkable_hook(y, x, NULL)) continue;
+		dd = distance(p_ptr->py, p_ptr->px, y, x);
+		if ((bestd < 0) || (dd < bestd)) { bestd = dd; *ny = y; *nx = x; }
+	}
+	return (bestd >= 0);
+}
+
+/* One step of the town routine: walk to the next shop and trade there; when all
+ * shops are done, recall back into the dungeon. Always spends the turn. */
+static bool autoplay_town_step(void)
+{
+	int town = p_ptr->town_num;
+	int sy = 0, sx = 0, sidx = -1, ny = 0, nx = 0, guard, dn;
+
+	if (!autoplay_shopping)
+	{
+		int k;
+		autoplay_shopping = TRUE;
+		for (k = 0; k < 32; k++) autoplay_shop_visited[k] = 0;
+	}
+
+	/* Recall down already armed: pass turns until we're yanked. */
+	if (p_ptr->word_recall > 0) { energy_use = 100; return (TRUE); }
+
+	for (guard = 0; guard < 40; guard++)
+	{
+		int dy, dx;
+		if (!autoplay_find_shop(&sy, &sx, &sidx)) break;
+
+		dy = sy - p_ptr->py; dx = sx - p_ptr->px;
+		if ((ABS(dy) <= 1) && (ABS(dx) <= 1))
+		{
+			/* Standing next to the shop: trade. */
+			store_bot_refresh(town, sidx);
+			autoplay_shop_sell_junk(town, sidx);
+			autoplay_shop_buy_needs(town, sidx);
+			autoplay_shop_visited[sidx] = 1;
+			energy_use = 100;
+			msg_print("Autoplay: shopping.");
+			return (TRUE);
+		}
+
+		if (autoplay_shop_neighbor(sy, sx, &ny, &nx) && autoplay_step_towards(ny, nx, FALSE))
+			return (TRUE);
+
+		/* Can't reach it: skip and try the next shop. */
+		autoplay_shop_visited[sidx] = 1;
+	}
+
+	/* All shops done -> recall back into the dungeon. */
+	autoplay_shopping = FALSE;
+	dn = p_ptr->recall_dungeon;
+	if (dn <= 0) dn = DUNGEON_BARROW_DOWNS;
+	autoplay_set_recall_target(dn, (max_dlv[dn] > 0) ? max_dlv[dn] : 1);
+
+	if (autoplay_start_recall())
+	{
+		msg_print("Autoplay: done shopping, recalling down.");
+		return (TRUE);
+	}
+
+	autoplaying = 0;
+	p_ptr->redraw |= (PR_STATE);
+	msg_print("Autoplay: stuck in town.");
+	return (TRUE);
+}
+
+/* In the dungeon, time to head back to town to restock? */
+static bool autoplay_needs_resupply(void)
+{
+	if (autoplay_pack_full()) return (TRUE);
+	if (autoplay_inv_count(TV_SCROLL, SV_SCROLL_WORD_OF_RECALL) < 1) return (TRUE);
+	if (autoplay_count_cure() < 1) return (TRUE);
+	if (autoplay_count_food() < 1) return (TRUE);
+	return (FALSE);
+}
+
 /*
  * One auto-play decision. Called from process_player()'s energy loop. Evaluates
  * a borg-inspired priority ladder and performs exactly one turn's worth of work
@@ -6085,34 +6324,9 @@ void autoplay_step(void)
 		/* Unreachable (wall between): fall through and keep exploring. */
 	}
 
-	/* In town (and safe): dive back into the dungeon via recall. The choice of
-	 * dungeon/depth is the seam the Lua brain will own; for now continue in the
-	 * dungeon we last recalled from, else a sensible early one (Barrow-downs). */
-	if (autoplay_in_town())
-	{
-		int dn;
-
-		if (p_ptr->word_recall > 0)
-		{
-			energy_use = 100;          /* recall pending: pass turns until yanked */
-			return;
-		}
-
-		dn = p_ptr->recall_dungeon;
-		if (dn <= 0) dn = DUNGEON_BARROW_DOWNS;
-		autoplay_set_recall_target(dn, (max_dlv[dn] > 0) ? max_dlv[dn] : 1);
-
-		if (autoplay_start_recall())
-		{
-			msg_print("Autoplay: recalling into the dungeon.");
-			return;
-		}
-
-		autoplaying = 0;
-		p_ptr->redraw |= (PR_STATE);
-		msg_print("Autoplay: no way to reach the dungeon.");
-		return;
-	}
+	/* In town (and safe): tour the shops -- sell junk, buy supplies -- then recall
+	 * back into the dungeon. */
+	if (autoplay_in_town()) { autoplay_town_step(); return; }
 
 	/* 3. Eat when hungry -- in a quiet moment, or sooner if about to faint. */
 	if ((p_ptr->food < PY_FOOD_ALERT) && (!enemy || (p_ptr->food < PY_FOOD_FAINT)))
@@ -6128,6 +6342,18 @@ void autoplay_step(void)
 	 * then wear anything better than what we have on. */
 	if (!enemy && autoplay_identify_step()) return;
 	if (!enemy && autoplay_autoequip_step()) return;
+
+	/* 4c. Out of supplies in the dungeon: arm a recall back to town (we keep
+	 * playing until yanked). Recall returns us to max depth, so no progress lost.
+	 * Don't re-arm if one is already pending (recall_player would toggle it off). */
+	if (!enemy && (dun_level > 0) && (p_ptr->word_recall == 0) && autoplay_needs_resupply())
+	{
+		if (autoplay_start_recall())
+		{
+			msg_print("Autoplay: low on supplies; recalling to town.");
+			return;
+		}
+	}
 
 	/* 5. Rest to recover when wounded, safe (no foe) and not starving. The
 	 * resting branch of process_player() takes over until HP/SP are full or a
@@ -6190,6 +6416,7 @@ void do_cmd_autoplay(void)
 	disturb(0, 0);
 	exploring = 0;
 	autoplaying = 1;
+	autoplay_shopping = FALSE;     /* fresh shopping trip bookkeeping */
 	p_ptr->redraw |= (PR_STATE);
 	msg_print("Autoplay started (press any key to stop).");
 }
