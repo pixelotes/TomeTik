@@ -4840,7 +4840,22 @@ static bool cell_has_item(int y, int x)
 		 * might want them; ours doesn't shoot.) */
 		if (o_ptr->marked && (o_ptr->tval != TV_GOLD) &&
 		                (o_ptr->tval != TV_CORPSE) && (o_ptr->tval != TV_SKELETON))
+		{
+			/* Auto-play won't pick up worthless junk (spent torches, broken
+			 * sticks, value<=0) -- so it must not treat it as a loot goal either,
+			 * or it walks to an item it refuses to take and loops forever. Keep
+			 * this in step with py_pickup_floor's auto-play filter. */
+			if (autoplaying)
+			{
+				if ((o_ptr->tval == TV_LITE) &&
+				                ((o_ptr->sval == SV_LITE_TORCH) || (o_ptr->sval == SV_LITE_LANTERN)) &&
+				                (o_ptr->timeout <= 0))
+					continue;
+				if (object_value(o_ptr) <= 0)
+					continue;
+			}
 			return (TRUE);
+		}
 	}
 	return (FALSE);
 }
