@@ -6685,6 +6685,47 @@ static void autoplay_buy_one(int town, int store, int tval, int sval, int target
 	if (idx >= 0) (void)store_bot_buy(town, store, idx, need);
 }
 
+/* Buy the single best gear upgrade this store offers that we can afford while
+ * keeping a gold reserve: scan the stock for a wieldable, non-cursed item worth
+ * more (object_value) than what sits in its slot, pick the biggest gain, buy it.
+ * Returns TRUE if it bought something (caller loops to grab several). The bought
+ * piece lands in the pack; the post-shopping equip pass wields it. */
+static bool autoplay_buy_best_gear(int town, int store)
+{
+	store_type *st = &town_info[town].store[store];
+	int i, best = -1, reserve = autoplay_cfg("min_gold", 100);
+	s32b best_gain = 0;
+	char nm[80];
+
+	for (i = 0; i < st->stock_num; i++)
+	{
+		object_type *o_ptr = &st->stock[i];
+		int slot = wield_slot(o_ptr);
+		s32b gain, price;
+
+		if (!autoplay_slot_autoequippable(slot)) continue;   /* only gear we auto-wear */
+		if (cursed_p(o_ptr)) continue;
+
+		gain = object_value(o_ptr) - object_value(&p_ptr->inventory[slot]);
+		if (gain <= 0) continue;                              /* not an upgrade */
+
+		price = store_bot_price(town, store, i);
+		if ((price <= 0) || (p_ptr->au - price < reserve)) continue;  /* can't afford + reserve */
+
+		if (gain > best_gain) { best_gain = gain; best = i; }
+	}
+
+	if (best < 0) return (FALSE);
+
+	object_desc(nm, &st->stock[best], TRUE, 1);
+	if (store_bot_buy(town, store, best, 1) > 0)
+	{
+		msg_format("Autoplay: bought %s.", nm);
+		return (TRUE);
+	}
+	return (FALSE);
+}
+
 static void autoplay_shop_buy_needs(int town, int store)
 {
 	object_type *lite = &p_ptr->inventory[INVEN_LITE];
@@ -6716,6 +6757,14 @@ static void autoplay_shop_buy_needs(int town, int store)
 		autoplay_buy_one(town, store, TV_LITE, SV_LITE_TORCH,
 		                 autoplay_cfg("want_torch", AP_WANT_TORCH),
 		                 autoplay_inv_count(TV_LITE, SV_LITE_TORCH));
+
+	/* With consumables covered, spend surplus gold on the best gear upgrades this
+	 * shop has (weapons/armour/etc.), keeping a reserve. Loop to grab several;
+	 * the post-shopping equip pass then wields them. */
+	{
+		int guard = 0;
+		while ((guard++ < 8) && autoplay_buy_best_gear(town, store)) ;
+	}
 }
 
 /* Nearest town shop tile we haven't done this trip (skipping the Home). */

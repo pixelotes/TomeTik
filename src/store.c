@@ -3848,6 +3848,20 @@ int store_bot_find(int town_num, int store_num, int tval, int sval)
 	return (-1);
 }
 
+/* Buy price (what the store charges) for one unit of stock slot 'stock_idx', or
+ * -1 if the slot is invalid. Lets the bot budget a purchase before committing. */
+s32b store_bot_price(int town_num, int store_num, int stock_idx)
+{
+	object_type forge;
+
+	store_bot_set(town_num, store_num);
+	if ((stock_idx < 0) || (stock_idx >= st_ptr->stock_num)) return (-1);
+
+	object_copy(&forge, &st_ptr->stock[stock_idx]);
+	forge.number = 1;
+	return (price_item(&forge, ot_ptr->min_inflate, FALSE));
+}
+
 /* Buy up to 'amt' of stock slot 'stock_idx' from (town,store) into the pack.
  * Buys fewer if short on gold or pack room. Returns the number bought. */
 int store_bot_buy(int town_num, int store_num, int stock_idx, int amt)
