@@ -5650,6 +5650,85 @@ static int autoplay_find_heal(bool severe)
 	return (-1);
 }
 
+/* ---- defensive items: lift a crippling status, or teleport out of trouble ---- */
+
+/* Pack index of the first potion whose sval is in svals[0..n-1], else -1. */
+static int autoplay_find_potion(const int *svals, int n)
+{
+	int i, k;
+	for (i = 0; i < INVEN_PACK; i++)
+	{
+		object_type *o_ptr = &p_ptr->inventory[i];
+		if (!o_ptr->k_idx || (o_ptr->tval != TV_POTION)) continue;
+		for (k = 0; k < n; k++) if (o_ptr->sval == svals[k]) return (i);
+	}
+	return (-1);
+}
+
+/* A disabling status is active AND we carry a potion that lifts it: return that
+ * potion's pack index and set *what to a label, else -1. Potions can be quaffed
+ * while blind/confused, so this self-clears those (which otherwise cripple the
+ * bot -- blind = can't see to explore, confused = can't move straight). Priority:
+ * confusion > blindness > meaningful poison. (Fear is handled in the combat
+ * ladder, where it actually matters.) svals are ordered cheapest-first so we
+ * don't burn a big heal on a minor ailment. */
+static int autoplay_find_cure(cptr *what)
+{
+	static const int conf[] =                  /* potions that clear confusion */
+	{ SV_POTION_CURE_SERIOUS, SV_POTION_CURE_CRITICAL, SV_POTION_HEALING,
+	  SV_POTION_STAR_HEALING, SV_POTION_LIFE };
+	static const int blnd[] =                  /* potions that clear blindness */
+	{ SV_POTION_CURE_LIGHT, SV_POTION_CURE_SERIOUS, SV_POTION_CURE_CRITICAL,
+	  SV_POTION_HEALING, SV_POTION_STAR_HEALING, SV_POTION_LIFE };
+	static const int pois[] =                  /* dedicated poison cures only */
+	{ SV_POTION_CURE_POISON, SV_POTION_CURING };
+	int it;
+
+	if (p_ptr->confused)
+	{ it = autoplay_find_potion(conf, 5); if (it >= 0) { *what = "the confusion"; return (it); } }
+	if (p_ptr->blind)
+	{ it = autoplay_find_potion(blnd, 6); if (it >= 0) { *what = "the blindness"; return (it); } }
+	if (p_ptr->poisoned > 10)
+	{ it = autoplay_find_potion(pois, 2); if (it >= 0) { *what = "the poison"; return (it); } }
+	return (-1);
+}
+
+/* Pack index of a potion that removes fear (to face a foe), or -1. */
+static int autoplay_find_boldness(void)
+{
+	static const int f[] = { SV_POTION_BOLDNESS, SV_POTION_HEROISM };
+	return (autoplay_find_potion(f, 2));
+}
+
+/* Pack index of an escape scroll: prefer Phase Door (short hop), else Teleport.
+ * Reading needs eyes, so the caller must ensure we are not blind/confused. */
+static int autoplay_find_escape(void)
+{
+	int i, tele = -1;
+	for (i = 0; i < INVEN_PACK; i++)
+	{
+		object_type *o_ptr = &p_ptr->inventory[i];
+		if (!o_ptr->k_idx || (o_ptr->tval != TV_SCROLL)) continue;
+		if (o_ptr->sval == SV_SCROLL_PHASE_DOOR) return (i);
+		if (o_ptr->sval == SV_SCROLL_TELEPORT) tele = i;
+	}
+	return (tele);
+}
+
+/* Read escape scroll in slot 'item': blink (Phase Door) or teleport away, and
+ * spend the scroll. One turn. */
+static void autoplay_escape(int item)
+{
+	object_type *o_ptr = &p_ptr->inventory[item];
+	int dist = (o_ptr->sval == SV_SCROLL_PHASE_DOOR) ? 10 : 100;
+
+	energy_use = 100;
+	teleport_player(dist);
+	inven_item_increase(item, -1);
+	inven_item_describe(item);
+	inven_item_optimize(item);
+}
+
 /* Backpack index of an edible staple food, or -1. */
 static int autoplay_find_food(void)
 {
@@ -6660,6 +6739,8 @@ static bool autoplay_needs_resupply(void)
 #define AP_DELVE    14  /* push into unseen real floor (y,x)   */
 #define AP_ASCEND   15  /* take an up stair (scum: regenerate) */
 #define AP_WAIT     16  /* pass a turn (e.g. waiting on recall) */
+#define AP_CURE     17  /* quaff a potion to lift a status (item)   */
+#define AP_ESCAPE   18  /* read phase/teleport to break away (item) */
 
 typedef struct autoplay_action autoplay_action;
 struct autoplay_action
@@ -6766,7 +6847,10 @@ static void autoplay_decide(autoplay_action *a)
 	a->pickup = !full;
 	strcpy(a->advice, "Nothing to do.");
 
-	if (p_ptr->confused || p_ptr->image || p_ptr->wild_mode)
+	/* Hallucination (can't trust the display) and wild_mode (overworld travel)
+	 * we genuinely can't auto-play through; confusion is handled below (we can
+	 * still quaff a cure, or wait it out, rather than abandoning the run). */
+	if (p_ptr->image || p_ptr->wild_mode)
 	{
 		strcpy(a->advice, "Wait -- you can't act sensibly right now.");
 		return;
@@ -6792,6 +6876,31 @@ static void autoplay_decide(autoplay_action *a)
 			strnfmt(a->advice, 80, "Quaff %s to heal.", nm);
 			return;
 		}
+	}
+
+	/* 1b. Lift a crippling status (confusion / blindness / meaningful poison). A
+	 * potion can be quaffed even while blind or confused, so this self-clears the
+	 * two states that would otherwise leave the bot unable to see or move. */
+	{
+		cptr what = NULL;
+		it = autoplay_find_cure(&what);
+		if (it >= 0)
+		{
+			a->type = AP_CURE; a->item = it;
+			strnfmt(a->advice, 80, "Quaff a potion to cure %s.", what);
+			return;
+		}
+	}
+
+	/* 1c. Still confused and nothing to cure it with: wait it out. Confused
+	 * movement is randomised, so stumbling around would just walk us into walls
+	 * or hazards -- passing turns until it lifts is safer (and we already healed
+	 * above if we were hurt). */
+	if (p_ptr->confused)
+	{
+		a->type = AP_WAIT;
+		strcpy(a->advice, "Wait out the confusion.");
+		return;
 	}
 
 	/* 2. A visible enemy: flee the dangerous/desperate cases, else close and melee.
@@ -6822,6 +6931,41 @@ static void autoplay_decide(autoplay_action *a)
 			strnfmt(a->advice, 80, "Flee from %s.", nm);
 			return;
 		}
+
+		/* Desperate and cornered (can't step away): blink / teleport out. Reading
+		 * needs eyes, so only when not blind/confused (which got a cure shot at
+		 * step 1b). Phase Door is preferred over Teleport in autoplay_find_escape. */
+		if (desperate && !p_ptr->blind && !p_ptr->confused)
+		{
+			int s = autoplay_find_escape();
+			if (s >= 0)
+			{
+				a->type = AP_ESCAPE; a->item = s;
+				strnfmt(a->advice, 80, "Read a scroll to escape %s.", nm);
+				return;
+			}
+		}
+
+		/* Afraid: fear blocks melee. Drink courage so we can actually fight back;
+		 * failing that, keep our distance rather than bumping the foe uselessly. */
+		if (p_ptr->afraid)
+		{
+			int b = autoplay_find_boldness();
+			if (b >= 0)
+			{
+				a->type = AP_CURE; a->item = b;
+				strnfmt(a->advice, 80, "Quaff courage to face %s.", nm);
+				return;
+			}
+			if (autoplay_can_flee(enemy->fy, enemy->fx))
+			{
+				a->type = AP_FLEE;
+				strnfmt(a->advice, 80, "Flee from %s (too afraid to fight).", nm);
+				return;
+			}
+			/* Can't cure, can't flee: fall through and try to fight regardless. */
+		}
+
 		if (autoplay_can_reach(enemy->fy, enemy->fx))
 		{
 			int eidx = (int)(enemy - m_list);
@@ -7053,6 +7197,8 @@ static void autoplay_perform(autoplay_action *a)
 	case AP_IDENTIFY: autoplay_do_identify(a->item); break;
 	case AP_EQUIP:    autoplay_wield(a->item); break;
 	case AP_LIGHT:    (void)autoplay_manage_light(); break;
+	case AP_CURE:     autoplay_quaff(a->item); break;
+	case AP_ESCAPE:   autoplay_escape(a->item); break;
 	case AP_FLEE:     (void)autoplay_flee_from(a->y, a->x); break;
 	case AP_FIGHT:    (void)autoplay_step_towards(a->y, a->x, a->pickup); break;
 	case AP_EXPLORE:  (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, explore_walkable_clear); break;
@@ -7076,7 +7222,10 @@ void autoplay_step(void)
 {
 	autoplay_action a;
 
-	if (p_ptr->confused || p_ptr->image || p_ptr->wild_mode)
+	/* Hallucination (display can't be trusted) and wild_mode (overworld) we can't
+	 * auto-play through. Confusion is NOT a stop any more: autoplay_decide cures
+	 * it (a potion works while confused) or waits it out. */
+	if (p_ptr->image || p_ptr->wild_mode)
 	{
 		autoplaying = 0;
 		p_ptr->redraw |= (PR_STATE);
