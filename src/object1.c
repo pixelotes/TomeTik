@@ -6741,6 +6741,19 @@ void py_pickup_floor(int pickup)
 		if (autoplaying && ((o_ptr->tval == TV_CORPSE) || (o_ptr->tval == TV_SKELETON)))
 			continue;
 
+		/* Auto-play skips worthless junk: spent torches/lanterns (0 turns of
+		 * light -- typically the very ones it just dropped when swapping in a
+		 * fresh light) and anything else of no value. */
+		if (autoplaying)
+		{
+			if ((o_ptr->tval == TV_LITE) &&
+			                ((o_ptr->sval == SV_LITE_TORCH) || (o_ptr->sval == SV_LITE_LANTERN)) &&
+			                (o_ptr->timeout <= 0))
+				continue;
+			if (object_value(o_ptr) <= 0)
+				continue;
+		}
+
 		{
 			char testdesc[80];
 
