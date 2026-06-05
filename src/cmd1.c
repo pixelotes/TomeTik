@@ -5943,6 +5943,28 @@ static bool autoplay_find_downstair(int *sy, int *sx)
 	return (bestd >= 0);
 }
 
+/* Nearest known, reachable-ish up staircase; TRUE and fills (*sy,*sx). Used for
+ * level-scumming when a level has no way down (and nothing left to explore). */
+static bool autoplay_find_upstair(int *sy, int *sx)
+{
+	int y, x, bestd = -1;
+
+	for (y = 0; y < cur_hgt; y++)
+	{
+		for (x = 0; x < cur_wid; x++)
+		{
+			int f = cave[y][x].feat, d;
+
+			if ((f != FEAT_LESS) && (f != FEAT_WAY_LESS)) continue;
+			if (!explore_is_seen(y, x)) continue;
+
+			d = distance(p_ptr->py, p_ptr->px, y, x);
+			if ((bestd < 0) || (d < bestd)) { bestd = d; *sy = y; *sx = x; }
+		}
+	}
+	return (bestd >= 0);
+}
+
 /* Descend the stairs under the player; auto-play continues on the new level. */
 static void autoplay_descend(void)
 {
@@ -5951,6 +5973,18 @@ static void autoplay_descend(void)
 	confirm_stairs = FALSE;     /* don't block on "Really leave the level?" */
 	msg_print("Autoplay: descending.");
 	do_cmd_go_down();
+	confirm_stairs = saved;
+}
+
+/* Ascend the stairs under the player. A no-way-down level gets escaped by going
+ * up and coming back down -- the level regenerates (level scumming). */
+static void autoplay_ascend(void)
+{
+	bool saved = confirm_stairs;
+
+	confirm_stairs = FALSE;
+	msg_print("Autoplay: taking the stairs up (regenerating the level).");
+	do_cmd_go_up();
 	confirm_stairs = saved;
 }
 
@@ -6346,7 +6380,7 @@ static bool autoplay_shop_neighbor(int sy, int sx, int *ny, int *nx)
 	{
 		int y = sy + dy8[d], x = sx + dx8[d], dd;
 		if (!in_bounds2(y, x)) continue;
-		if (!explore_walkable_hook(y, x, NULL)) continue;
+		if (!explore_walkable_clear(y, x, NULL)) continue;   /* free floor, no NPC */
 		dd = distance(p_ptr->py, p_ptr->px, y, x);
 		if ((bestd < 0) || (dd < bestd)) { bestd = dd; *ny = y; *nx = x; }
 	}
@@ -6388,7 +6422,8 @@ static bool autoplay_town_step(void)
 			return (TRUE);
 		}
 
-		if (autoplay_shop_neighbor(sy, sx, &ny, &nx) && autoplay_step_towards(ny, nx, FALSE))
+		if (autoplay_shop_neighbor(sy, sx, &ny, &nx) &&
+		                autoplay_step_towards_hook(ny, nx, FALSE, explore_walkable_clear))
 			return (TRUE);
 
 		/* Can't reach it: skip and try the next shop. */
@@ -6476,6 +6511,8 @@ static bool autoplay_needs_resupply(void)
 #define AP_DESCEND  12  /* take the down stair underfoot       */
 #define AP_GOSTAIR  13  /* head to the down stair at (y,x)     */
 #define AP_DELVE    14  /* push into unseen real floor (y,x)   */
+#define AP_ASCEND   15  /* take an up stair (scum: regenerate) */
+#define AP_WAIT     16  /* pass a turn (e.g. waiting on recall) */
 
 typedef struct autoplay_action autoplay_action;
 struct autoplay_action
@@ -6733,6 +6770,34 @@ static void autoplay_decide(autoplay_action *a)
 			return;
 		}
 
+		/* 12. Dead end: nothing left to explore and no way down. Scum the level --
+		 * take an up staircase and come back down so it regenerates; failing that
+		 * (no stairs at all), recall to town and re-dive a fresh level. */
+		if ((here == FEAT_LESS) || (here == FEAT_WAY_LESS))
+		{
+			a->type = AP_ASCEND;
+			strcpy(a->advice, "Dead end: take the stairs up to regenerate the level.");
+			return;
+		}
+		if (autoplay_find_upstair(&sy, &sx) && autoplay_can_reach_hook(sy, sx, explore_walkable_clear))
+		{
+			a->type = AP_GOSTAIR; a->y = sy; a->x = sx;
+			strcpy(a->advice, "Dead end: head to a staircase to regenerate the level.");
+			return;
+		}
+		if (dun_level > 0)
+		{
+			if (p_ptr->word_recall > 0)
+			{
+				a->type = AP_WAIT;
+				strcpy(a->advice, "Dead end: waiting for recall.");
+				return;
+			}
+			a->type = AP_RECALL;
+			strcpy(a->advice, "Dead end: no stairs -- recalling to town.");
+			return;
+		}
+
 		a->type = AP_NONE;
 		strnfmt(a->advice, 80,
 		        "Nothing to do (goal=%d reach=%d stair=%d/%d dl=%d seen=%ld).",
@@ -6755,9 +6820,11 @@ static void autoplay_perform(autoplay_action *a)
 	case AP_DELVE:    (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, real_walkable_clear); break;
 	case AP_GOSTAIR:  (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, explore_walkable_clear); break;
 	case AP_DESCEND:  autoplay_descend(); break;
+	case AP_ASCEND:   autoplay_ascend(); break;
 	case AP_TOWN:     (void)autoplay_town_step(); break;
 	case AP_RECALL:   (void)autoplay_start_recall(); break;
 	case AP_REST:     resting = -1; p_ptr->redraw |= (PR_STATE); break;
+	case AP_WAIT:     energy_use = 100; break;   /* pass a turn (recall pending) */
 	default:          break;
 	}
 }
