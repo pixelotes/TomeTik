@@ -964,7 +964,9 @@ void recall_player(int d, int f)
 	if (dun_level && (max_dlv[dungeon_type] > dun_level) &&
 	                !p_ptr->inside_quest)
 	{
-		if (get_check("Reset recall depth? "))
+		/* Auto-play/-explore can't answer prompts: keep the deepest recall depth
+		 * (so recalling back drops us where we left off) and don't block. */
+		if (!(exploring || autoplaying) && get_check("Reset recall depth? "))
 			max_dlv[dungeon_type] = dun_level;
 
 	}
