@@ -4941,6 +4941,18 @@ static bool real_walkable_clear(int y, int x, void *user)
 	return (travel_walkable_real(y, x, user));
 }
 
+/* As explore_walkable_clear, but a cell held by a FRIENDLY monster is passable:
+ * the player swaps / pushes past friendlies (see move_player_aux), so a friendly
+ * NPC stuck in a 1-wide corridor with no detour doesn't dead-end the bot. Hostile
+ * (and unpushable) occupants still block -- we won't blunder into a fight just to
+ * get past. Used only as a fallback when the monster-avoiding route fails. */
+static bool explore_walkable_friend(int y, int x, void *user)
+{
+	if (cave[y][x].m_idx && (is_friend(&m_list[cave[y][x].m_idx]) <= 0))
+		return (FALSE);
+	return (explore_walkable_hook(y, x, user));
+}
+
 /* Give up on grid (y,x) for the rest of this level's auto-explore: from now on we
  * route around it (and never sit a frontier goal on it, since the BFS no longer
  * reaches it). */
@@ -6773,6 +6785,7 @@ static bool autoplay_needs_resupply(void)
 #define AP_CURE     17  /* quaff a potion to lift a status (item)   */
 #define AP_ESCAPE   18  /* read phase/teleport to break away (item) */
 #define AP_SEARCH   19  /* search for secret doors (at y,x)         */
+#define AP_PUSHPAST 20  /* step toward (y,x) swapping past a friend */
 
 typedef struct autoplay_action autoplay_action;
 struct autoplay_action
@@ -7180,6 +7193,16 @@ static void autoplay_decide(autoplay_action *a)
 			return;
 		}
 
+		/* (A3) Blocked from the goal only because a FRIENDLY creature sits in a
+		 * 1-wide corridor with no detour? Push past it (swap). We still avoid
+		 * hostiles -- explore_walkable_friend only opens friendly-held cells. */
+		if (got && !reach && autoplay_can_reach_hook(gy, gx, explore_walkable_friend))
+		{
+			a->type = AP_PUSHPAST; a->y = gy; a->x = gx;
+			strcpy(a->advice, "Push past a friendly creature blocking the way.");
+			return;
+		}
+
 		blind = autoplay_blind_goal(&gy, &gx);
 		if (blind)
 		{
@@ -7298,6 +7321,7 @@ static void autoplay_perform(autoplay_action *a)
 	case AP_LIGHT:    (void)autoplay_manage_light(); break;
 	case AP_CURE:     autoplay_quaff(a->item); break;
 	case AP_ESCAPE:   autoplay_escape(a->item); break;
+	case AP_PUSHPAST: (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, explore_walkable_friend); break;
 	case AP_SEARCH:
 		energy_use = 100;
 		search();                                  /* reveals adjacent secret doors/traps */
