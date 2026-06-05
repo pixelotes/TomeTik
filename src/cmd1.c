@@ -4743,6 +4743,9 @@ static byte *explore_bad = NULL;
  * como intransitables SOLO para el autoexplore, de modo que rodea en vez de
  * pararse. El click-to-move no las consulta (el jugador puede ir a mano). */
 static byte *explore_block = NULL;
+static byte *ap_searched = NULL;   /* A2: floor cells we've already searched from */
+static int ap_search_done = 0;     /* A2: search turns spent on this level (capped) */
+#define AP_SEARCH_MAX 60           /*     don't sweep forever before scumming */
 static int explore_goal_y = -1, explore_goal_x = -1;
 static long explore_goal_count = -1;  /* celdas vistas cuando fijamos la meta */
 static bool explore_goal_is_loot = FALSE; /* la meta actual es oro / un objeto */
@@ -4778,10 +4781,13 @@ static void explore_sync_seen(void)
 		if (explore_seen) C_FREE(explore_seen, explore_seen_n, byte);
 		if (explore_bad) C_FREE(explore_bad, explore_seen_n, byte);
 		if (explore_block) C_FREE(explore_block, explore_seen_n, byte);
+		if (ap_searched) C_FREE(ap_searched, explore_seen_n, byte);
 		explore_seen_n = n;
 		C_MAKE(explore_seen, n, byte);
 		C_MAKE(explore_bad, n, byte);
 		C_MAKE(explore_block, n, byte);
+		C_MAKE(ap_searched, n, byte);
+		ap_search_done = 0;
 		explore_seen_stamp = old_turn;
 		explore_seen_count = 0;
 		explore_goal_y = explore_goal_x = -1;
@@ -6766,6 +6772,7 @@ static bool autoplay_needs_resupply(void)
 #define AP_WAIT     16  /* pass a turn (e.g. waiting on recall) */
 #define AP_CURE     17  /* quaff a potion to lift a status (item)   */
 #define AP_ESCAPE   18  /* read phase/teleport to break away (item) */
+#define AP_SEARCH   19  /* search for secret doors (at y,x)         */
 
 typedef struct autoplay_action autoplay_action;
 struct autoplay_action
@@ -6838,6 +6845,49 @@ static bool autoplay_pick_stair(bool down, int *sy, int *sx)
 
 	ap_stair_y = *sy; ap_stair_x = *sx;
 	return (TRUE);
+}
+
+/* A2: nearest reachable explored floor cell that is adjacent to a seen wall
+ * (where a secret door could be hiding) and that we have not searched from yet.
+ * Used to sweep a dead-end level for secret doors before giving up on it. Walls
+ * are feat >= FEAT_SECRET (secret doors display as plain granite, so we can't
+ * spot them -- we have to stand next to the wall and search). TRUE + (*sy,*sx). */
+static bool autoplay_find_search_spot(int *sy, int *sx)
+{
+	static const int dy8[8] = { -1, 1, 0, 0, -1, -1, 1, 1 };
+	static const int dx8[8] = { 0, 0, -1, 1, -1, 1, -1, 1 };
+	int y, x, bestd = -1;
+
+	if (!ap_searched) return (FALSE);
+
+	for (y = 0; y < cur_hgt; y++)
+	{
+		for (x = 0; x < cur_wid; x++)
+		{
+			int cell = y * cur_wid + x, k, d;
+			bool by_wall = FALSE;
+
+			if (ap_searched[cell]) continue;
+			if (!explore_is_seen(y, x)) continue;
+			if (!cave_floor_bold(y, x)) continue;
+
+			for (k = 0; k < 8; k++)
+			{
+				int ny = y + dy8[k], nx = x + dx8[k];
+				if (!in_bounds2(ny, nx)) continue;
+				if (explore_is_seen(ny, nx) && (cave[ny][nx].feat >= FEAT_SECRET))
+				{ by_wall = TRUE; break; }
+			}
+			if (!by_wall) continue;
+
+			d = distance(p_ptr->py, p_ptr->px, y, x);
+			if ((bestd >= 0) && (d >= bestd)) continue;
+			if (!((y == p_ptr->py) && (x == p_ptr->px)) &&
+			                !autoplay_can_reach_hook(y, x, explore_walkable_clear)) continue;
+			bestd = d; *sy = y; *sx = x;
+		}
+	}
+	return (bestd >= 0);
 }
 
 /* Read-only: is a fleeing step (away from (ty,tx), onto empty known floor)
@@ -7177,6 +7227,30 @@ static void autoplay_decide(autoplay_action *a)
 			}
 		}
 
+		/* 11c. (A2) Before scumming, sweep for secret doors: a room sealed by a
+		 * secret door looks like a dead end (no frontier, no stairs) but isn't.
+		 * Walk to explored floor cells that border a wall and search there; a
+		 * revealed door becomes a frontier and normal exploration resumes. Bounded
+		 * (ap_searched marks each spot once, AP_SEARCH_MAX caps the total). */
+		if (ap_search_done < AP_SEARCH_MAX)
+		{
+			int spy = 0, spx = 0;
+			if (autoplay_find_search_spot(&spy, &spx))
+			{
+				if ((spy == p_ptr->py) && (spx == p_ptr->px))
+				{
+					a->type = AP_SEARCH; a->y = spy; a->x = spx;
+					strcpy(a->advice, "Search for secret doors.");
+				}
+				else
+				{
+					a->type = AP_GOSTAIR; a->y = spy; a->x = spx;
+					strcpy(a->advice, "Move to a wall to search for secret doors.");
+				}
+				return;
+			}
+		}
+
 		/* 12. Dead end: nothing left to explore and no way down. Scum the level --
 		 * take an up staircase and come back down so it regenerates; failing that
 		 * (no stairs at all), recall to town and re-dive a fresh level. */
@@ -7224,6 +7298,12 @@ static void autoplay_perform(autoplay_action *a)
 	case AP_LIGHT:    (void)autoplay_manage_light(); break;
 	case AP_CURE:     autoplay_quaff(a->item); break;
 	case AP_ESCAPE:   autoplay_escape(a->item); break;
+	case AP_SEARCH:
+		energy_use = 100;
+		search();                                  /* reveals adjacent secret doors/traps */
+		if (ap_searched) ap_searched[p_ptr->py * cur_wid + p_ptr->px] = 1;
+		ap_search_done++;
+		break;
 	case AP_FLEE:     (void)autoplay_flee_from(a->y, a->x); break;
 	case AP_FIGHT:    (void)autoplay_step_towards(a->y, a->x, a->pickup); break;
 	case AP_EXPLORE:  (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, explore_walkable_clear); break;
