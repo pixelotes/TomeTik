@@ -4375,8 +4375,14 @@ static errr Term_xtra_gtk(int n, int v)
 		/* Delay for some milliseconds */
 	case TERM_XTRA_DELAY:
 		{
-			/* sleep for v milliseconds */
+			/* Pump ALL pending GTK events around the sleep. Auto-play / travel
+			 * delays are otherwise dead time in which no input is handled, and a
+			 * single inkey() only drains one event at a time -- so a mouse click
+			 * (queued behind a flood of motion/tooltip events) would never stop
+			 * the bot. Draining here makes any key or click take effect promptly. */
+			DrainEvents();
 			usleep(v * 1000);
+			DrainEvents();
 
 			/* Done */
 			return (0);
@@ -5227,6 +5233,20 @@ static gboolean keypress_event_handler(
 	/* Hack - do not do anything until the player picks from the menu */
 	if (!game_in_progress) return (TRUE);
 
+	/* While the bot is driving (auto-play / explore / travel / queued click), ANY
+	 * key stops it immediately and is swallowed -- so the UI stays responsive and
+	 * keypresses don't pile up behind the bot. Press again to issue a command. */
+	if (autoplaying || exploring || travelling || click_dir)
+	{
+		autoplaying = 0;
+		exploring = 0;
+		travelling = 0;
+		click_dir = 0;
+		flush();
+		p_ptr->redraw |= (PR_STATE);
+		return (TRUE);
+	}
+
 	/* Hack - Ignore parameters */
 	(void) widget;
 	(void) user_data;
@@ -5872,7 +5892,6 @@ static GtkItemFactoryEntry main_menu_items[] =
 	{ "/Action/Movement/Walk (-)", NULL, action_event_handler, '-', NULL },
 	{ "/Action/Movement/Auto-explore (^E)", NULL, action_event_handler, KTRL('E'), NULL },
 	{ "/Action/Movement/Autoplay (^V)", NULL, action_event_handler, KTRL('V'), NULL },
-	{ "/Action/Movement/Oracle: advice (^N)", NULL, action_event_handler, KTRL('N'), NULL },
 
 	{ "/Action/Alter", NULL, NULL, 0, "<Branch>" },
 	{ "/Action/Alter/Alter (+)", NULL, action_event_handler, '+', NULL },
@@ -5899,6 +5918,7 @@ static GtkItemFactoryEntry main_menu_items[] =
 
 	{ "/Action/sep1", NULL, NULL, 0, "<Separator>" },
 	{ "/Action/Take note (:)", NULL, action_event_handler, ':', NULL },
+	{ "/Action/Oracle: advice (^N)", NULL, action_event_handler, KTRL('N'), NULL },
 
 	/* "Audio" menu (TomeTik): sonido y música, desactivados por defecto. */
 	{ "/Audio", NULL, NULL, 0, "<Branch>" },
@@ -6671,6 +6691,16 @@ static gboolean button_press_event_handler(
 	/* Solo botón izquierdo, con partida en curso y no dentro de menú/tienda. */
 	if (event->button != 1) return FALSE;
 	if (!game_in_progress || !character_generated || character_icky) return FALSE;
+
+	/* A click while the bot is driving stops it (rather than queueing a move). */
+	if (autoplaying || exploring)
+	{
+		autoplaying = 0;
+		exploring = 0;
+		flush();
+		p_ptr->redraw |= (PR_STATE);
+		return (TRUE);
+	}
 
 	if (!gtk_map_pixel_to_cave(td, (int)event->x, (int)event->y, &cy, &cx))
 		return FALSE;
