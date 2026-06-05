@@ -5560,6 +5560,15 @@ static s16b ap_ignore_idx = 0;    /* monster we stopped chasing (0 = none)   */
 static s16b ap_chase_idx  = 0;    /* monster we are currently going after     */
 static int  ap_chase_turns = 0;   /* consecutive turns targeting it           */
 
+/* A staircase we have committed to walking toward. Without this, the dead-end
+ * scummer re-picks the nearest stair every turn by straight-line distance, so
+ * with two stairs it flip-flops which one is "nearest" as it moves and ends up
+ * oscillating in place forever. We lock one and keep heading to it until we
+ * reach it, take stairs, or it goes stale. (y = -1 means none locked.) */
+static int  ap_stair_y = -1, ap_stair_x = -1;
+
+static void autoplay_clear_stair(void) { ap_stair_y = ap_stair_x = -1; }
+
 static bool autoplay_too_dangerous(monster_type *m);   /* fwd: threat verdict */
 
 /* Nearest VISIBLE real enemy worth engaging; NULL if none. Skips a foe we gave
@@ -5930,48 +5939,10 @@ static bool autoplay_flee_from(int ty, int tx)
 	return (TRUE);
 }
 
-/* Nearest known, reachable-ish down staircase; TRUE and fills (*sy,*sx). */
-static bool autoplay_find_downstair(int *sy, int *sx)
-{
-	int y, x, bestd = -1;
-
-	for (y = 0; y < cur_hgt; y++)
-	{
-		for (x = 0; x < cur_wid; x++)
-		{
-			int f = cave[y][x].feat, d;
-
-			if ((f != FEAT_MORE) && (f != FEAT_WAY_MORE)) continue;
-			if (!explore_is_seen(y, x)) continue;
-
-			d = distance(p_ptr->py, p_ptr->px, y, x);
-			if ((bestd < 0) || (d < bestd)) { bestd = d; *sy = y; *sx = x; }
-		}
-	}
-	return (bestd >= 0);
-}
-
-/* Nearest known, reachable-ish up staircase; TRUE and fills (*sy,*sx). Used for
- * level-scumming when a level has no way down (and nothing left to explore). */
-static bool autoplay_find_upstair(int *sy, int *sx)
-{
-	int y, x, bestd = -1;
-
-	for (y = 0; y < cur_hgt; y++)
-	{
-		for (x = 0; x < cur_wid; x++)
-		{
-			int f = cave[y][x].feat, d;
-
-			if ((f != FEAT_LESS) && (f != FEAT_WAY_LESS)) continue;
-			if (!explore_is_seen(y, x)) continue;
-
-			d = distance(p_ptr->py, p_ptr->px, y, x);
-			if ((bestd < 0) || (d < bestd)) { bestd = d; *sy = y; *sx = x; }
-		}
-	}
-	return (bestd >= 0);
-}
+/* (Staircase selection lives in autoplay_pick_stair, below -- it commits to one
+ * stair and filters by real A* reachability, replacing the old straight-line
+ * nearest-stair finders that made the scummer oscillate between equidistant
+ * stairs.) */
 
 /* Descend the stairs under the player; auto-play continues on the new level. */
 static void autoplay_descend(void)
@@ -5982,6 +5953,7 @@ static void autoplay_descend(void)
 	msg_print("Autoplay: descending.");
 	do_cmd_go_down();
 	confirm_stairs = saved;
+	autoplay_clear_stair();     /* new level: any locked stair is gone */
 }
 
 /* Ascend the stairs under the player. A no-way-down level gets escaped by going
@@ -5994,6 +5966,7 @@ static void autoplay_ascend(void)
 	msg_print("Autoplay: taking the stairs up (regenerating the level).");
 	do_cmd_go_up();
 	confirm_stairs = saved;
+	autoplay_clear_stair();     /* new level: any locked stair is gone */
 }
 
 /* Is the backpack full (no free general slot)? The pack is kept compact, so a
@@ -6635,6 +6608,53 @@ static bool autoplay_can_reach(int gy, int gx)
 	return (autoplay_can_reach_hook(gy, gx, explore_walkable_hook));
 }
 
+/* Pick a staircase of the requested kind to head for, committing to it across
+ * turns so we don't oscillate between equidistant stairs (see ap_stair_*). If a
+ * still-valid, reachable stair of this kind is already locked we keep it;
+ * otherwise we lock the nearest *reachable* one. Reachability is checked with
+ * A* (not straight-line), so we never commit to a stair we can't actually walk
+ * to. Returns TRUE and fills (*sy,*sx). `down` = down stairs, else up. */
+static bool autoplay_pick_stair(bool down, int *sy, int *sx)
+{
+	int y, x, bestd = -1;
+
+	/* Keep the locked stair if it's still a reachable stair of the right kind. */
+	if ((ap_stair_y >= 0) && (ap_stair_x >= 0))
+	{
+		int f = cave[ap_stair_y][ap_stair_x].feat;
+		bool ok = down ? ((f == FEAT_MORE) || (f == FEAT_WAY_MORE))
+		               : ((f == FEAT_LESS) || (f == FEAT_WAY_LESS));
+		if (ok && explore_is_seen(ap_stair_y, ap_stair_x) &&
+		                autoplay_can_reach_hook(ap_stair_y, ap_stair_x, explore_walkable_clear))
+		{
+			*sy = ap_stair_y; *sx = ap_stair_x;
+			return (TRUE);
+		}
+		autoplay_clear_stair();   /* stale (gone / unseen / unreachable): re-pick */
+	}
+
+	/* Lock the nearest reachable stair of this kind. */
+	for (y = 0; y < cur_hgt; y++)
+	{
+		for (x = 0; x < cur_wid; x++)
+		{
+			int f = cave[y][x].feat, d;
+			bool match = down ? ((f == FEAT_MORE) || (f == FEAT_WAY_MORE))
+			                  : ((f == FEAT_LESS) || (f == FEAT_WAY_LESS));
+			if (!match) continue;
+			if (!explore_is_seen(y, x)) continue;
+			d = distance(p_ptr->py, p_ptr->px, y, x);
+			if ((bestd >= 0) && (d >= bestd)) continue;       /* not closer */
+			if (!autoplay_can_reach_hook(y, x, explore_walkable_clear)) continue;
+			bestd = d; *sy = y; *sx = x;
+		}
+	}
+	if (bestd < 0) return (FALSE);
+
+	ap_stair_y = *sy; ap_stair_x = *sx;
+	return (TRUE);
+}
+
 /* Read-only: is a fleeing step (away from (ty,tx), onto empty known floor)
  * available right now? */
 static bool autoplay_can_flee(int ty, int tx)
@@ -6858,9 +6878,9 @@ static void autoplay_decide(autoplay_action *a)
 			strcpy(a->advice, "Descend the staircase.");
 			return;
 		}
-		gotstair = autoplay_find_downstair(&sy, &sx);
-		if (gotstair) reachstair = autoplay_can_reach_hook(sy, sx, explore_walkable_clear);
-		if (gotstair && reachstair)
+		gotstair = autoplay_pick_stair(TRUE, &sy, &sx);   /* nearest reachable, locked */
+		reachstair = gotstair;                            /* pick_stair already filters */
+		if (gotstair)
 		{
 			a->type = AP_GOSTAIR; a->y = sy; a->x = sx;
 			strcpy(a->advice, "Head to the down staircase.");
@@ -6900,7 +6920,7 @@ static void autoplay_decide(autoplay_action *a)
 			strcpy(a->advice, "Dead end: take the stairs up to regenerate the level.");
 			return;
 		}
-		if (autoplay_find_upstair(&sy, &sx) && autoplay_can_reach_hook(sy, sx, explore_walkable_clear))
+		if (autoplay_pick_stair(FALSE, &sy, &sx))   /* nearest reachable up stair, locked */
 		{
 			a->type = AP_GOSTAIR; a->y = sy; a->x = sx;
 			strcpy(a->advice, "Dead end: head to a staircase to regenerate the level.");
@@ -7017,6 +7037,7 @@ void do_cmd_autoplay(void)
 	autoplay_no_resupply_until = 0;
 	ap_ignore_idx = ap_chase_idx = 0;
 	ap_chase_turns = 0;
+	autoplay_clear_stair();
 	p_ptr->redraw |= (PR_STATE);
 	msg_print("Autoplay started (press any key to stop).");
 }
