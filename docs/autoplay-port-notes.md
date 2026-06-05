@@ -308,6 +308,13 @@ Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
     también ammo sin lanzador, boulders con skill; elegir el mejor lanzable por daño.
 - **Fase 1b**: navegación por wilderness (descubrir mazmorras a pie) — recall cubre casi todo.
 - Afinar: amenaza de monstruos (tabla de peligro real), umbrales de resupply/compra.
+  - **Follow-up: amenaza del CONJUNTO / cluster, no solo individual.** Hoy se evalúa cada
+    monstruo por separado (`autoplay_too_dangerous`); un solo jackal o araña es "fácil", pero
+    un **pack** de 6-10 mata por suma de daño/turno. Sumar la amenaza (daño esperado/turno)
+    de todos los enemigos visibles —o de un cluster cercano— y, si supera un umbral relativo
+    a HP/AC, **huir/teleport/recall** en vez de pelear de uno en uno. Considera también
+    multiplicadores (`MULTIPLY`/breeders) y los que rodean (varios adyacentes = no se puede
+    huir a pie → escape). Esto evita las muertes por pack de jackals/arañas/perros.
 - Completitud de quest por **muerte del guardián** (`r_info[FINAL_GUARDIAN].max_num==0`) en vez
   de "tocó fondo"; coger el `FINAL_ARTIFACT`/`FINAL_OBJECT` concreto antes de salir.
 - Gates `plev` de la ruta = estimaciones; afinar con partidas reales (el bot melee-only es frágil).
