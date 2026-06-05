@@ -146,7 +146,9 @@ static void prt_piety(void)
 
 	c_put_str(TERM_L_WHITE, "Pt ", ROW_PIETY, COL_PIETY);
 
-	sprintf(tmp, "%9ld", p_ptr->grace);
+	/* grace is s32b (== int under L64); %ld expects a 64-bit long, so without the
+	 * cast it reads garbage and the piety shows as e.g. "4294967160". */
+	sprintf(tmp, "%9ld", (long)p_ptr->grace);
 
 	if (p_ptr->praying)
 		c_put_str(TERM_L_GREEN, tmp, ROW_PIETY, COL_PIETY + 3);
