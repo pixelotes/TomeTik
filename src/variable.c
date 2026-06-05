@@ -121,6 +121,8 @@ s16b travelling;		/* Steps left while auto-travelling (click-to-walk), or 0 */
 s16b click_dir;			/* One-shot move/attack direction queued by a mouse click, or 0 */
 s16b exploring;			/* TRUE while auto-exploring (drives travel legs), or 0 */
 s16b autoplaying;		/* TRUE while auto-playing (explore + survive + fight), or 0 */
+bool autoplay_force_item_on = FALSE;	/* auto-play preselects an item for get_item() */
+s16b autoplay_force_item = 0;		/* ...this pack/floor index (fire ammo / throw target) */
 s16b resting; 			/* Current counter for resting, if any */
 
 s16b cur_hgt; 			/* Current dungeon height */

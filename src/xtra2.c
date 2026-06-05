@@ -6734,6 +6734,16 @@ bool get_aim_dir(int *dp)
 
 	cptr p;
 
+	/* Auto-play/-explore: fire at the target the bot locked just before issuing
+	 * the command (target_who/row/col). Never prompt for a direction -- if there
+	 * is no valid target, cancel cleanly instead of looping on input. */
+	if (exploring || autoplaying)
+	{
+		if (target_okay()) { *dp = 5; return (TRUE); }
+		*dp = 0;
+		return (FALSE);
+	}
+
 #ifdef ALLOW_REPEAT /* TNB */
 
 	if (repeat_pull(dp))
