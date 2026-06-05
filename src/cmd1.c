@@ -5517,11 +5517,25 @@ void do_cmd_explore(void)
  * turn, so it reacts immediately to a new threat or dropping HP.
  */
 
-/* Nearest VISIBLE real enemy (not a neutral or a pet); NULL if none. */
+/* Chasing state: a monster we have given up closing on (it flees / keeps its
+ * distance -- e.g. a fruit bat doing bait-and-switch) and progress tracking, so
+ * we don't oscillate after it forever. */
+static s16b ap_ignore_idx = 0;    /* monster we stopped chasing (0 = none)   */
+static s16b ap_chase_idx  = 0;    /* monster we are currently going after     */
+static int  ap_chase_turns = 0;   /* consecutive turns targeting it           */
+
+/* Nearest VISIBLE real enemy worth engaging; NULL if none. Skips a foe we gave
+ * up chasing and a frightened one fleeing in the distance -- but still returns
+ * either if it's right next to us (then we just hit it). */
 static monster_type *autoplay_nearest_enemy(int *dist)
 {
 	int i, bd = 0;
 	monster_type *best = NULL;
+
+	/* Forget the give-up target once it's dead or out of sight. */
+	if (ap_ignore_idx && ((ap_ignore_idx >= m_max) ||
+	                !m_list[ap_ignore_idx].r_idx || !m_list[ap_ignore_idx].ml))
+		ap_ignore_idx = 0;
 
 	for (i = 1; i < m_max; i++)
 	{
@@ -5533,6 +5547,11 @@ static monster_type *autoplay_nearest_enemy(int *dist)
 		if (m_ptr->status != MSTATUS_ENEMY) continue;   /* only real foes    */
 
 		d = distance(p_ptr->py, p_ptr->px, m_ptr->fy, m_ptr->fx);
+
+		/* Ignore the give-up target and frightened fleers -- unless adjacent. */
+		if ((i == ap_ignore_idx) && (d > 1)) continue;
+		if (m_ptr->monfear && (d > 1)) continue;
+
 		if (!best || (d < bd)) { best = m_ptr; bd = d; }
 	}
 
@@ -5750,17 +5769,20 @@ static bool autoplay_light_needs(void)
 	return (FALSE);
 }
 
-/* Take one step toward (gy,gx) over known terrain (auto-explore policy), via
+/* Take one step toward (gy,gx) over terrain accepted by 'hook', via
  * move_player_aux -- so stepping onto an adjacent monster ATTACKS it. Returns
- * TRUE if a step/attack was issued (a turn spent). */
-static bool autoplay_step_towards(int gy, int gx, bool do_pickup)
+ * TRUE if a step/attack was issued (a turn spent). The seen-gated
+ * explore_walkable_hook keeps to known ground; travel_walkable_real pushes into
+ * as-yet-unseen real floor (delving into the dark). */
+static bool autoplay_step_towards_hook(int gy, int gx, bool do_pickup,
+                                       astar_walkable_hook hook)
 {
 	path_result *route;
 	int dir = 0, d, ny, nx;
 
 	if ((gy == p_ptr->py) && (gx == p_ptr->px)) return (FALSE);
 
-	route = astar_find_path_cb(cur_hgt, cur_wid, explore_walkable_hook, NULL,
+	route = astar_find_path_cb(cur_hgt, cur_wid, hook, NULL,
 	                           p_ptr->py, p_ptr->px, gy, gx, ASTAR_8DIR_CUT);
 	if (!route || (route->length < 2))
 	{
@@ -5782,6 +5804,57 @@ static bool autoplay_step_towards(int gy, int gx, bool do_pickup)
 	energy_use = 100;
 	move_player_aux(dir, do_pickup, 1, TRUE);
 	return (TRUE);
+}
+
+/* Default step toward known ground (auto-explore policy). */
+static bool autoplay_step_towards(int gy, int gx, bool do_pickup)
+{
+	return (autoplay_step_towards_hook(gy, gx, do_pickup, explore_walkable_hook));
+}
+
+/* Nearest still-unseen real-floor cell reachable over real terrain (ignoring
+ * what we've seen), for delving into the dark when the seen-gated frontier
+ * search comes up empty. Returns TRUE and fills (*gy,*gx). */
+static bool autoplay_blind_goal(int *gy, int *gx)
+{
+	static const int dy8[8] = { -1, 1, 0, 0, -1, -1, 1, 1 };
+	static const int dx8[8] = { 0, 0, -1, 1, -1, 1, -1, 1 };
+	int n = cur_hgt * cur_wid, head = 0, tail = 0;
+	int start = p_ptr->py * cur_wid + p_ptr->px;
+	byte *seen;
+	int *queue;
+	bool found = FALSE;
+
+	if (n <= 0) return (FALSE);
+	C_MAKE(seen, n, byte);
+	C_MAKE(queue, n, int);
+
+	seen[start] = 1;
+	queue[tail++] = start;
+
+	while (head < tail)
+	{
+		int cur = queue[head++], cy = cur / cur_wid, cx = cur % cur_wid, d;
+		for (d = 0; d < 8; d++)
+		{
+			int ny = cy + dy8[d], nx = cx + dx8[d], nc;
+			if ((ny < 0) || (ny >= cur_hgt) || (nx < 0) || (nx >= cur_wid)) continue;
+			nc = ny * cur_wid + nx;
+			if (seen[nc]) continue;
+			if (!travel_walkable_real(ny, nx, NULL)) continue;   /* real floor/door */
+
+			/* A walkable cell we have not yet uncovered: head there. */
+			if (!explore_is_seen(ny, nx)) { *gy = ny; *gx = nx; found = TRUE; break; }
+
+			seen[nc] = 1;
+			queue[tail++] = nc;
+		}
+		if (found) break;
+	}
+
+	C_FREE(seen, n, byte);
+	C_FREE(queue, n, int);
+	return (found);
 }
 
 /* Step directly away from the threat at (ty,tx) over known floor with no monster
@@ -6268,9 +6341,23 @@ static bool autoplay_town_step(void)
 		autoplay_shop_visited[sidx] = 1;
 	}
 
-	/* All shops done -> recall back into the dungeon. Hold off on the next town
-	 * trip for a while so we actually dive rather than yo-yo to the shops (and
-	 * don't thrash if we couldn't buy what we wanted). */
+	/* All shops done -> gear up (it's safe here, no foes), then recall into the
+	 * dungeon. Doing the identify/equip/light here means we descend already
+	 * kitted out, instead of arriving with our weapon/armour/torch still in the
+	 * pack (the in-dungeon upkeep only runs when no enemy is in sight, so a foe by
+	 * the entrance could otherwise keep us unequipped). */
+	{
+		int it, guard = 0;
+		while (((it = autoplay_find_unknown_id()) >= 0) && (guard++ < 40))
+			autoplay_do_identify(it);
+		guard = 0;
+		while (((it = autoplay_find_upgrade()) >= 0) && (guard++ < 40))
+			autoplay_wield(it);
+		(void)autoplay_manage_light();
+	}
+
+	/* Hold off on the next town trip for a while so we actually dive rather than
+	 * yo-yo to the shops (and don't thrash if we couldn't buy what we wanted). */
 	autoplay_shopping = FALSE;
 	autoplay_no_resupply_until = turn + 3000;
 	dn = p_ptr->recall_dungeon;
@@ -6294,8 +6381,18 @@ static bool autoplay_needs_resupply(void)
 {
 	/* Cooldown after a town trip: stay in the dungeon for a while. */
 	if (turn < autoplay_no_resupply_until) return (FALSE);
+
+	/* A full pack always warrants a trip: we go to sell (which also makes gold)
+	 * and free space. */
 	if (autoplay_pack_full()) return (TRUE);
-	if (autoplay_inv_count(TV_SCROLL, SV_SCROLL_WORD_OF_RECALL) < 1) return (TRUE);
+
+	/* Buying needs gold; a near-broke character should keep diving and earning
+	 * rather than trudge to town for supplies it can't afford. */
+	if (p_ptr->au < 100) return (FALSE);
+
+	/* NB: we do NOT trip on missing Word of Recall -- the bot recalls for free
+	 * (autoplay_start_recall falls back to recall_player), so it never needs the
+	 * scrolls. Triggering on WoR sent it town<->dungeon forever, never playing. */
 	if (autoplay_count_cure() < 1) return (TRUE);
 	if (autoplay_count_food() < 1) return (TRUE);
 	return (FALSE);
@@ -6324,6 +6421,7 @@ static bool autoplay_needs_resupply(void)
 #define AP_EXPLORE  11  /* step toward exploration goal (y,x)  */
 #define AP_DESCEND  12  /* take the down stair underfoot       */
 #define AP_GOSTAIR  13  /* head to the down stair at (y,x)     */
+#define AP_DELVE    14  /* push into unseen real floor (y,x)   */
 
 typedef struct autoplay_action autoplay_action;
 struct autoplay_action
@@ -6383,6 +6481,12 @@ static void autoplay_decide(autoplay_action *a)
 		return;
 	}
 
+	/* Make our view of the level current before reading it. On the very first
+	 * turn of a freshly entered level the view/lite isn't applied yet, so nothing
+	 * is "seen" and exploration had nothing to work from -- the bot stalled until
+	 * the player nudged it. Forcing the pending update fixes that. */
+	if (p_ptr->update) update_stuff();
+
 	explore_sync_seen();
 
 	/* 1. Heal when hurt and a potion is at hand (cheap cure first; big heal if low). */
@@ -6427,11 +6531,31 @@ static void autoplay_decide(autoplay_action *a)
 		}
 		if (autoplay_can_reach(enemy->fy, enemy->fx))
 		{
-			a->type = AP_FIGHT;
-			strnfmt(a->advice, 80, "Fight %s.", nm);
-			return;
+			int eidx = (int)(enemy - m_list);
+
+			/* Count consecutive turns spent on this target. A foe we can actually
+			 * kill goes down in a handful of melee turns; if it is still alive
+			 * after many turns of our attention it is something we can't bring
+			 * down -- it flees / keeps its distance (bait-and-switch), or it's an
+			 * NPC we shouldn't be hitting at all (e.g. Farmer Maggot). Give up on
+			 * it (ignore until it dies or leaves) and get on with exploring. */
+			if (eidx == ap_chase_idx) ap_chase_turns++;
+			else { ap_chase_idx = eidx; ap_chase_turns = 1; }
+
+			if (ap_chase_turns <= 15)
+			{
+				a->type = AP_FIGHT;
+				strnfmt(a->advice, 80, "Fight %s.", nm);
+				return;
+			}
+
+			/* Can't bring it down: give it up and carry on (explore). */
+			ap_ignore_idx = eidx;
+			ap_chase_idx = 0;
+			ap_chase_turns = 0;
+			enemy = NULL;
 		}
-		/* Unreachable: ignore it and carry on. */
+		/* Unreachable / given up: ignore it and carry on. */
 	}
 
 	/* 3. In town: shop, then recall back down. */
@@ -6506,41 +6630,55 @@ static void autoplay_decide(autoplay_action *a)
 		}
 	}
 
-	/* 10. Explore. */
+	/* 10. Explore the seen frontier; if that is exhausted, delve toward the
+	 * nearest unseen real-floor cell (pushing into the dark like click-to-move);
+	 * if even that finds nothing, head to / take a down staircase. Whatever's
+	 * left over is reported with diagnostics so the Oracle can explain a stall. */
 	{
-		int gy = 0, gx = 0;
-		bool got;
+		int gy = 0, gx = 0, sy = 0, sx = 0;
+		int here = cave[p_ptr->py][p_ptr->px].feat;
+		bool got, reach = FALSE, blind, gotstair, reachstair = FALSE;
+
 		explore_no_items = full;
 		got = explore_pick_goal(&gy, &gx);
 		explore_no_items = FALSE;
-		if (got && autoplay_can_reach(gy, gx))
+		if (got) reach = autoplay_can_reach(gy, gx);
+		if (got && reach)
 		{
 			a->type = AP_EXPLORE; a->y = gy; a->x = gx;
 			strcpy(a->advice, "Keep exploring.");
 			return;
 		}
-	}
 
-	/* 11. Level cleared: descend, or head to a known down staircase. */
-	{
-		int here = cave[p_ptr->py][p_ptr->px].feat;
-		int sy = 0, sx = 0;
+		blind = autoplay_blind_goal(&gy, &gx);
+		if (blind)
+		{
+			a->type = AP_DELVE; a->y = gy; a->x = gx;
+			strcpy(a->advice, "Delve toward the unexplored.");
+			return;
+		}
+
 		if ((here == FEAT_MORE) || (here == FEAT_WAY_MORE))
 		{
 			a->type = AP_DESCEND;
 			strcpy(a->advice, "Descend the staircase.");
 			return;
 		}
-		if (autoplay_find_downstair(&sy, &sx) && autoplay_can_reach(sy, sx))
+		gotstair = autoplay_find_downstair(&sy, &sx);
+		if (gotstair) reachstair = autoplay_can_reach(sy, sx);
+		if (gotstair && reachstair)
 		{
 			a->type = AP_GOSTAIR; a->y = sy; a->x = sx;
 			strcpy(a->advice, "Head to the down staircase.");
 			return;
 		}
-	}
 
-	a->type = AP_NONE;
-	strcpy(a->advice, "Nothing left to do.");
+		a->type = AP_NONE;
+		strnfmt(a->advice, 80,
+		        "Nothing to do (goal=%d reach=%d stair=%d/%d dl=%d seen=%ld).",
+		        (int)got, (int)reach, (int)gotstair, (int)reachstair,
+		        (int)dun_level, (long)explore_seen_count);
+	}
 }
 
 static void autoplay_perform(autoplay_action *a)
@@ -6554,6 +6692,7 @@ static void autoplay_perform(autoplay_action *a)
 	case AP_FLEE:     (void)autoplay_flee_from(a->y, a->x); break;
 	case AP_FIGHT:    (void)autoplay_step_towards(a->y, a->x, a->pickup); break;
 	case AP_EXPLORE:  (void)autoplay_step_towards(a->y, a->x, a->pickup); break;
+	case AP_DELVE:    (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, travel_walkable_real); break;
 	case AP_GOSTAIR:  (void)autoplay_step_towards(a->y, a->x, a->pickup); break;
 	case AP_DESCEND:  autoplay_descend(); break;
 	case AP_TOWN:     (void)autoplay_town_step(); break;
@@ -6628,6 +6767,8 @@ void do_cmd_autoplay(void)
 	autoplaying = 1;
 	autoplay_shopping = FALSE;     /* fresh shopping trip bookkeeping */
 	autoplay_no_resupply_until = 0;
+	ap_ignore_idx = ap_chase_idx = 0;
+	ap_chase_turns = 0;
 	p_ptr->redraw |= (PR_STATE);
 	msg_print("Autoplay started (press any key to stop).");
 }
