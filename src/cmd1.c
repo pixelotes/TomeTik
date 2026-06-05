@@ -5560,9 +5560,13 @@ static s16b ap_ignore_idx = 0;    /* monster we stopped chasing (0 = none)   */
 static s16b ap_chase_idx  = 0;    /* monster we are currently going after     */
 static int  ap_chase_turns = 0;   /* consecutive turns targeting it           */
 
+static bool autoplay_too_dangerous(monster_type *m);   /* fwd: threat verdict */
+
 /* Nearest VISIBLE real enemy worth engaging; NULL if none. Skips a foe we gave
- * up chasing and a frightened one fleeing in the distance -- but still returns
- * either if it's right next to us (then we just hit it). */
+ * up chasing, a frightened one fleeing in the distance, and one judged too
+ * dangerous to melee (paralysers, out-of-depth) -- so the bot routes past those
+ * rather than throwing itself at them. A merely-frightened/given-up one adjacent
+ * is still returned (we just hit it); a too-dangerous one is never a target. */
 static monster_type *autoplay_nearest_enemy(int *dist)
 {
 	int i, bd = 0;
@@ -5587,6 +5591,10 @@ static monster_type *autoplay_nearest_enemy(int *dist)
 		/* Ignore the give-up target and frightened fleers -- unless adjacent. */
 		if ((i == ap_ignore_idx) && (d > 1)) continue;
 		if (m_ptr->monfear && (d > 1)) continue;
+
+		/* Never melee a foe judged too dangerous (paralyser, out-of-depth): the
+		 * bot routes past it instead of dying on its gaze/claws. */
+		if (autoplay_too_dangerous(m_ptr)) continue;
 
 		if (!best || (d < bd)) { best = m_ptr; bd = d; }
 	}
@@ -6014,6 +6022,16 @@ static bool autoplay_too_dangerous(monster_type *m)
 			if (avoid == 1) return (TRUE);
 			if (avoid == 0) return (FALSE);
 		}
+	}
+
+	/* A foe that can PARALYSE us while we lack Free Action: meleeing it is the
+	 * classic way the bot dies (floating eyes -- you bump it, it gazes, you're
+	 * paralysed, you die). Don't engage; route past it instead. */
+	if (!p_ptr->free_act && autoplay_cfg("avoid_paralyze", 1))
+	{
+		int b;
+		for (b = 0; b < 4; b++)
+			if (r_ptr->blow[b].effect == RBE_PARALYZE) return (TRUE);
 	}
 
 	/* A unique noticeably above our level: don't pick the fight. */
@@ -6614,13 +6632,15 @@ static void autoplay_decide(autoplay_action *a)
 
 	if (enemy)
 	{
-		bool dangerous = autoplay_too_dangerous(enemy);
+		/* nearest_enemy already filtered out foes too dangerous to melee, so a
+		 * returned enemy is one we're willing to fight. We still bail out (flee)
+		 * if we're critically low and out of cures. */
 		bool desperate = (chp * 4 <= mhp) && (autoplay_find_heal(TRUE) < 0);
 		char nm[80];
 		monster_desc(nm, enemy, 0);
 		a->y = enemy->fy; a->x = enemy->fx;
 
-		if ((dangerous || desperate) && autoplay_can_flee(enemy->fy, enemy->fx))
+		if (desperate && autoplay_can_flee(enemy->fy, enemy->fx))
 		{
 			a->type = AP_FLEE;
 			strnfmt(a->advice, 80, "Flee from %s.", nm);
