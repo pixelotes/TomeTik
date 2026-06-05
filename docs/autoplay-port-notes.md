@@ -310,14 +310,19 @@ Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
     Economía: `autoplay_shop_buy_needs` compra flasks de oil para todos (lanzables) y **munición**
     del lanzador (`AP_WANT_AMMO=40`) si hay arco. *Pendiente v3*: recoger ammo tirado del suelo.
 - **Fase 1b**: navegación por wilderness (descubrir mazmorras a pie) — recall cubre casi todo.
-- Afinar: amenaza de monstruos (tabla de peligro real), umbrales de resupply/compra.
-  - **Follow-up: amenaza del CONJUNTO / cluster, no solo individual.** Hoy se evalúa cada
-    monstruo por separado (`autoplay_too_dangerous`); un solo jackal o araña es "fácil", pero
-    un **pack** de 6-10 mata por suma de daño/turno. Sumar la amenaza (daño esperado/turno)
-    de todos los enemigos visibles —o de un cluster cercano— y, si supera un umbral relativo
-    a HP/AC, **huir/teleport/recall** en vez de pelear de uno en uno. Considera también
-    multiplicadores (`MULTIPLY`/breeders) y los que rodean (varios adyacentes = no se puede
-    huir a pie → escape). Esto evita las muertes por pack de jackals/arañas/perros.
+- **Tabla de amenaza real — HECHO**: `autoplay_monster_danger(m)` = daño esperado/turno
+  (suma de blows × ~60% acierto + extra por casters/breathers según HP×freq + bump por
+  velocidad). `autoplay_too_dangerous` ahora incluye "un solo foe que me mata en
+  `danger_turns` turnos (def 2) → evitar melee" además de los casos previos (paralizador,
+  unique/out-of-depth).
+  - **Cluster / packs — HECHO**: `autoplay_cluster_danger` suma el daño/turno de los foes
+    visibles a ≤`cluster_range` (def 8). Paso **1c2** en `decide`: si hay ≥2 foes y
+    `cluster_danger * pack_flee_turns (def 4) >= HP` → **escape (Phase Door/Teleport) o huir
+    a pie**; si acorralado, cae a ranged/melee. Mata-packs de jackals/arañas resuelto. Knobs
+    en `autoplay.lua`: `danger_turns`, `pack_flee_turns`, `cluster_range`.
+  - *Pendiente*: mitigación por AC/resistencias en el cálculo (hoy AC-agnóstico); breeders
+    (`MULTIPLY`) merecen un extra.
+- Afinar: umbrales de resupply/compra.
 - Completitud de quest por **muerte del guardián** (`r_info[FINAL_GUARDIAN].max_num==0`) en vez
   de "tocó fondo"; coger el `FINAL_ARTIFACT`/`FINAL_OBJECT` concreto antes de salir.
 - Gates `plev` de la ruta = estimaciones; afinar con partidas reales (el bot melee-only es frágil).

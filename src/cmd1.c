@@ -5632,6 +5632,67 @@ static bool autoplay_low_value_foe(monster_type *m)
 	return (FALSE);
 }
 
+/* ---- threat model: roughly how much damage a foe deals us per turn ---- */
+
+/* Expected damage/turn this monster can do to us: melee blows (average roll,
+ * crude ~60% land factor), a chunk for casters/breathers scaled by their HP and
+ * spell frequency, and a bump for being faster than us. Approximate but enough
+ * to compare foes and sum a pack's threat. Always >= 1. */
+static int autoplay_monster_danger(monster_type *m)
+{
+	monster_race *r_ptr = &r_info[m->r_idx];
+	int b, dmg = 0;
+
+	/* Melee: sum the average damage of each blow. */
+	for (b = 0; b < 4; b++)
+	{
+		if (!r_ptr->blow[b].method) continue;
+		dmg += (r_ptr->blow[b].d_dice * (r_ptr->blow[b].d_side + 1)) / 2;
+	}
+	dmg = (dmg * 3) / 5;        /* not every swing lands (crude, AC-agnostic) */
+
+	/* Casters / breathers: breaths scale with current HP; approximate the extra
+	 * damage/turn as a fraction of its HP times how often it acts with magic. */
+	if (r_ptr->freq_inate || r_ptr->freq_spell)
+		dmg += ((int)(m->maxhp / 6) * (r_ptr->freq_inate + r_ptr->freq_spell)) / 100;
+
+	/* Faster than us -> it gets extra turns to hit us. */
+	if (m->mspeed > 110)
+		dmg += (dmg * (m->mspeed - 110)) / 20;
+
+	return ((dmg < 1) ? 1 : dmg);
+}
+
+/* Sum of danger/turn of the visible hostiles near us (within cluster_range
+ * tiles), the count in *foes, and the nearest of them in *nearest. The
+ * pack-threat metric: one jackal is nothing, ten are lethal. */
+static int autoplay_cluster_danger(int *foes, monster_type **nearest)
+{
+	int i, total = 0, n = 0, bd = 0;
+	int range = autoplay_cfg("cluster_range", 8);
+	monster_type *best = NULL;
+
+	for (i = 1; i < m_max; i++)
+	{
+		monster_type *m = &m_list[i];
+		int d;
+
+		if (!m->r_idx || !m->ml) continue;
+		if (m->status != MSTATUS_ENEMY) continue;
+		if (m->monfear) continue;                 /* a fleeing foe isn't pressing us */
+		d = distance(p_ptr->py, p_ptr->px, m->fy, m->fx);
+		if (d > range) continue;
+
+		total += autoplay_monster_danger(m);
+		n++;
+		if (!best || (d < bd)) { best = m; bd = d; }
+	}
+
+	if (foes) *foes = n;
+	if (nearest) *nearest = best;
+	return (total);
+}
+
 /* Nearest VISIBLE real enemy worth engaging; NULL if none. Skips a foe we gave
  * up chasing, a frightened one fleeing in the distance, and one judged too
  * dangerous to melee (paralysers, out-of-depth) -- so the bot routes past those
@@ -6355,6 +6416,11 @@ static bool autoplay_too_dangerous(monster_type *m)
 	/* Any monster whose native level roughly doubles ours (and is well above
 	 * it in absolute terms): treat as out-of-depth and avoid. */
 	if ((r_ptr->level >= plev * 2) && (r_ptr->level > plev + 5)) return (TRUE);
+
+	/* Real threat: a single foe whose expected damage/turn could kill us in a
+	 * couple of rounds -- don't trade melee with it, route around / shoot / flee. */
+	if (autoplay_monster_danger(m) * autoplay_cfg("danger_turns", 2) >= p_ptr->chp)
+		return (TRUE);
 
 	return (FALSE);
 }
@@ -7246,6 +7312,40 @@ static void autoplay_decide(autoplay_action *a)
 		a->type = AP_WAIT;
 		strcpy(a->advice, "Wait out the confusion.");
 		return;
+	}
+
+	/* 1c2. Overwhelmed by a PACK: if the combined danger/turn of the nearby foes
+	 * is lethal and there is more than one, break away -- blink/teleport if we
+	 * can, else flee on foot -- before they surround and grind us down (the
+	 * jackal / spider-pack killer). If we can't get away, fall through and
+	 * fight/shoot what we can. */
+	if (dun_level > 0)
+	{
+		int foes = 0;
+		monster_type *near = NULL;
+		int cd = autoplay_cluster_danger(&foes, &near);
+
+		if ((foes >= 2) && near &&
+		                (cd * autoplay_cfg("pack_flee_turns", 4) >= p_ptr->chp))
+		{
+			if (!p_ptr->blind && !p_ptr->confused)
+			{
+				int s = autoplay_find_escape();
+				if (s >= 0)
+				{
+					a->type = AP_ESCAPE; a->item = s;
+					strnfmt(a->advice, 80, "A pack of %d closing in -- escape!", foes);
+					return;
+				}
+			}
+			if (autoplay_can_flee(near->fy, near->fx))
+			{
+				a->type = AP_FLEE; a->y = near->fy; a->x = near->fx;
+				strnfmt(a->advice, 80, "A pack of %d -- flee!", foes);
+				return;
+			}
+			/* Cornered: nothing better -- fall through to ranged / melee. */
+		}
 	}
 
 	/* 1d. Ranged attack ("Random bullshit go!"): in the dungeon, with nothing
