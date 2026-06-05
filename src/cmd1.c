@@ -5832,6 +5832,38 @@ static bool autoplay_light_needs(void)
 	return (FALSE);
 }
 
+/* No usable spare light anywhere: no fresh torch in the pack, and (if wielding a
+ * lantern) no oil to refuel it. */
+static bool autoplay_no_spare_light(void)
+{
+	object_type *lite = &p_ptr->inventory[INVEN_LITE];
+
+	if (autoplay_find_torch() >= 0) return (FALSE);          /* a spare torch */
+	if (lite->k_idx && (lite->tval == TV_LITE) &&
+	                (lite->sval == SV_LITE_LANTERN) && (autoplay_find_oil() >= 0))
+		return (FALSE);                                       /* oil for the lamp */
+	return (TRUE);
+}
+
+/* In the dark with no way to relight: the worn light gives nothing (no light
+ * worn, or a torch/lantern burnt to 0) AND there's no spare/oil to fix it.
+ * Diving like this is suicide -- and with nothing lit the frontier search finds
+ * no goal, so the bot would otherwise just stall. (Permanent/artifact lights,
+ * which never run out, are never "dark".) */
+static bool autoplay_light_dark(void)
+{
+	object_type *lite = &p_ptr->inventory[INVEN_LITE];
+	bool dark;
+
+	if (!lite->k_idx) dark = TRUE;
+	else if (lite->tval != TV_LITE) dark = FALSE;
+	else if ((lite->sval == SV_LITE_TORCH) || (lite->sval == SV_LITE_LANTERN))
+		dark = (lite->timeout <= 0);
+	else dark = FALSE;     /* permanent light (phial, star, ...) */
+
+	return (dark && autoplay_no_spare_light());
+}
+
 /* Take one step toward (gy,gx) over terrain accepted by 'hook', via
  * move_player_aux -- so stepping onto an adjacent monster ATTACKS it. Returns
  * TRUE if a step/attack was issued (a turn spent). The seen-gated
@@ -6553,6 +6585,17 @@ static bool autoplay_needs_resupply(void)
 	 * and free space. */
 	if (autoplay_pack_full()) return (TRUE);
 
+	/* Running low on light with no spare/oil: go restock before we end up stuck
+	 * in the dark. Checked before the gold gate -- torches are cheap and going
+	 * dark is lethal, so we make the trip even near-broke. */
+	{
+		object_type *lite = &p_ptr->inventory[INVEN_LITE];
+		if (autoplay_no_spare_light() && lite->k_idx && (lite->tval == TV_LITE) &&
+		                ((lite->sval == SV_LITE_TORCH) || (lite->sval == SV_LITE_LANTERN)) &&
+		                (lite->timeout < 500))
+			return (TRUE);
+	}
+
 	/* Buying needs gold; a near-broke character should keep diving and earning
 	 * rather than trudge to town for supplies it can't afford. */
 	if (p_ptr->au < autoplay_cfg("min_gold", 100)) return (FALSE);
@@ -6807,11 +6850,29 @@ static void autoplay_decide(autoplay_action *a)
 	/* The rest only happen with no foe pressing. */
 	if (!enemy)
 	{
-		/* 5. Tend the light source. */
+		/* 5. Tend the light source (swap in a fresh torch / refuel the lamp). */
 		if (autoplay_light_needs())
 		{
 			a->type = AP_LIGHT;
 			strcpy(a->advice, "Tend your light source.");
+			return;
+		}
+
+		/* 5b. In the dark with nothing to relight with: bail to town to restock.
+		 * Diving blind is suicide, and with nothing lit the frontier search picks
+		 * no goal -- so this MUST come before exploration or the bot just stalls
+		 * in the dark (which is exactly what it did when a torch burnt out with no
+		 * spare). */
+		if ((dun_level > 0) && autoplay_light_dark())
+		{
+			if (p_ptr->word_recall > 0)
+			{
+				a->type = AP_WAIT;
+				strcpy(a->advice, "Out of light -- waiting for recall to town.");
+				return;
+			}
+			a->type = AP_RECALL;
+			strcpy(a->advice, "Out of light -- recall to town to restock torches.");
 			return;
 		}
 
@@ -6965,6 +7026,7 @@ static void autoplay_perform(autoplay_action *a)
 	case AP_EAT:      eat_food(a->item); break;
 	case AP_IDENTIFY: autoplay_do_identify(a->item); break;
 	case AP_EQUIP:    autoplay_wield(a->item); break;
+	case AP_LIGHT:    (void)autoplay_manage_light(); break;
 	case AP_FLEE:     (void)autoplay_flee_from(a->y, a->x); break;
 	case AP_FIGHT:    (void)autoplay_step_towards(a->y, a->x, a->pickup); break;
 	case AP_EXPLORE:  (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, explore_walkable_clear); break;
@@ -7006,7 +7068,24 @@ void autoplay_step(void)
 		return;
 	}
 
+	/* Every autoplay action must spend a turn. If one doesn't (a step that found
+	 * no route, a tend-light that couldn't act, ...), process_player's
+	 * `while (p_ptr->energy >= 100)` loop re-runs the SAME decision forever with
+	 * the same state -- the bot looks frozen ("se queda parado"). Detect a
+	 * no-energy action and stop cleanly, naming the culprit so the cause is
+	 * visible (this is how the "torch out -> stuck" freeze surfaces). */
+	energy_use = 0;
 	autoplay_perform(&a);
+
+	/* AP_REST doesn't spend energy here -- it hands off to the resting subsystem
+	 * (resting = -1), which is dispatched ahead of autoplay and burns the turns.
+	 * Every other action must consume a turn; if one didn't, stop cleanly. */
+	if (autoplaying && (energy_use == 0) && (a.type != AP_REST))
+	{
+		autoplaying = 0;
+		p_ptr->redraw |= (PR_STATE);
+		msg_format("Autoplay stalled -- no turn taken for: %s", a.advice);
+	}
 }
 
 /*
