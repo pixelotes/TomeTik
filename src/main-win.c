@@ -1151,14 +1151,17 @@ static void load_prefs(void)
 
 	/* Extract the "arg_bigtile" flag */
 	arg_bigtile = GetPrivateProfileInt("Angband", "Bigtile", FALSE, ini_file);
-	use_bigtile = arg_bigtile;
+	/* TomeTik: bigtile/zoom solo aplican en modo gráfico; en ASCII deben quedar
+	 * apagados aunque el .ini los traiga activos, o el mapa se dibuja a doble
+	 * ancho con huecos negros (ver Term_xtra_win_react) */
+	use_bigtile = arg_graphics ? arg_bigtile : FALSE;
 
 	/*
 	 * Start TomeTik 0.3
 	 */
 	/* Extract the "arg_zoom" flag */
 	arg_zoom = GetPrivateProfileInt("Angband", "Zoom", FALSE, ini_file);
-	if (arg_zoom == 1) use_zoom = FALSE;
+	if (!arg_graphics || arg_zoom == 1) use_zoom = FALSE;
 	else use_zoom = TRUE;
 	/*
 	 * End TomeTik 0.3
@@ -1878,6 +1881,27 @@ static errr Term_xtra_win_react(void)
 
 		/* Change setting */
 		use_graphics = arg_graphics;
+
+		/*
+		 * TomeTik: en modo ASCII hay que apagar todo el "modo tile", igual que
+		 * hace el frontend GTK2 (graf_nuke/graf_init togglean higher_pict). Si no,
+		 * z-term usa Term_fresh_row_both (ruta gráfica) con el bigtile/zoom heredados
+		 * del .ini: el mapa se dibuja a doble ancho con marcadores 255 en las columnas
+		 * pares que esa ruta se salta, dejando huecos negros en las tiradas de suelo.
+		 */
+		{
+			int j;
+
+			/* "Term_pict" solo para datos gráficos reales */
+			for (j = 0; j < MAX_TERM_DATA; j++)
+			{
+				data[j].t.higher_pict = use_graphics ? TRUE : FALSE;
+			}
+
+			/* bigtile/zoom no tienen sentido en texto */
+			use_bigtile = use_graphics ? arg_bigtile : FALSE;
+			use_zoom = use_graphics ? (arg_zoom != 1) : FALSE;
+		}
 
 		/* Reset visuals */
 		reset_visuals();
@@ -2649,8 +2673,9 @@ static void term_data_link(term_data *td)
 	/* Use a "software" cursor */
 	t->soft_cursor = TRUE;
 
-	/* Use "Term_pict" for "graphic" data */
-	t->higher_pict = TRUE;
+	/* Use "Term_pict" for "graphic" data (solo si arrancamos con gráficos;
+	 * en ASCII puro debe ser FALSE para usar la ruta de texto de z-term, como GTK2) */
+	t->higher_pict = arg_graphics ? TRUE : FALSE;
 
 	/* Erase with "white space" */
 	t->attr_blank = TERM_WHITE;
