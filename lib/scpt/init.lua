@@ -44,3 +44,6 @@ tome_dofile_anywhere(ANGBAND_DIR_SCPT, "dg_test.lua", FALSE)
 
 -- A nice custom intro :)
 tome_dofile("intro.lua")
+
+-- AuToME: tunable auto-play policy (threat table, shopping/thresholds)
+tome_dofile("autoplay.lua")
