@@ -3804,6 +3804,135 @@ static bool store_process_command(void)
 }
 
 
+/* ------------------------------------------------------------------------- *
+ * Auto-play store API: non-interactive buy/sell, driven by the bot in cmd1.c.
+ * These reuse the static helpers above (price_item, store_will_buy, store_carry,
+ * ...) and the static st_ptr/ot_ptr/cur_store_num context, so they must live in
+ * store.c. They never open the interactive store UI.
+ * ------------------------------------------------------------------------- */
+
+/* Point the static store context at town's store #store_num. */
+static void store_bot_set(int town_num, int store_num)
+{
+	cur_store_num = store_num;
+	st_ptr = &town_info[town_num].store[store_num];
+	ot_ptr = &ow_info[st_ptr->owner];
+}
+
+/* Refresh a store's stock as if the player had just walked up to it (so the bot
+ * sees current goods rather than whatever was there on the last visit). */
+void store_bot_refresh(int town_num, int store_num)
+{
+	store_type *st = &town_info[town_num].store[store_num];
+	int n = (turn - st->last_visit) / (10L * STORE_TURNS);
+	int i;
+
+	if (n > 10) n = 10;
+	for (i = 0; i < n; i++) store_maint(town_num, store_num);
+	st->last_visit = turn;
+}
+
+/* First stock slot in (town,store) holding tval (and sval, if sval >= 0), or -1. */
+int store_bot_find(int town_num, int store_num, int tval, int sval)
+{
+	store_type *st = &town_info[town_num].store[store_num];
+	int i;
+
+	for (i = 0; i < st->stock_num; i++)
+	{
+		object_type *o_ptr = &st->stock[i];
+		if (o_ptr->tval != tval) continue;
+		if ((sval >= 0) && (o_ptr->sval != sval)) continue;
+		return (i);
+	}
+	return (-1);
+}
+
+/* Buy up to 'amt' of stock slot 'stock_idx' from (town,store) into the pack.
+ * Buys fewer if short on gold or pack room. Returns the number bought. */
+int store_bot_buy(int town_num, int store_num, int stock_idx, int amt)
+{
+	object_type forge;
+	object_type *o_ptr;
+	s32b unit;
+
+	store_bot_set(town_num, store_num);
+	if ((stock_idx < 0) || (stock_idx >= st_ptr->stock_num)) return (0);
+
+	o_ptr = &st_ptr->stock[stock_idx];
+	if (amt > o_ptr->number) amt = o_ptr->number;
+	if (amt < 1) return (0);
+
+	object_copy(&forge, o_ptr);
+	forge.number = 1;
+	unit = price_item(&forge, ot_ptr->min_inflate, FALSE);   /* store sells */
+	if (unit < 0) unit = 0;
+
+	/* Clamp to gold and pack room. */
+	if (unit > 0)
+	{
+		s32b afford = (unit > 0) ? (p_ptr->au / unit) : 0;
+		if (amt > afford) amt = afford;
+	}
+	if (amt < 1) return (0);
+
+	forge.number = amt;
+	while ((amt > 0) && !inven_carry_okay(&forge)) { amt--; forge.number = amt; }
+	if (amt < 1) return (0);
+
+	p_ptr->au -= unit * amt;
+	object_aware(&forge);
+	object_known(&forge);
+	forge.ident |= IDENT_STOREB;
+	forge.note = 0;
+	(void)inven_carry(&forge, FALSE);
+
+	store_item_increase(stock_idx, -amt);
+	store_item_optimize(stock_idx);
+
+	p_ptr->update |= (PU_BONUS);
+	p_ptr->window |= (PW_INVEN | PW_EQUIP | PW_PLAYER);
+	p_ptr->redraw |= (PR_GOLD);
+	return (amt);
+}
+
+/* Sell one of pack item 'item' to (town,store) if the store will buy it.
+ * Returns the gold gained (0 if it won't buy / no room / worthless). */
+s32b store_bot_sell(int town_num, int store_num, int item)
+{
+	object_type forge;
+	object_type *o_ptr = &p_ptr->inventory[item];
+	s32b price;
+
+	store_bot_set(town_num, store_num);
+	if (!o_ptr->k_idx) return (0);
+
+	object_copy(&forge, o_ptr);
+	forge.number = 1;
+	forge.note = 0;
+
+	if (!store_will_buy(&forge)) return (0);
+	if (!store_check_num(&forge)) return (0);
+
+	price = price_item(&forge, ot_ptr->min_inflate, TRUE);   /* store buys */
+	if (price <= 0) return (0);
+
+	/* Selling reveals the item. */
+	object_aware(o_ptr);
+	object_known(o_ptr);
+
+	p_ptr->au += price;
+	inven_item_increase(item, -1);
+	inven_item_optimize(item);
+	(void)store_carry(&forge);
+
+	p_ptr->update |= (PU_BONUS);
+	p_ptr->window |= (PW_INVEN | PW_EQUIP | PW_PLAYER);
+	p_ptr->redraw |= (PR_GOLD);
+	return (price);
+}
+
+
 /*
  * Enter a store, and interact with it.
  *

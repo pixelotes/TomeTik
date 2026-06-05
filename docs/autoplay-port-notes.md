@@ -32,6 +32,22 @@ Se desarrolla en **`2.2.2`** y se propaga por `git cherry-pick` a **`main`, `iso
 - `extern void autoplay_step(void);`
 - `extern void eat_food(int item);`             (extraída de do_cmd_eat_food)
 - `extern bool quaff_potion(int tval, int sval, int pval, int pval2);` (pasó a no-static)
+- API de tienda (Fase 2b): `store_bot_refresh`, `store_bot_find`, `store_bot_buy`, `store_bot_sell`.
+
+### `src/store.c` — API de tienda no-interactiva (Fase 2b)
+Funciones nuevas que reusan los helpers `static` locales (`price_item`, `store_will_buy`,
+`store_carry`, `store_check_num`, `store_item_increase/optimize`) y el contexto
+`st_ptr`/`ot_ptr`/`cur_store_num`; **deben vivir en store.c**. Insertadas antes de
+`do_cmd_store`. Nunca abren la UI:
+- `store_bot_set(town,store)` (static) — fija el contexto.
+- `store_bot_refresh(town,store)` — `store_maint` catch-up (stock actual).
+- `store_bot_find(town,store,tval,sval)` — localiza en el stock (sval<0 = cualquiera).
+- `store_bot_buy(town,store,stock_idx,amt)` — compra (precio `price_item(...,min_inflate,FALSE)`,
+  acota a oro y hueco de mochila).
+- `store_bot_sell(town,store,item)` — vende 1 si `store_will_buy` (precio
+  `price_item(...,min_inflate,TRUE)`).
+- **OJO**: pisar `FEAT_SHOP` auto-abre la UI (cmd1.c:~3778 → `command_new='_'`). El bot
+  transacciona desde una **casilla adyacente**, nunca pisando la entrada.
 
 ### `src/cmd6.c` — primitivas de consumo sin prompt
 - `quaff_potion(...)`: **quitar `static`** (para que el bot beba por índice).
@@ -115,6 +131,14 @@ Se desarrolla en **`2.2.2`** y se propaga por `git cherry-pick` a **`main`, `iso
   `autoplay_identify_step` (object_aware+object_known+IDENT_MENTAL, consume Scroll of
   Identify), `autoplay_slot_autoequippable`, `autoplay_wield`, `autoplay_autoequip_step`
   (compara por `object_value`, solo conocido/sensado y no maldito).
+- Tiendas/resupply (Fase 2b): defines `AP_WANT_*` (objetivos de stock), estáticos
+  `autoplay_shopping`/`autoplay_shop_visited[]`; `autoplay_inv_count`, `autoplay_is_cure`,
+  `autoplay_is_staple`, `autoplay_count_cure/food`, `autoplay_keep_item` (qué NO vender),
+  `autoplay_shop_sell_junk`, `autoplay_buy_one`/`autoplay_shop_buy_needs`,
+  `autoplay_find_shop`/`autoplay_shop_neighbor` (caminar adyacente, no pisar),
+  `autoplay_town_step` (tour de tiendas → recall abajo), `autoplay_needs_resupply` (disparo
+  en mazmorra → recall arriba). Venta **agresiva**: vende todo lo no-equipable y no-consumible
+  de la lista. Navegación: **camina** a cada tienda.
 - **`autoplay_step()`** — escalera de prioridades (1 acción/turno):
   curar → combate/huida → (en pueblo) recall a mazmorra → comer → luz → identificar →
   auto-equipar → descansar → explorar → bajar escaleras.
@@ -130,11 +154,13 @@ Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
 5. `fix(autoplay)`: no bloquearse en el prompt "Pick up X? (y/n)".
 6. `feat(autoplay)`: navegación de mundo fase 1 — recall town↔mazmorra.
 7. `feat(autoplay)`: identificar desconocidos y auto-equipar lo mejor.
-8. (en curso) no recoger esqueletos; y Fase 2b: comprar/vender/resupply (tocará `store.c`).
+8. `fix(autoplay)`: no recoger esqueletos (TV_SKELETON); `docs`: estas notas.
+9. `feat(autoplay)`: Fase 2b — tiendas (vender agresivo / comprar suministros / resupply),
+   `store.c` API no-interactiva + flujo de pueblo en cmd1.c.
 
 ## Pendiente
-- **Fase 2b**: tiendas (comprar/vender/resupply). Tocará `store.c` (varias funciones son
-  `static`: `price_item`, `store_carry`, `store_will_buy`, `store_item_increase/optimize` —
-  habrá que exponerlas o añadir una API no-static), + contexto `st_ptr`/`ot_ptr`.
-- **Cerebro Lua**: ruta/estrategia ("a qué mazmorra ir") como datos; bindings tolua.
+- **Cerebro Lua**: ruta/estrategia ("a qué mazmorra ir") como datos; bindings tolua. Modelo
+  acordado: híbrido (motor C de grindeo+recall + ruta curada en Lua + lectura de quests).
 - **Fase 1b**: navegación por wilderness (descubrir mazmorras a pie) — recall cubre casi todo.
+- Afinar: amenaza de monstruos (tabla de peligro real), umbrales de resupply/compra,
+  selección de mazmorra por nivel del pj.
