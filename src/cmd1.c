@@ -6385,6 +6385,44 @@ static void autoplay_set_recall_target(int dungeon, int depth)
  * Fills *dungeon and *depth (the depth to aim a town->dungeon recall at:
  * wherever we left off, clamped into [mindepth, target]). If `name` is non-NULL
  * it gets a human-readable label for the objective (Oracle / recall messages). */
+
+/* Is the route's objective for dungeon dn (target depth tgt) finished? A dungeon
+ * with a FINAL_GUARDIAN (the quest lairs) is "done" only when that guardian unique
+ * is dead (r_info[g].max_num == 0) -- reaching the bottom isn't enough; you must
+ * kill the boss. The principal ladder (no guardian) is done at the target depth. */
+static bool autoplay_dungeon_done(int dn, int tgt)
+{
+	int g = d_info[dn].final_guardian;
+
+	if ((g > 0) && (g < max_r_idx)) return (r_info[g].max_num == 0);
+	return (max_dlv[dn] >= tgt);
+}
+
+/* Can we plausibly beat this dungeon's final guardian right now? Lets the route
+ * SKIP a quest whose boss is still out of our league (we move on and come back
+ * when stronger) instead of locking onto an unwinnable fight forever. TRUE if
+ * there's no guardian, it's already dead, or it looks beatable. */
+static bool autoplay_guardian_ok(int g)
+{
+	monster_race *r_ptr;
+
+	if ((g <= 0) || (g >= max_r_idx)) return (TRUE);
+	r_ptr = &r_info[g];
+	if (r_ptr->max_num == 0) return (TRUE);          /* already slain */
+
+	/* A paralyser we can't safely melee without Free Action: not yet. */
+	if (!p_ptr->free_act && autoplay_cfg("avoid_paralyze", 1))
+	{
+		int b;
+		for (b = 0; b < 4; b++)
+			if (r_ptr->blow[b].effect == RBE_PARALYZE) return (FALSE);
+	}
+
+	/* Out of our depth -- wait until we're roughly its level. */
+	if (r_ptr->level > p_ptr->lev + 5) return (FALSE);
+	return (TRUE);
+}
+
 static void autoplay_objective(int *dungeon, int *depth, char *name)
 {
 	int i, best = -1, best_depth = 0, best_ridx = -1;
@@ -6398,8 +6436,9 @@ static void autoplay_objective(int *dungeon, int *depth, char *name)
 				break;
 			if (dn < 0) break;                              /* end of the list */
 			if ((dn <= 0) || (dn >= max_d_idx)) continue;   /* wilderness/bogus */
-			if (max_dlv[dn] >= tgt) continue;               /* already finished */
+			if (autoplay_dungeon_done((int)dn, (int)tgt)) continue;  /* cleared / boss dead */
 			if (p_ptr->lev < plev) continue;                /* too weak: retry later */
+			if (!autoplay_guardian_ok(d_info[dn].final_guardian)) continue;  /* boss too tough yet */
 			best = (int)dn; best_depth = (int)tgt; best_ridx = i;
 			break;
 		}
@@ -6413,7 +6452,7 @@ static void autoplay_objective(int *dungeon, int *depth, char *name)
 			if (!(d_info[i].flags1 & DF1_PRINCIPAL)) continue;
 			if (i == DUNGEON_WILDERNESS) continue;
 			if (p_ptr->lev < d_info[i].min_plev) continue;
-			if (max_dlv[i] >= d_info[i].maxdepth) continue;
+			if (autoplay_dungeon_done(i, d_info[i].maxdepth)) continue;
 			if ((best < 0) || (d_info[i].mindepth > d_info[best].mindepth)) best = i;
 		}
 		if (best < 0) best = DUNGEON_BARROW_DOWNS;
