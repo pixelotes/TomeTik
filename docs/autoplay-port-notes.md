@@ -209,6 +209,40 @@ Funciones nuevas que reusan los helpers `static` locales (`price_item`, `store_w
   diferir en 2.3.x → vigilar el cherry-pick de esa línea; `autoplay.lua` es fichero nuevo (sin
   conflicto). Editar el `.lua` re-tunea el bot **sin recompilar**.
 
+## Ruta / estrategia (Paso C) — a qué mazmorra ir
+
+- **`lib/scpt/autoplay.lua`**: tabla `autoplay_route` = lista ordenada de
+  `{dungeon, plev, depth, name}` (índices de `lib/edit/d_info.txt`). Es **dato puro,
+  tweakeable**: reordenar/borrar/re-gatear sin recompilar. Espina dorsal = los 4
+  dungeons `PRINCIPAL` (Barrow-Downs→Mirkwood→Mordor→Angband, escalera de
+  profundidad 1..127); el resto son raids opcionales de jefe (`FINAL_GUARDIAN`) y
+  botín (`FINAL_ARTIFACT`/`FINAL_OBJECT`), intercalados por nivel. `plev` es un gate
+  de **supervivencia** (más estricto que el `min_plev` "puede entrar" de d_info):
+  suele fijarse cerca de la profundidad del fondo, para que el bot grindee antes de
+  un boss profundo. Accesores Lua: `autoplay_route_at(i)` → `dungeon,plev,depth`
+  (devuelve `dungeon=-1` pasado el final = centinela; **Lua 4.0 no tiene
+  `table.getn`**), `autoplay_route_name(i)` → etiqueta.
+- **`cmd1.c`** `autoplay_objective(int *dungeon,int *depth,char *name)`: recorre la
+  ruta y coge la **primera** entrada no terminada (`max_dlv[dungeon] < depth`) y para
+  la que hay nivel (`p_ptr->lev >= plev`). Si Lua ausente o lista agotada →
+  **fallback**: el dungeon `PRINCIPAL` más profundo que puede entrar (`min_plev`) y no
+  ha tocado fondo. `depth` = donde lo dejó (`max_dlv`), clamp a `[mindepth,target]`.
+  Usa `DF1_PRINCIPAL` (0x1), campos `mindepth/maxdepth/min_plev/flags1`, `max_d_idx`,
+  `dungeon_type` (dungeon actual), `d_name + d_info[i].name` (nombre fallback).
+- **Integración** en `cmd1.c`:
+  - `autoplay_town_step` (recall tras comprar): el destino del recall = `autoplay_objective`,
+    no el último dungeon. Mensaje "recalling to X (Ln)".
+  - Cola del dead-end de `autoplay_decide` (paso "11b", antes del scum): si el nivel
+    está agotado y el objetivo es **otro** dungeon (éste limpio / fuera de plan) →
+    `AP_RECALL` al pueblo (o `AP_WAIT` si recall ya pendiente) en vez de hacer scum
+    eterno. Si el objetivo sigue siendo este dungeon → cae al scum (regenera para
+    hallar bajada).
+- **Completitud**: se aproxima por `max_dlv[dungeon] >= depth` (tocó fondo ≈ hecho).
+  NO comprueba que el `FINAL_GUARDIAN` esté muerto (mejora futura: `r_info[guard].max_num==0`).
+- **OJO porting**: `autoplay.lua` es nuevo (sin conflicto). `call_lua` soporta múltiples
+  retornos (`ret="ddd"`, cada arg `s32b*`). En LP64+L64 `s32b==int`. Probar con
+  `autoplay_lua_ok()` antes (peta si falta la global).
+
 ## Historial de commits (lógicos)
 
 Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
@@ -227,10 +261,13 @@ Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
 11. `fix(autoplay)`: robustez (arranque/vista+delve, WoR-loop+gold-gate, give-up de evasivos/
     Maggot, responsividad tecla+clic con DrainEvents, equip antes del recall).
 12. `feat(autoplay)`: **puente Lua** (Paso B) — `autoplay.lua` config+threat table; A* rodea NPCs.
+13. `feat(autoplay)`: **ruta/estrategia** (Paso C) — tabla `autoplay_route` en Lua (espina
+    principal + raids de quest por nivel); `autoplay_objective` dirige el recall y el salto
+    entre mazmorras al limpiar una.
 
 ## Pendiente
-- **Cerebro Lua**: ruta/estrategia ("a qué mazmorra ir") como datos; bindings tolua. Modelo
-  acordado: híbrido (motor C de grindeo+recall + ruta curada en Lua + lectura de quests).
 - **Fase 1b**: navegación por wilderness (descubrir mazmorras a pie) — recall cubre casi todo.
-- Afinar: amenaza de monstruos (tabla de peligro real), umbrales de resupply/compra,
-  selección de mazmorra por nivel del pj.
+- Afinar: amenaza de monstruos (tabla de peligro real), umbrales de resupply/compra.
+- Completitud de quest por **muerte del guardián** (`r_info[FINAL_GUARDIAN].max_num==0`) en vez
+  de "tocó fondo"; coger el `FINAL_ARTIFACT`/`FINAL_OBJECT` concreto antes de salir.
+- Gates `plev` de la ruta = estimaciones; afinar con partidas reales (el bot melee-only es frágil).
