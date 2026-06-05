@@ -290,6 +290,11 @@ Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
     (regresión del split); + guarda anti-stall + red de seguridad de luz (recall si sin repuesto).
 
 ## Pendiente
+- **(B) Objetos lanzables / a distancia (TODO, no empezado)**: usar dardos, *spikes*,
+  arcos si hay flechas, hondas si hay *pebbles*, etc. contra el **enemigo más cercano**.
+  Mantenerlo simple: no elegir blanco óptimo ni cinemática de tiro, solo "tira lo que
+  tengas al más cercano". Primer paso de capacidad a distancia para un bot que hoy es
+  melee puro. (Encaja con B5 del roadmap: detección/varas vendrían después.)
 - **Fase 1b**: navegación por wilderness (descubrir mazmorras a pie) — recall cubre casi todo.
 - Afinar: amenaza de monstruos (tabla de peligro real), umbrales de resupply/compra.
 - Completitud de quest por **muerte del guardián** (`r_info[FINAL_GUARDIAN].max_num==0`) en vez
