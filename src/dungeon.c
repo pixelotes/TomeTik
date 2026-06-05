@@ -4493,6 +4493,13 @@ static void process_command(void)
 			break;
 		}
 
+		/* Oracle: what would auto-play do now? (TomeTik) */
+	case KTRL('N'):
+		{
+			do_cmd_oracle();
+			break;
+		}
+
 		/* Show previous message */
 	case KTRL('O'):
 		{
