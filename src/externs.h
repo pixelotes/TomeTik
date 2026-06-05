@@ -152,6 +152,8 @@ extern s16b travelling;
 extern s16b click_dir;
 extern s16b exploring;
 extern s16b autoplaying;
+extern bool autoplay_force_item_on;
+extern s16b autoplay_force_item;
 extern s16b resting;
 extern s16b cur_hgt;
 extern s16b cur_wid;

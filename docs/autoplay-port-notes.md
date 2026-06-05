@@ -290,11 +290,16 @@ Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
     (regresión del split); + guarda anti-stall + red de seguridad de luz (recall si sin repuesto).
 
 ## Pendiente
-- **(B) Objetos lanzables / a distancia (TODO, no empezado)**: usar dardos, *spikes*,
-  arcos si hay flechas, hondas si hay *pebbles*, etc. contra el **enemigo más cercano**.
-  Mantenerlo simple: no elegir blanco óptimo ni cinemática de tiro, solo "tira lo que
-  tengas al más cercano". Primer paso de capacidad a distancia para un bot que hoy es
-  melee puro. (Encaja con B5 del roadmap: detección/varas vendrían después.)
+- **(B) Objetos lanzables / a distancia ("Random bullshit go!") — HECHO (v1)**: paso 1d en
+  `autoplay_decide`. Si en mazmorra, sin enemigo adyacente, no ciego y con línea de tiro
+  (`projectable`), dispara el lanzador (`INVEN_BOW`+munición del carcaj/mochila) o tira un
+  *flask* (no si gasta aceite de linterna) al **más cercano**. Clave: usa
+  `autoplay_nearest_ranged` que **SÍ incluye** los `too_dangerous` (floating eyes), así los
+  mata desde lejos sin melee. Mecanismo sin prompts: `autoplay_force_item`(+`_on`) alimenta
+  `get_item`, y `target_who/row/col` + `get_aim_dir` auto-apuntan en auto-modo. `AP_SHOOT`/
+  `AP_THROW` reusan `do_cmd_fire`/`do_cmd_throw` (ellos ponen `energy_use`).
+  - **Pendiente v2**: comprar/recoger munición y lanzables a propósito (economía); lanzar
+    también ammo sin lanzador, boulders con skill; elegir el mejor lanzable por daño.
 - **Fase 1b**: navegación por wilderness (descubrir mazmorras a pie) — recall cubre casi todo.
 - Afinar: amenaza de monstruos (tabla de peligro real), umbrales de resupply/compra.
 - Completitud de quest por **muerte del guardián** (`r_info[FINAL_GUARDIAN].max_num==0`) en vez

@@ -5772,6 +5772,113 @@ static void autoplay_escape(int item)
 	inven_item_optimize(item);
 }
 
+/* ---- ranged attacks: fire a launcher, or throw something, at a foe ---- */
+
+/* TRUE if we wield a usable missile launcher (bow / sling / crossbow). */
+static bool autoplay_have_launcher(void)
+{
+	object_type *bow = &p_ptr->inventory[INVEN_BOW];
+	return (bow->k_idx && bow->tval && (bow->tval != TV_INSTRUMENT));
+}
+
+/* Index of ammo matching our launcher (prefers the quiver), or -1. */
+static int autoplay_find_ammo(void)
+{
+	object_type *q = &p_ptr->inventory[INVEN_AMMO];
+	int i;
+
+	if (q->k_idx && (q->tval == p_ptr->tval_ammo)) return (INVEN_AMMO);
+	for (i = 0; i < INVEN_PACK; i++)
+	{
+		object_type *o_ptr = &p_ptr->inventory[i];
+		if (o_ptr->k_idx && (o_ptr->tval == p_ptr->tval_ammo)) return (i);
+	}
+	return (-1);
+}
+
+/* Pack index of something worth throwing. v1: flasks of oil (fire damage) -- but
+ * not while we burn them as lantern fuel. -1 if nothing suitable. */
+static int autoplay_find_throwable(void)
+{
+	object_type *lite = &p_ptr->inventory[INVEN_LITE];
+	int i;
+
+	if (lite->k_idx && (lite->tval == TV_LITE) && (lite->sval == SV_LITE_LANTERN))
+		return (-1);   /* keep flasks for the lamp */
+
+	for (i = 0; i < INVEN_PACK; i++)
+	{
+		object_type *o_ptr = &p_ptr->inventory[i];
+		if (o_ptr->k_idx && (o_ptr->tval == TV_FLASK)) return (i);
+	}
+	return (-1);
+}
+
+/* Any hostile right next to us? Then deal with the melee threat before shooting. */
+static bool autoplay_adjacent_enemy(void)
+{
+	int i;
+	for (i = 1; i < m_max; i++)
+	{
+		monster_type *m_ptr = &m_list[i];
+		if (!m_ptr->r_idx || !m_ptr->ml) continue;
+		if (m_ptr->status != MSTATUS_ENEMY) continue;
+		if (distance(p_ptr->py, p_ptr->px, m_ptr->fy, m_ptr->fx) <= 1) return (TRUE);
+	}
+	return (FALSE);
+}
+
+/* Nearest VISIBLE hostile that is NOT adjacent and we have a clear shot at --
+ * INCLUDING foes too dangerous to melee (floating eyes etc.), which is exactly
+ * what shooting them from range is for. NULL if none. */
+static monster_type *autoplay_nearest_ranged(void)
+{
+	int i, bd = 0;
+	monster_type *best = NULL;
+
+	for (i = 1; i < m_max; i++)
+	{
+		monster_type *m_ptr = &m_list[i];
+		int d;
+
+		if (!m_ptr->r_idx || !m_ptr->ml) continue;
+		if (m_ptr->status != MSTATUS_ENEMY) continue;
+		d = distance(p_ptr->py, p_ptr->px, m_ptr->fy, m_ptr->fx);
+		if (d <= 1) continue;                  /* adjacent: melee/flee handles it */
+		if (m_ptr->monfear) continue;          /* let fleers flee */
+		if (!projectable(p_ptr->py, p_ptr->px, m_ptr->fy, m_ptr->fx)) continue;
+		if (!best || (d < bd)) { best = m_ptr; bd = d; }
+	}
+	return (best);
+}
+
+/* Point the game's target at a monster so get_aim_dir() returns "use target". */
+static void autoplay_aim_at(monster_type *m_ptr)
+{
+	target_who = (s16b)(m_ptr - m_list);
+	target_row = m_ptr->fy;
+	target_col = m_ptr->fx;
+}
+
+/* Fire ammo 'item' / throw 'item' at m_ptr. autoplay_force_item feeds get_item()
+ * (so no picker) and the aimed target feeds get_aim_dir(). do_cmd_fire/throw set
+ * energy_use themselves. */
+static void autoplay_shoot(int item, monster_type *m_ptr)
+{
+	autoplay_aim_at(m_ptr);
+	autoplay_force_item = item; autoplay_force_item_on = TRUE;
+	do_cmd_fire();
+	autoplay_force_item_on = FALSE;
+}
+
+static void autoplay_throw_at(int item, monster_type *m_ptr)
+{
+	autoplay_aim_at(m_ptr);
+	autoplay_force_item = item; autoplay_force_item_on = TRUE;
+	do_cmd_throw();
+	autoplay_force_item_on = FALSE;
+}
+
 /* Backpack index of an edible staple food, or -1. */
 static int autoplay_find_food(void)
 {
@@ -6786,6 +6893,8 @@ static bool autoplay_needs_resupply(void)
 #define AP_ESCAPE   18  /* read phase/teleport to break away (item) */
 #define AP_SEARCH   19  /* search for secret doors (at y,x)         */
 #define AP_PUSHPAST 20  /* step toward (y,x) swapping past a friend */
+#define AP_SHOOT    21  /* fire launcher ammo (item) at foe (y,x)   */
+#define AP_THROW    22  /* throw an item (item) at foe (y,x)        */
 
 typedef struct autoplay_action autoplay_action;
 struct autoplay_action
@@ -6989,6 +7098,40 @@ static void autoplay_decide(autoplay_action *a)
 		a->type = AP_WAIT;
 		strcpy(a->advice, "Wait out the confusion.");
 		return;
+	}
+
+	/* 1d. Ranged attack ("Random bullshit go!"): in the dungeon, with nothing
+	 * adjacent (melee threats are dealt with below) and a clear line of fire,
+	 * shoot/throw at the nearest foe -- crucially INCLUDING paralysers and other
+	 * foes too dangerous to melee, which we can safely pick off from range. */
+	if ((dun_level > 0) && !p_ptr->blind && !autoplay_adjacent_enemy())
+	{
+		monster_type *rt = autoplay_nearest_ranged();
+		if (rt)
+		{
+			char nm[80];
+			monster_desc(nm, rt, 0);
+
+			if (autoplay_have_launcher())
+			{
+				int am = autoplay_find_ammo();
+				if (am != -1)
+				{
+					a->type = AP_SHOOT; a->item = am; a->y = rt->fy; a->x = rt->fx;
+					strnfmt(a->advice, 80, "Shoot %s.", nm);
+					return;
+				}
+			}
+			{
+				int th = autoplay_find_throwable();
+				if (th >= 0)
+				{
+					a->type = AP_THROW; a->item = th; a->y = rt->fy; a->x = rt->fx;
+					strnfmt(a->advice, 80, "Throw something at %s.", nm);
+					return;
+				}
+			}
+		}
 	}
 
 	/* 2. A visible enemy: flee the dangerous/desperate cases, else close and melee.
@@ -7322,6 +7465,8 @@ static void autoplay_perform(autoplay_action *a)
 	case AP_CURE:     autoplay_quaff(a->item); break;
 	case AP_ESCAPE:   autoplay_escape(a->item); break;
 	case AP_PUSHPAST: (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, explore_walkable_friend); break;
+	case AP_SHOOT:    { int mi = cave[a->y][a->x].m_idx; if (mi) autoplay_shoot(a->item, &m_list[mi]); break; }
+	case AP_THROW:    { int mi = cave[a->y][a->x].m_idx; if (mi) autoplay_throw_at(a->item, &m_list[mi]); break; }
 	case AP_SEARCH:
 		energy_use = 100;
 		search();                                  /* reveals adjacent secret doors/traps */
