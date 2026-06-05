@@ -304,8 +304,11 @@ Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
   mata desde lejos sin melee. Mecanismo sin prompts: `autoplay_force_item`(+`_on`) alimenta
   `get_item`, y `target_who/row/col` + `get_aim_dir` auto-apuntan en auto-modo. `AP_SHOOT`/
   `AP_THROW` reusan `do_cmd_fire`/`do_cmd_throw` (ellos ponen `energy_use`).
-  - **Pendiente v2**: comprar/recoger munición y lanzables a propósito (economía); lanzar
-    también ammo sin lanzador, boulders con skill; elegir el mejor lanzable por daño.
+  - **v2 HECHO**: `autoplay_throwable_score` puntúa por daño aproximado y `autoplay_find_throwable`
+    coge el mejor — incluye **boulders** (con `SKILL_BOULDER`), **ammo sin lanzador** (shots/
+    arrows/bolts que no podemos disparar), y flasks de oil (no si son fuel de linterna).
+    Economía: `autoplay_shop_buy_needs` compra flasks de oil para todos (lanzables) y **munición**
+    del lanzador (`AP_WANT_AMMO=40`) si hay arco. *Pendiente v3*: recoger ammo tirado del suelo.
 - **Fase 1b**: navegación por wilderness (descubrir mazmorras a pie) — recall cubre casi todo.
 - Afinar: amenaza de monstruos (tabla de peligro real), umbrales de resupply/compra.
 - Completitud de quest por **muerte del guardián** (`r_info[FINAL_GUARDIAN].max_num==0`) en vez

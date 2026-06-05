@@ -5819,20 +5819,53 @@ static int autoplay_find_ammo(void)
 
 /* Pack index of something worth throwing. v1: flasks of oil (fire damage) -- but
  * not while we burn them as lantern fuel. -1 if nothing suitable. */
+/* Rough "expected damage" worth of throwing this item, or 0 if not worth it.
+ * Used to pick the best thing to throw (ranged v2: not just flasks of oil). */
+static int autoplay_throwable_score(object_type *o_ptr)
+{
+	if (!o_ptr->k_idx) return (0);
+
+	/* Flasks of oil: reliable fire damage -- but not the ones we burn as lamp
+	 * fuel. */
+	if (o_ptr->tval == TV_FLASK)
+	{
+		object_type *lite = &p_ptr->inventory[INVEN_LITE];
+		if (lite->k_idx && (lite->tval == TV_LITE) && (lite->sval == SV_LITE_LANTERN))
+			return (0);
+		return (12 + o_ptr->to_d);
+	}
+
+	/* Boulders are strong thrown -- but only with the skill (else heavy & weak). */
+	if ((o_ptr->tval == TV_JUNK) && (o_ptr->sval == SV_BOULDER))
+	{
+		if (get_skill(SKILL_BOULDER) <= 0) return (0);
+		return (20 + (int)get_skill_scale(SKILL_BOULDER, 80) +
+		        (o_ptr->dd * o_ptr->ds));
+	}
+
+	/* Ammo with no launcher to fire it: throwing is better than nothing. If we DO
+	 * wield a matching launcher we fire it instead (handled separately), so don't
+	 * offer that ammo as a throwable. */
+	if ((o_ptr->tval == TV_SHOT) || (o_ptr->tval == TV_ARROW) || (o_ptr->tval == TV_BOLT))
+	{
+		if (autoplay_have_launcher() && (o_ptr->tval == p_ptr->tval_ammo)) return (0);
+		return ((o_ptr->dd * o_ptr->ds) + o_ptr->to_d);
+	}
+
+	return (0);
+}
+
+/* Pack index of the best thing to throw (highest autoplay_throwable_score), or -1. */
 static int autoplay_find_throwable(void)
 {
-	object_type *lite = &p_ptr->inventory[INVEN_LITE];
-	int i;
-
-	if (lite->k_idx && (lite->tval == TV_LITE) && (lite->sval == SV_LITE_LANTERN))
-		return (-1);   /* keep flasks for the lamp */
+	int i, best = -1, best_score = 0;
 
 	for (i = 0; i < INVEN_PACK; i++)
 	{
-		object_type *o_ptr = &p_ptr->inventory[i];
-		if (o_ptr->k_idx && (o_ptr->tval == TV_FLASK)) return (i);
+		int s = autoplay_throwable_score(&p_ptr->inventory[i]);
+		if (s > best_score) { best_score = s; best = i; }
 	}
-	return (-1);
+	return (best);
 }
 
 /* Any hostile right next to us? Then deal with the melee threat before shooting. */
@@ -6632,8 +6665,9 @@ static int autoplay_find_upgrade(void)
 #define AP_WANT_CURE   5   /* cure-wounds potions to keep    */
 #define AP_WANT_FOOD   5   /* staple food to keep            */
 #define AP_WANT_ID     5   /* Scroll of Identify to keep     */
-#define AP_WANT_OIL    3   /* flasks of oil (if lantern)     */
+#define AP_WANT_OIL    3   /* flasks of oil (fuel and/or throwing) */
 #define AP_WANT_TORCH  2   /* spare torches (if torch)       */
+#define AP_WANT_AMMO  40   /* missiles to keep for the launcher    */
 
 static bool autoplay_shopping = FALSE;     /* mid town-shopping trip */
 static byte autoplay_shop_visited[32];     /* by store index, this trip */
@@ -6799,13 +6833,27 @@ static void autoplay_shop_buy_needs(int town, int store)
 	autoplay_buy_one(town, store, TV_FOOD, SV_FOOD_JERKY, want_food, autoplay_count_food());
 	autoplay_buy_one(town, store, TV_FOOD, SV_FOOD_WAYBREAD, want_food, autoplay_count_food());
 
-	if (lite->k_idx && (lite->tval == TV_LITE) && (lite->sval == SV_LITE_LANTERN))
+	{
+		bool lantern = (lite->k_idx && (lite->tval == TV_LITE) &&
+		                (lite->sval == SV_LITE_LANTERN));
+
+		/* Torch users keep spare torches for light. */
+		if (!lantern)
+			autoplay_buy_one(town, store, TV_LITE, SV_LITE_TORCH,
+			                 autoplay_cfg("want_torch", AP_WANT_TORCH),
+			                 autoplay_inv_count(TV_LITE, SV_LITE_TORCH));
+
+		/* Flasks of oil: lamp fuel for lantern users, throwing ammo for everyone
+		 * else (ranged v2 -- the bot now throws oil, so stock it on purpose). */
 		autoplay_buy_one(town, store, TV_FLASK, -1, autoplay_cfg("want_oil", AP_WANT_OIL),
 		                 autoplay_inv_count(TV_FLASK, -1));
-	else
-		autoplay_buy_one(town, store, TV_LITE, SV_LITE_TORCH,
-		                 autoplay_cfg("want_torch", AP_WANT_TORCH),
-		                 autoplay_inv_count(TV_LITE, SV_LITE_TORCH));
+
+		/* Ammo for our launcher, so the bot keeps firing instead of running dry. */
+		if (autoplay_have_launcher())
+			autoplay_buy_one(town, store, p_ptr->tval_ammo, -1,
+			                 autoplay_cfg("want_ammo", AP_WANT_AMMO),
+			                 autoplay_inv_count(p_ptr->tval_ammo, -1));
+	}
 
 	/* With consumables covered, spend surplus gold on the best gear upgrades this
 	 * shop has (weapons/armour/etc.), keeping a reserve. Loop to grab several;
