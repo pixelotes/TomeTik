@@ -182,6 +182,26 @@ Funciones nuevas que reusan los helpers `static` locales (`price_item`, `store_w
    **Workaround de equipo:** en `autoplay_town_step`, antes del recall-abajo, se identifica +
    auto-equipa + asegura luz (descender ya pertrechado, no depender del upkeep in-dungeon que
    se gatea con `!enemy`).
+7. **NPC amistoso (Farmer Maggot) en la ruta → "stop to avoid hitting" en bucle.** **RESUELTO**:
+   A* ahora **rodea** las casillas con monstruo en el movimiento no-combate. Hooks
+   `explore_walkable_clear`/`real_walkable_clear` (= hooks normales + casilla con `m_idx` =
+   intransitable), usados en explorar/delve/escalera (pathing + `autoplay_can_reach_hook` +
+   `blind_goal`). El combate sigue ignorando monstruos (para alcanzar al blanco). *Caso límite:*
+   NPC bloqueando pasillo de 1 ancho (sin rodeo) → seguiría flojo; ahí tocaría swap/push-past.
+
+## Puente Lua (Paso B) — política tweakeable
+
+- **`lib/scpt/autoplay.lua`** (NUEVO): `autoplay_config(key)` (knobs: `want_cure/food/id/wor/oil/
+  torch`, `min_gold`, `chase_turns`, `resupply_cooldown`) y `autoplay_avoid(m)` (tabla de
+  amenaza por nombre: 1=evitar, 0=pelear, ausente=heurística C). Trae `["Farmer Maggot"]=1`.
+- **`lib/scpt/init.lua`**: `tome_dofile("autoplay.lua")` al final.
+- **`cmd1.c`**: `autoplay_lua_ok()` (sonda única vía `string_exec_lua`, porque `call_lua` peta si
+  la función no existe), `autoplay_cfg(key,def)` (lee `autoplay_config`, fallback a def si Lua
+  ausente o devuelve <0). `autoplay_too_dangerous` consulta `autoplay_avoid(m)` (`call_lua "(M)"`).
+  Los knobs `AP_WANT_*`/chase/min_gold/cooldown leen de `autoplay_cfg`.
+- **OJO porting**: los `.lua` viven en `lib/scpt/` (versionado, por rama). `init.lua` puede
+  diferir en 2.3.x → vigilar el cherry-pick de esa línea; `autoplay.lua` es fichero nuevo (sin
+  conflicto). Editar el `.lua` re-tunea el bot **sin recompilar**.
 
 ## Historial de commits (lógicos)
 
@@ -198,6 +218,9 @@ Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
    `store.c` API no-interactiva + flujo de pueblo en cmd1.c.
 10. `feat(autoplay)`: split decisión/ejecución + **Oráculo** (^N, consejos en inglés); fixes:
     ignorar foes no adyacentes en superficie, cooldown de resupply, ampliar svals de compra.
+11. `fix(autoplay)`: robustez (arranque/vista+delve, WoR-loop+gold-gate, give-up de evasivos/
+    Maggot, responsividad tecla+clic con DrainEvents, equip antes del recall).
+12. `feat(autoplay)`: **puente Lua** (Paso B) — `autoplay.lua` config+threat table; A* rodea NPCs.
 
 ## Pendiente
 - **Cerebro Lua**: ruta/estrategia ("a qué mazmorra ir") como datos; bindings tolua. Modelo
