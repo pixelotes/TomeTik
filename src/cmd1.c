@@ -4903,6 +4903,23 @@ static bool explore_walkable_hook(int y, int x, void *user)
 	return (travel_walkable_hook(y, x, user));
 }
 
+/* As explore_walkable_hook / travel_walkable_real, but also treats a grid HELD
+ * BY A MONSTER as impassable. Used for auto-play's non-combat movement (explore,
+ * delve, walk-to-stairs) so A* routes AROUND creatures -- e.g. a friendly NPC
+ * like Farmer Maggot standing in the way -- instead of bumping into them
+ * forever. (Combat keeps the monster-ignoring hooks so it can reach its target.) */
+static bool explore_walkable_clear(int y, int x, void *user)
+{
+	if (cave[y][x].m_idx) return (FALSE);
+	return (explore_walkable_hook(y, x, user));
+}
+
+static bool real_walkable_clear(int y, int x, void *user)
+{
+	if (cave[y][x].m_idx) return (FALSE);
+	return (travel_walkable_real(y, x, user));
+}
+
 /* Give up on grid (y,x) for the rest of this level's auto-explore: from now on we
  * route around it (and never sit a frontier goal on it, since the BFS no longer
  * reaches it). */
@@ -5517,6 +5534,35 @@ void do_cmd_explore(void)
  * turn, so it reacts immediately to a new threat or dropping HP.
  */
 
+/* ---- Lua policy bridge (AuToME) ----
+ *
+ * Tunable policy -- shopping targets, thresholds, a per-monster threat table --
+ * lives in lib/scpt/autoplay.lua (loaded by init.lua), so it can be retuned
+ * without recompiling. The C engine consults it but ALWAYS has a fallback, so
+ * the bot works even if the script is missing. We probe once that the Lua
+ * functions exist, because call_lua() errors loudly on a missing global. */
+static int autoplay_lua = -1;     /* -1 unknown, 0 absent, 1 present */
+
+static bool autoplay_lua_ok(void)
+{
+	if (autoplay_lua < 0)
+	{
+		cptr r = string_exec_lua("return tostring(type(autoplay_config) == 'function')");
+		autoplay_lua = (r && !strcmp(r, "true")) ? 1 : 0;
+	}
+	return (autoplay_lua == 1);
+}
+
+/* Integer config knob from Lua autoplay_config(key); returns `def` if Lua is
+ * absent or hands back a negative value ("no override, use the C default"). */
+static int autoplay_cfg(cptr key, int def)
+{
+	s32b v = def;
+	if (!autoplay_lua_ok()) return (def);
+	if (!call_lua("autoplay_config", "(s)", "d", (char *)key, &v)) return (def);
+	return (v >= 0) ? ((int)v) : def;
+}
+
 /* Chasing state: a monster we have given up closing on (it flees / keeps its
  * distance -- e.g. a fruit bat doing bait-and-switch) and progress tracking, so
  * we don't oscillate after it forever. */
@@ -5841,7 +5887,7 @@ static bool autoplay_blind_goal(int *gy, int *gx)
 			if ((ny < 0) || (ny >= cur_hgt) || (nx < 0) || (nx >= cur_wid)) continue;
 			nc = ny * cur_wid + nx;
 			if (seen[nc]) continue;
-			if (!travel_walkable_real(ny, nx, NULL)) continue;   /* real floor/door */
+			if (!real_walkable_clear(ny, nx, NULL)) continue;   /* real floor, no monster */
 
 			/* A walkable cell we have not yet uncovered: head there. */
 			if (!explore_is_seen(ny, nx)) { *gy = ny; *gx = nx; found = TRUE; break; }
@@ -5933,6 +5979,18 @@ static bool autoplay_too_dangerous(monster_type *m)
 {
 	monster_race *r_ptr = &r_info[m->r_idx];
 	int plev = p_ptr->lev;
+
+	/* Let the Lua threat table decide first: 1 = avoid, 0 = fight, anything else
+	 * (e.g. -1) = no opinion, use the C heuristic below. */
+	if (autoplay_lua_ok())
+	{
+		s32b avoid = -1;
+		if (call_lua("autoplay_avoid", "(M)", "d", m, &avoid))
+		{
+			if (avoid == 1) return (TRUE);
+			if (avoid == 0) return (FALSE);
+		}
+	}
 
 	/* A unique noticeably above our level: don't pick the fight. */
 	if ((r_ptr->flags1 & RF1_UNIQUE) && (r_ptr->level > plev + 3)) return (TRUE);
@@ -6236,27 +6294,33 @@ static void autoplay_buy_one(int town, int store, int tval, int sval, int target
 static void autoplay_shop_buy_needs(int town, int store)
 {
 	object_type *lite = &p_ptr->inventory[INVEN_LITE];
+	int want_cure = autoplay_cfg("want_cure", AP_WANT_CURE);
+	int want_food = autoplay_cfg("want_food", AP_WANT_FOOD);
 
-	autoplay_buy_one(town, store, TV_SCROLL, SV_SCROLL_WORD_OF_RECALL, AP_WANT_WOR,
+	autoplay_buy_one(town, store, TV_SCROLL, SV_SCROLL_WORD_OF_RECALL,
+	                 autoplay_cfg("want_wor", AP_WANT_WOR),
 	                 autoplay_inv_count(TV_SCROLL, SV_SCROLL_WORD_OF_RECALL));
-	autoplay_buy_one(town, store, TV_SCROLL, SV_SCROLL_IDENTIFY, AP_WANT_ID,
+	autoplay_buy_one(town, store, TV_SCROLL, SV_SCROLL_IDENTIFY,
+	                 autoplay_cfg("want_id", AP_WANT_ID),
 	                 autoplay_inv_count(TV_SCROLL, SV_SCROLL_IDENTIFY));
 
 	/* Cure wounds: buy whatever kind the store stocks, toward the combined target. */
-	autoplay_buy_one(town, store, TV_POTION, SV_POTION_CURE_LIGHT, AP_WANT_CURE, autoplay_count_cure());
-	autoplay_buy_one(town, store, TV_POTION, SV_POTION_CURE_SERIOUS, AP_WANT_CURE, autoplay_count_cure());
-	autoplay_buy_one(town, store, TV_POTION, SV_POTION_CURE_CRITICAL, AP_WANT_CURE, autoplay_count_cure());
+	autoplay_buy_one(town, store, TV_POTION, SV_POTION_CURE_LIGHT, want_cure, autoplay_count_cure());
+	autoplay_buy_one(town, store, TV_POTION, SV_POTION_CURE_SERIOUS, want_cure, autoplay_count_cure());
+	autoplay_buy_one(town, store, TV_POTION, SV_POTION_CURE_CRITICAL, want_cure, autoplay_count_cure());
 
 	/* Food: any staple this store carries. */
-	autoplay_buy_one(town, store, TV_FOOD, SV_FOOD_RATION, AP_WANT_FOOD, autoplay_count_food());
-	autoplay_buy_one(town, store, TV_FOOD, SV_FOOD_BISCUIT, AP_WANT_FOOD, autoplay_count_food());
-	autoplay_buy_one(town, store, TV_FOOD, SV_FOOD_JERKY, AP_WANT_FOOD, autoplay_count_food());
-	autoplay_buy_one(town, store, TV_FOOD, SV_FOOD_WAYBREAD, AP_WANT_FOOD, autoplay_count_food());
+	autoplay_buy_one(town, store, TV_FOOD, SV_FOOD_RATION, want_food, autoplay_count_food());
+	autoplay_buy_one(town, store, TV_FOOD, SV_FOOD_BISCUIT, want_food, autoplay_count_food());
+	autoplay_buy_one(town, store, TV_FOOD, SV_FOOD_JERKY, want_food, autoplay_count_food());
+	autoplay_buy_one(town, store, TV_FOOD, SV_FOOD_WAYBREAD, want_food, autoplay_count_food());
 
 	if (lite->k_idx && (lite->tval == TV_LITE) && (lite->sval == SV_LITE_LANTERN))
-		autoplay_buy_one(town, store, TV_FLASK, -1, AP_WANT_OIL, autoplay_inv_count(TV_FLASK, -1));
+		autoplay_buy_one(town, store, TV_FLASK, -1, autoplay_cfg("want_oil", AP_WANT_OIL),
+		                 autoplay_inv_count(TV_FLASK, -1));
 	else
-		autoplay_buy_one(town, store, TV_LITE, SV_LITE_TORCH, AP_WANT_TORCH,
+		autoplay_buy_one(town, store, TV_LITE, SV_LITE_TORCH,
+		                 autoplay_cfg("want_torch", AP_WANT_TORCH),
 		                 autoplay_inv_count(TV_LITE, SV_LITE_TORCH));
 }
 
@@ -6359,7 +6423,7 @@ static bool autoplay_town_step(void)
 	/* Hold off on the next town trip for a while so we actually dive rather than
 	 * yo-yo to the shops (and don't thrash if we couldn't buy what we wanted). */
 	autoplay_shopping = FALSE;
-	autoplay_no_resupply_until = turn + 3000;
+	autoplay_no_resupply_until = turn + autoplay_cfg("resupply_cooldown", 3000);
 	dn = p_ptr->recall_dungeon;
 	if (dn <= 0) dn = DUNGEON_BARROW_DOWNS;
 	autoplay_set_recall_target(dn, (max_dlv[dn] > 0) ? max_dlv[dn] : 1);
@@ -6388,7 +6452,7 @@ static bool autoplay_needs_resupply(void)
 
 	/* Buying needs gold; a near-broke character should keep diving and earning
 	 * rather than trudge to town for supplies it can't afford. */
-	if (p_ptr->au < 100) return (FALSE);
+	if (p_ptr->au < autoplay_cfg("min_gold", 100)) return (FALSE);
 
 	/* NB: we do NOT trip on missing Word of Recall -- the bot recalls for free
 	 * (autoplay_start_recall falls back to recall_player), so it never needs the
@@ -6433,14 +6497,20 @@ struct autoplay_action
 	char advice[80];   /* English, human-readable                 */
 };
 
-/* Read-only: is (gy,gx) reachable over known terrain? (A* probe, frees path.) */
-static bool autoplay_can_reach(int gy, int gx)
+/* Read-only: is (gy,gx) reachable over terrain accepted by 'hook'? (A* probe.) */
+static bool autoplay_can_reach_hook(int gy, int gx, astar_walkable_hook hook)
 {
-	path_result *r = astar_find_path_cb(cur_hgt, cur_wid, explore_walkable_hook,
+	path_result *r = astar_find_path_cb(cur_hgt, cur_wid, hook,
 	                                    NULL, p_ptr->py, p_ptr->px, gy, gx, ASTAR_8DIR_CUT);
 	bool ok = (r && (r->length >= 2));
 	if (r) path_free(r);
 	return (ok);
+}
+
+/* Combat reach: ignore monsters (we want to reach the foe's own tile). */
+static bool autoplay_can_reach(int gy, int gx)
+{
+	return (autoplay_can_reach_hook(gy, gx, explore_walkable_hook));
 }
 
 /* Read-only: is a fleeing step (away from (ty,tx), onto empty known floor)
@@ -6542,7 +6612,7 @@ static void autoplay_decide(autoplay_action *a)
 			if (eidx == ap_chase_idx) ap_chase_turns++;
 			else { ap_chase_idx = eidx; ap_chase_turns = 1; }
 
-			if (ap_chase_turns <= 15)
+			if (ap_chase_turns <= autoplay_cfg("chase_turns", 15))
 			{
 				a->type = AP_FIGHT;
 				strnfmt(a->advice, 80, "Fight %s.", nm);
@@ -6642,7 +6712,7 @@ static void autoplay_decide(autoplay_action *a)
 		explore_no_items = full;
 		got = explore_pick_goal(&gy, &gx);
 		explore_no_items = FALSE;
-		if (got) reach = autoplay_can_reach(gy, gx);
+		if (got) reach = autoplay_can_reach_hook(gy, gx, explore_walkable_clear);
 		if (got && reach)
 		{
 			a->type = AP_EXPLORE; a->y = gy; a->x = gx;
@@ -6665,7 +6735,7 @@ static void autoplay_decide(autoplay_action *a)
 			return;
 		}
 		gotstair = autoplay_find_downstair(&sy, &sx);
-		if (gotstair) reachstair = autoplay_can_reach(sy, sx);
+		if (gotstair) reachstair = autoplay_can_reach_hook(sy, sx, explore_walkable_clear);
 		if (gotstair && reachstair)
 		{
 			a->type = AP_GOSTAIR; a->y = sy; a->x = sx;
@@ -6691,9 +6761,9 @@ static void autoplay_perform(autoplay_action *a)
 	case AP_EQUIP:    autoplay_wield(a->item); break;
 	case AP_FLEE:     (void)autoplay_flee_from(a->y, a->x); break;
 	case AP_FIGHT:    (void)autoplay_step_towards(a->y, a->x, a->pickup); break;
-	case AP_EXPLORE:  (void)autoplay_step_towards(a->y, a->x, a->pickup); break;
-	case AP_DELVE:    (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, travel_walkable_real); break;
-	case AP_GOSTAIR:  (void)autoplay_step_towards(a->y, a->x, a->pickup); break;
+	case AP_EXPLORE:  (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, explore_walkable_clear); break;
+	case AP_DELVE:    (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, real_walkable_clear); break;
+	case AP_GOSTAIR:  (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, explore_walkable_clear); break;
 	case AP_DESCEND:  autoplay_descend(); break;
 	case AP_TOWN:     (void)autoplay_town_step(); break;
 	case AP_RECALL:   (void)autoplay_start_recall(); break;
