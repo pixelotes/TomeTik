@@ -7029,7 +7029,7 @@ turn_monsters(40 + p_ptr->lev);
 				if (!doit) return "word of recall every 200 turns";
 				if (dun_level && (max_dlv[dungeon_type] > dun_level))
 				{
-					if (get_check("Reset recall depth? "))
+					if (!(exploring || autoplaying) && get_check("Reset recall depth? "))
 						max_dlv[dungeon_type] = dun_level;
 				}
 
