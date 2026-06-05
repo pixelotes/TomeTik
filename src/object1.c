@@ -6409,6 +6409,16 @@ bool get_item_floor(int *cp, cptr pmt, cptr str, int mode)
  */
 bool get_item(int *cp, cptr pmt, cptr str, int mode)
 {
+	/* Auto-play preselects the exact item (fire ammo / throw target) so its
+	 * fire/throw command runs without the interactive picker. Only honoured while
+	 * the flag is set -- i.e. only around those bot commands -- so other auto-mode
+	 * get_item() calls are unaffected. */
+	if (autoplay_force_item_on)
+	{
+		*cp = autoplay_force_item;
+		return (TRUE);
+	}
+
 	automatizer_create = FALSE;
 
 	return get_item_floor(cp, pmt, str, mode);
