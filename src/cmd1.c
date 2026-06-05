@@ -5579,6 +5579,15 @@ static int  ap_stair_y = -1, ap_stair_x = -1;
 
 static void autoplay_clear_stair(void) { ap_stair_y = ap_stair_x = -1; }
 
+/* A cell we keep trying to step into but can't actually enter -- normally a door
+ * being opened (legit, costs a turn each), but if it never yields (a jammed door
+ * we can't force, an obstacle) we'd retry it forever. Mirrors travel_stuck: after
+ * AP_STUCK_MAX failed tries we explore_block_cell() it and reroute. */
+#define AP_STUCK_MAX 12
+static int  ap_stuck_y = -1, ap_stuck_x = -1, ap_stuck_count = 0;
+
+static void autoplay_clear_stuck(void) { ap_stuck_y = ap_stuck_x = -1; ap_stuck_count = 0; }
+
 static bool autoplay_too_dangerous(monster_type *m);   /* fwd: threat verdict */
 
 /* Nearest VISIBLE real enemy worth engaging; NULL if none. Skips a foe we gave
@@ -5896,8 +5905,33 @@ static bool autoplay_step_towards_hook(int gy, int gx, bool do_pickup,
 	}
 	if (!dir) return (FALSE);
 
-	energy_use = 100;
-	move_player_aux(dir, do_pickup, 1, TRUE);
+	{
+		int oy = p_ptr->py, ox = p_ptr->px;
+
+		energy_use = 100;
+		move_player_aux(dir, do_pickup, 1, TRUE);
+
+		/* Stuck-on-a-cell give-up. If we issued a step but didn't actually move,
+		 * and the blocking cell holds NO monster (so it's terrain -- a door being
+		 * forced, an obstacle -- not a melee attack, which legitimately stays in
+		 * place), count the failures. A normal closed door opens in a turn or two;
+		 * if a cell resists AP_STUCK_MAX tries it won't yield, so block it and let
+		 * A* reroute (and drop any stair lock that was leading us into it) rather
+		 * than bumping it forever. */
+		if ((p_ptr->py == oy) && (p_ptr->px == ox) && !cave[ny][nx].m_idx)
+		{
+			if ((ny == ap_stuck_y) && (nx == ap_stuck_x)) ap_stuck_count++;
+			else { ap_stuck_y = ny; ap_stuck_x = nx; ap_stuck_count = 1; }
+
+			if (ap_stuck_count > AP_STUCK_MAX)
+			{
+				explore_block_cell(ny, nx);
+				autoplay_clear_stair();
+				autoplay_clear_stuck();
+			}
+		}
+		else autoplay_clear_stuck();   /* moved (or it was a melee bump): reset */
+	}
 	return (TRUE);
 }
 
@@ -5995,7 +6029,8 @@ static void autoplay_descend(void)
 	msg_print("Autoplay: descending.");
 	do_cmd_go_down();
 	confirm_stairs = saved;
-	autoplay_clear_stair();     /* new level: any locked stair is gone */
+	autoplay_clear_stair();     /* new level: any locked stair / stuck cell is gone */
+	autoplay_clear_stuck();
 }
 
 /* Ascend the stairs under the player. A no-way-down level gets escaped by going
@@ -6008,7 +6043,8 @@ static void autoplay_ascend(void)
 	msg_print("Autoplay: taking the stairs up (regenerating the level).");
 	do_cmd_go_up();
 	confirm_stairs = saved;
-	autoplay_clear_stair();     /* new level: any locked stair is gone */
+	autoplay_clear_stair();     /* new level: any locked stair / stuck cell is gone */
+	autoplay_clear_stuck();
 }
 
 /* Is the backpack full (no free general slot)? The pack is kept compact, so a
@@ -7127,6 +7163,7 @@ void do_cmd_autoplay(void)
 	ap_ignore_idx = ap_chase_idx = 0;
 	ap_chase_turns = 0;
 	autoplay_clear_stair();
+	autoplay_clear_stuck();
 	p_ptr->redraw |= (PR_STATE);
 	msg_print("Autoplay started (press any key to stop).");
 }
