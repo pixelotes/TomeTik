@@ -3487,6 +3487,9 @@ bool get_string(cptr prompt, char *buf, int len)
 {
 	bool res;
 
+	/* Auto-mode: cancel text entry rather than block on input. */
+	if (exploring || autoplaying) return (FALSE);
+
 	/* Paranoia XXX XXX XXX */
 	msg_print(NULL);
 
@@ -3516,6 +3519,12 @@ bool get_check(cptr prompt)
 	int i;
 
 	char buf[80];
+
+	/* Auto-explore / auto-play can't answer prompts: proceed with the action the
+	 * bot already deliberately chose rather than block forever on inkey(). Prompts
+	 * whose safe default is "no" (e.g. "Reset recall depth?") are bypassed at their
+	 * own call site before reaching here. */
+	if (exploring || autoplaying) return (TRUE);
 
 	/* Paranoia XXX XXX XXX */
 	msg_print(NULL);
@@ -3556,6 +3565,9 @@ bool get_check(cptr prompt)
 */
 bool get_com(cptr prompt, char *command)
 {
+	/* Auto-mode: cancel any command prompt rather than block on input. */
+	if (exploring || autoplaying) { *command = ESCAPE; return (FALSE); }
+
 	/* Paranoia XXX XXX XXX */
 	msg_print(NULL);
 
@@ -3590,6 +3602,9 @@ s32b get_quantity(cptr prompt, s32b max)
 
 	char buf[80];
 
+	/* Auto-mode: take the full amount (the natural "all" default for pickup /
+	 * transactions) rather than block on input. */
+	if ((exploring || autoplaying) && !command_arg) return (max);
 
 	/* Use "command_arg" */
 	if (command_arg)
