@@ -186,8 +186,14 @@ Funciones nuevas que reusan los helpers `static` locales (`price_item`, `store_w
    A* ahora **rodea** las casillas con monstruo en el movimiento no-combate. Hooks
    `explore_walkable_clear`/`real_walkable_clear` (= hooks normales + casilla con `m_idx` =
    intransitable), usados en explorar/delve/escalera (pathing + `autoplay_can_reach_hook` +
-   `blind_goal`). El combate sigue ignorando monstruos (para alcanzar al blanco). *Caso límite:*
-   NPC bloqueando pasillo de 1 ancho (sin rodeo) → seguiría flojo; ahí tocaría swap/push-past.
+   `blind_goal`) **y en el paseo por el pueblo** (`autoplay_town_step`/`autoplay_shop_neighbor`,
+   que era el que faltaba — en Bree seguía atravesando a Maggot). El combate sigue ignorando
+   monstruos (para alcanzar al blanco). *Caso límite:* NPC bloqueando pasillo de 1 ancho (sin
+   rodeo) → seguiría flojo; ahí tocaría swap/push-past.
+8. **Nivel sin salida → "Nothing to do".** **RESUELTO (scumming)**: tras agotar explorar/delve/
+   bajar, el bot va a una escalera ARRIBA conocida y sube (el nivel se regenera; `AP_ASCEND`/
+   `autoplay_find_upstair`/`autoplay_ascend`); sin escaleras → recall al pueblo (`AP_RECALL` +
+   `AP_WAIT` mientras cuenta atrás) y re-baja a un nivel fresco.
 
 ## Puente Lua (Paso B) — política tweakeable
 
