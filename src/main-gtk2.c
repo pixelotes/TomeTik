@@ -5884,7 +5884,7 @@ static GtkItemFactoryEntry main_menu_items[] =
 	{ "/Action/Movement/Walk and pick up (;)", NULL, action_event_handler, ';', NULL },
 	{ "/Action/Movement/Walk (-)", NULL, action_event_handler, '-', NULL },
 	{ "/Action/Movement/Auto-explore (^E)", NULL, action_event_handler, KTRL('E'), NULL },
-	{ "/Action/Movement/Autoplay (^V)", NULL, action_event_handler, KTRL('V'), NULL },
+	{ "/Action/Movement/Autoplay (^Z)", NULL, action_event_handler, KTRL('Z'), NULL },
 
 	{ "/Action/Alter", NULL, NULL, 0, "<Branch>" },
 	{ "/Action/Alter/Alter (+)", NULL, action_event_handler, '+', NULL },
@@ -5911,7 +5911,7 @@ static GtkItemFactoryEntry main_menu_items[] =
 
 	{ "/Action/sep1", NULL, NULL, 0, "<Separator>" },
 	{ "/Action/Take note (:)", NULL, action_event_handler, ':', NULL },
-	{ "/Action/Oracle: advice (^N)", NULL, action_event_handler, KTRL('N'), NULL },
+	{ "/Action/Oracle: advice (^O)", NULL, action_event_handler, KTRL('O'), NULL },
 
 	/* "Audio" menu (TomeTik): sonido y música, desactivados por defecto. */
 	{ "/Audio", NULL, NULL, 0, "<Branch>" },
