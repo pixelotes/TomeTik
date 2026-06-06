@@ -4746,6 +4746,7 @@ static byte *explore_block = NULL;
 static byte *ap_searched = NULL;   /* A2: floor cells we've already searched from */
 static int ap_search_done = 0;     /* A2: search turns spent on this level (capped) */
 #define AP_SEARCH_MAX 60           /*     don't sweep forever before scumming */
+static bool ap_detected = FALSE;   /* B1: have we run detection on this level yet? */
 static int explore_goal_y = -1, explore_goal_x = -1;
 static long explore_goal_count = -1;  /* celdas vistas cuando fijamos la meta */
 static bool explore_goal_is_loot = FALSE; /* la meta actual es oro / un objeto */
@@ -4788,6 +4789,7 @@ static void explore_sync_seen(void)
 		C_MAKE(explore_block, n, byte);
 		C_MAKE(ap_searched, n, byte);
 		ap_search_done = 0;
+		ap_detected = FALSE;
 		explore_seen_stamp = old_turn;
 		explore_seen_count = 0;
 		explore_goal_y = explore_goal_x = -1;
@@ -4862,6 +4864,24 @@ static bool cell_has_item(int y, int x)
 			}
 			return (TRUE);
 		}
+	}
+	return (FALSE);
+}
+
+/* (B4) Survivable missiles (shots/arrows/bolts) lying here -- the bot's own fired
+ * ammo to recover. Flasks of oil shatter when thrown, so they're not counted. */
+static bool cell_has_ammo(int y, int x)
+{
+	s16b this_o_idx, next_o_idx;
+
+	for (this_o_idx = cave[y][x].o_idx; this_o_idx; this_o_idx = next_o_idx)
+	{
+		object_type *o_ptr = &o_list[this_o_idx];
+		next_o_idx = o_ptr->next_o_idx;
+		if (!o_ptr->marked) continue;
+		if ((o_ptr->tval == TV_SHOT) || (o_ptr->tval == TV_ARROW) ||
+		                (o_ptr->tval == TV_BOLT))
+			return (TRUE);
 	}
 	return (FALSE);
 }
@@ -5349,6 +5369,12 @@ static int explore_cell_interest(int y, int x, int dist)
 		return (EXPLORE_LOOT);
 	if (!explore_no_items && (explore_item_radius > 0) &&
 	                (dist <= explore_item_radius) && cell_has_item(y, x))
+		return (EXPLORE_LOOT);
+
+	/* (B4) Recover our own missiles at a longer range than ordinary loot -- ammo
+	 * is a limited resource and worth a small detour to pick back up. */
+	if ((explore_item_radius > 0) && (dist <= explore_item_radius * 2) &&
+	                cell_has_ammo(y, x))
 		return (EXPLORE_LOOT);
 
 	/* Frontier: a seen grid next to one we have never seen -- and not blacklisted
@@ -5993,6 +6019,122 @@ static void autoplay_throw_at(int item, monster_type *m_ptr)
 	autoplay_force_item = item; autoplay_force_item_on = TRUE;
 	do_cmd_throw();
 	autoplay_force_item_on = FALSE;
+}
+
+/* ---- (B) use beneficial devices/potions: detect, haste, restore, uncurse ---- */
+
+/* Kinds of "device" the bot can use without a picker, via autoplay_force_item. */
+#define APDEV_STAFF  1
+#define APDEV_ROD    2
+#define APDEV_SCROLL 3
+
+/* Use staff/rod/scroll in pack slot 'item' (force_item feeds get_item; the
+ * do_cmd_* set energy_use themselves). */
+static void autoplay_use_device(int item, int kind)
+{
+	autoplay_force_item = item; autoplay_force_item_on = TRUE;
+	switch (kind)
+	{
+	case APDEV_STAFF:  do_cmd_use_staff(); break;
+	case APDEV_ROD:    do_cmd_zap_rod(); break;
+	case APDEV_SCROLL: do_cmd_read_scroll(); break;
+	}
+	autoplay_force_item_on = FALSE;
+}
+
+/* Find a usable detection item (monsters/traps/mapping) with charges. Sets *kind
+ * (APDEV_*) and returns its pack index, or -1. Staves/scrolls never prompt for a
+ * direction; rods only if unaware/aimed, so we only take AWARE detection rods. */
+static int autoplay_find_detection(int *kind)
+{
+	static const int staves[] =
+	{ SV_STAFF_SENSE_MONSTER, SV_STAFF_REVEAL_WAYS, SV_STAFF_SENSE_HIDDEN,
+	  SV_STAFF_VISION, SV_STAFF_MITHRANDIR };
+	static const int rods[] =
+	{ SV_ROD_DETECTION, SV_ROD_MAPPING, SV_ROD_DETECT_TRAP, SV_ROD_DETECT_DOOR };
+	static const int scrolls[] =
+	{ SV_SCROLL_DETECT_INVIS, SV_SCROLL_DETECT_TRAP, SV_SCROLL_DETECT_DOOR };
+	int i, k;
+
+	for (i = 0; i < INVEN_PACK; i++)
+	{
+		object_type *o_ptr = &p_ptr->inventory[i];
+		if (!o_ptr->k_idx) continue;
+
+		if ((o_ptr->tval == TV_STAFF) && (o_ptr->pval > 0))
+			for (k = 0; k < 5; k++)
+				if (o_ptr->sval == staves[k]) { *kind = APDEV_STAFF; return (i); }
+
+		if ((o_ptr->tval == TV_ROD) && (o_ptr->timeout <= 0) && object_aware_p(o_ptr))
+			for (k = 0; k < 4; k++)
+				if (o_ptr->sval == rods[k]) { *kind = APDEV_ROD; return (i); }
+
+		if (o_ptr->tval == TV_SCROLL)
+			for (k = 0; k < 3; k++)
+				if (o_ptr->sval == scrolls[k]) { *kind = APDEV_SCROLL; return (i); }
+	}
+	return (-1);
+}
+
+/* A worn item is cursed (so we'd want a Remove Curse scroll). */
+static bool autoplay_wearing_cursed(void)
+{
+	int i;
+	for (i = INVEN_WIELD; i < INVEN_TOTAL; i++)
+		if (p_ptr->inventory[i].k_idx && cursed_p(&p_ptr->inventory[i])) return (TRUE);
+	return (FALSE);
+}
+
+/* Pack index of a Remove Curse scroll, or -1. */
+static int autoplay_find_remove_curse(void)
+{
+	int i;
+	for (i = 0; i < INVEN_PACK; i++)
+	{
+		object_type *o_ptr = &p_ptr->inventory[i];
+		if (o_ptr->k_idx && (o_ptr->tval == TV_SCROLL) &&
+		                ((o_ptr->sval == SV_SCROLL_REMOVE_CURSE) ||
+		                 (o_ptr->sval == SV_SCROLL_STAR_REMOVE_CURSE)))
+			return (i);
+	}
+	return (-1);
+}
+
+/* Pack index of a Potion of Speed, or -1. */
+static int autoplay_find_speed(void)
+{
+	int i;
+	for (i = 0; i < INVEN_PACK; i++)
+	{
+		object_type *o_ptr = &p_ptr->inventory[i];
+		if (o_ptr->k_idx && (o_ptr->tval == TV_POTION) && (o_ptr->sval == SV_POTION_SPEED))
+			return (i);
+	}
+	return (-1);
+}
+
+/* A drained stat (stat_cur < stat_max) with a matching Restore potion in the
+ * pack: return that potion's slot (and set *stat to the index), else -1. */
+static int autoplay_find_restore(int *stat)
+{
+	static const int restore_sval[6] =
+	{ SV_POTION_RES_STR, SV_POTION_RES_INT, SV_POTION_RES_WIS,
+	  SV_POTION_RES_DEX, SV_POTION_RES_CON, SV_POTION_RESTORE_MANA /* CHR has none here */ };
+	int s, i;
+
+	for (s = 0; s < 6; s++)
+	{
+		if (s == 5) continue;                       /* CHR: no restore potion */
+		if (p_ptr->stat_cur[s] >= p_ptr->stat_max[s]) continue;   /* not drained */
+		for (i = 0; i < INVEN_PACK; i++)
+		{
+			object_type *o_ptr = &p_ptr->inventory[i];
+			if (o_ptr->k_idx && (o_ptr->tval == TV_POTION) &&
+			                (o_ptr->sval == restore_sval[s]))
+			{ *stat = s; return (i); }
+		}
+	}
+	return (-1);
 }
 
 /* Backpack index of an edible staple food, or -1. */
@@ -7119,6 +7261,8 @@ static bool autoplay_needs_resupply(void)
 #define AP_PUSHPAST 20  /* step toward (y,x) swapping past a friend */
 #define AP_SHOOT    21  /* fire launcher ammo (item) at foe (y,x)   */
 #define AP_THROW    22  /* throw an item (item) at foe (y,x)        */
+#define AP_DEVICE   23  /* use staff/rod/scroll (item; kind in .y)  */
+#define AP_DETECT   24  /* use a detection device (item; kind .y)   */
 
 typedef struct autoplay_action autoplay_action;
 struct autoplay_action
@@ -7358,6 +7502,20 @@ static void autoplay_decide(autoplay_action *a)
 		}
 	}
 
+	/* 1c3. (B1) Detect once per level: if we carry a detection staff/rod/scroll
+	 * and nothing is adjacent, use it so the threat/trap picture is current before
+	 * we wander into it. */
+	if ((dun_level > 0) && !ap_detected && !autoplay_adjacent_enemy())
+	{
+		int kind = 0, it2 = autoplay_find_detection(&kind);
+		if (it2 >= 0)
+		{
+			a->type = AP_DETECT; a->item = it2; a->y = kind;
+			strcpy(a->advice, "Use a detection device.");
+			return;
+		}
+	}
+
 	/* 1d. Ranged attack ("Random bullshit go!"): in the dungeon, with nothing
 	 * adjacent (melee threats are dealt with below) and a clear line of fire,
 	 * shoot/throw at the nearest foe -- crucially INCLUDING paralysers and other
@@ -7413,6 +7571,19 @@ static void autoplay_decide(autoplay_action *a)
 		char nm[80];
 		monster_desc(nm, enemy, 0);
 		a->y = enemy->fy; a->x = enemy->fx;
+
+		/* (B2) Haste before a genuinely dangerous fight (foe that hits for a big
+		 * chunk per turn), if we have a Speed potion and aren't already fast. */
+		if (!p_ptr->fast && (autoplay_monster_danger(enemy) * 3 >= chp))
+		{
+			int sp = autoplay_find_speed();
+			if (sp >= 0)
+			{
+				a->type = AP_QUAFF; a->item = sp;
+				strnfmt(a->advice, 80, "Quaff Speed to fight %s.", nm);
+				return;
+			}
+		}
 
 		if (desperate && autoplay_can_flee(enemy->fy, enemy->fx))
 		{
@@ -7555,6 +7726,29 @@ static void autoplay_decide(autoplay_action *a)
 			a->type = AP_EQUIP; a->item = it;
 			strnfmt(a->advice, 80, "Equip %s.", nm);
 			return;
+		}
+
+		/* 7b. (B3) Restore a drained stat if we carry the matching potion. */
+		{
+			int st = 0, ri = autoplay_find_restore(&st);
+			if (ri >= 0)
+			{
+				a->type = AP_QUAFF; a->item = ri;
+				strcpy(a->advice, "Quaff a potion to restore a drained stat.");
+				return;
+			}
+		}
+
+		/* 7c. (B3) Uncurse a stuck cursed item if we have a Remove Curse scroll. */
+		if (autoplay_wearing_cursed())
+		{
+			int rc = autoplay_find_remove_curse();
+			if (rc >= 0)
+			{
+				a->type = AP_DEVICE; a->item = rc; a->y = APDEV_SCROLL;
+				strcpy(a->advice, "Read Remove Curse.");
+				return;
+			}
 		}
 
 		/* 8. Out of supplies: recall back to town (no progress lost). */
@@ -7725,6 +7919,8 @@ static void autoplay_perform(autoplay_action *a)
 	case AP_PUSHPAST: (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, explore_walkable_friend); break;
 	case AP_SHOOT:    { int mi = cave[a->y][a->x].m_idx; if (mi) autoplay_shoot(a->item, &m_list[mi]); break; }
 	case AP_THROW:    { int mi = cave[a->y][a->x].m_idx; if (mi) autoplay_throw_at(a->item, &m_list[mi]); break; }
+	case AP_DEVICE:   autoplay_use_device(a->item, a->y); break;
+	case AP_DETECT:   autoplay_use_device(a->item, a->y); ap_detected = TRUE; break;
 	case AP_SEARCH:
 		energy_use = 100;
 		search();                                  /* reveals adjacent secret doors/traps */
