@@ -229,14 +229,27 @@ se queda permanentemente débil. Detalles:
      (`timeout<500`) sin repuesto, **antes del gold-gate** (antorchas baratas, ir a oscuras es
      letal). El `else` de `autoplay_shop_buy_needs` ya compra antorchas aunque no haya luz puesta.
 
-5. **[POR ARREGLAR BIEN] Selección de objetivo en oscuridad total.** El núcleo de exploración
-   usa **fronteras vistas** (celda vista junto a una no vista); si el `@` **no ve nada**
-   (habitación a oscuras / sin fuente de luz), no hay frontera → no elige objetivo → se
-   bloquea. Es un **problema lógico del algoritmo de selección de objetivo**. *Workaround*
-   actual: equipar antorcha antes del recall (ver abajo) + `AP_DELVE` (terreno real) lo
-   mitiga, pero una sala **cerrada con solo puertas secretas** (necesita buscar) o el caso de
-   cero luz siguen siendo flojos. Fix propio: que la selección de objetivo no dependa solo de
-   "visto" (p.ej. delve siempre como objetivo válido, o buscar puertas secretas).
+5. **Selección de objetivo en oscuridad total.** El núcleo de exploración usa **fronteras
+   vistas** (celda vista junto a una no vista); a oscuras no hay frontera. **Mitigado de fondo
+   por `autoplay_blind_goal`/`AP_DELVE`** (BFS sobre terreno **real** `cave[][].feat`, ground
+   truth): la sala a oscuras se delvea un paso → la luz revela → vuelve la frontera. Cero luz =
+   problema de **supervivencia** (red de seguridad de luz → recall), no de navegación (el delve
+   lee terreno real). **Residual = puertas secretas**, ahora atacado en **L1 (HECHO)**:
+   - **L1 — búsqueda dirigida y persistente** (cmd1.c). El barrido 11c original usaba
+     `feat >= FEAT_SECRET`, que (0x30) incluye **todos** los muros/vetas → buscaba 1 vez en
+     cada borde del perímetro (inútil, y gastaba hasta `AP_SEARCH_MAX`=60 turnos antes de
+     scummear). Ahora `autoplay_find_search_spot` apunta a la **puerta secreta real**
+     (`cave[ny][nx].feat == FEAT_SECRET` exacto, ground truth — coherente con que el bot ya
+     navega por terreno real) e **insiste** en el mismo spot hasta revelarla: `ap_searched`
+     pasó de bool a **contador por celda** con presupuesto `AP_SEARCH_PER_SPOT`=20 (`search()`
+     es probabilístico por turno); al revelarse, `FEAT_SECRET` (0x30) → puerta (0x20) sale del
+     filtro y la exploración normal sigue. Si no hay puerta secreta alcanzable → 0 spots → al
+     scum directo (sin barrido de 60 turnos). `case AP_SEARCH`: `ap_searched[...]++`.
+   - *Pendiente L2*: detección legítima en el dead-end (Scroll Magic Mapping / Detect Doors &
+     Stairs / vara-rod) antes de buscar a mano — revela puertas+escaleras de golpe; reusa
+     `AP_DETECT`/`AP_DEVICE` y se compra en pueblo. *L3*: unificar frontera/blind/search en un
+     solo BFS de terreno real (objetivo = {suelo no visto} ∪ {adyacente a FEAT_SECRET} ∪
+     {escaleras}). *L4*: puertas con cerrojo / tunelar (`AP_OPEN`/`AP_DISARM`/`AP_TUNNEL`).
 6. **Bot perseguía a perpetuidad a evasivos / NPCs (fruit bat, Blubbering idiot, Farmer
    Maggot).** **RESUELTO**: give-up por **turnos totales** (`ap_chase_turns > 15` ⇒ se mete en
    `ap_ignore_idx` y explora; el progreso-based reseteaba con la fluctuación de distancia).

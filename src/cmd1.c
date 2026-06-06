@@ -4733,9 +4733,12 @@ static byte *explore_bad = NULL;
  * como intransitables SOLO para el autoexplore, de modo que rodea en vez de
  * pararse. El click-to-move no las consulta (el jugador puede ir a mano). */
 static byte *explore_block = NULL;
-static byte *ap_searched = NULL;   /* A2: floor cells we've already searched from */
+static byte *ap_searched = NULL;   /* A2: per-cell count of searches spent there */
 static int ap_search_done = 0;     /* A2: search turns spent on this level (capped) */
 #define AP_SEARCH_MAX 60           /*     don't sweep forever before scumming */
+#define AP_SEARCH_PER_SPOT 20      /*     keep searching one spot this many turns  */
+                                   /*     (search() is per-turn probabilistic) before */
+                                   /*     giving the door up                          */
 static bool ap_detected = FALSE;   /* B1: have we run detection on this level yet? */
 
 /* A: position-loop detection -- break out of oscillating between a few cells. */
@@ -7393,20 +7396,26 @@ static bool autoplay_find_search_spot(int *sy, int *sx)
 		for (x = 0; x < cur_wid; x++)
 		{
 			int cell = y * cur_wid + x, k, d;
-			bool by_wall = FALSE;
+			bool by_secret = FALSE;
 
-			if (ap_searched[cell]) continue;
+			if (ap_searched[cell] >= AP_SEARCH_PER_SPOT) continue;  /* spot exhausted */
 			if (!explore_is_seen(y, x)) continue;
 			if (!cave_floor_bold(y, x)) continue;
 
+			/* Adjacent to an as-yet-unrevealed real secret door? FEAT_SECRET
+			 * (0x30) is the genuine hidden-door feat -- note >= FEAT_SECRET would
+			 * also match plain walls/veins (rubble..perm), so we test for equality
+			 * and home onto the actual door. The bot already navigates by ground-
+			 * truth terrain (autoplay_blind_goal), so reading the hidden feat here
+			 * is consistent: it searches only where a door truly is, and reports
+			 * "none" at once when there isn't one to find (-> scum, no 60-turn sweep). */
 			for (k = 0; k < 8; k++)
 			{
 				int ny = y + dy8[k], nx = x + dx8[k];
 				if (!in_bounds2(ny, nx)) continue;
-				if (explore_is_seen(ny, nx) && (cave[ny][nx].feat >= FEAT_SECRET))
-				{ by_wall = TRUE; break; }
+				if (cave[ny][nx].feat == FEAT_SECRET) { by_secret = TRUE; break; }
 			}
-			if (!by_wall) continue;
+			if (!by_secret) continue;
 
 			d = distance(p_ptr->py, p_ptr->px, y, x);
 			if ((bestd >= 0) && (d >= bestd)) continue;
@@ -7974,7 +7983,11 @@ static void autoplay_perform(autoplay_action *a)
 	case AP_SEARCH:
 		energy_use = 100;
 		search();                                  /* reveals adjacent secret doors/traps */
-		if (ap_searched) ap_searched[p_ptr->py * cur_wid + p_ptr->px] = 1;
+		/* Count the search here; we keep working the same spot (search() only has
+		 * a per-turn chance) until the door reveals -- once FEAT_SECRET flips to a
+		 * real door the spot drops out of autoplay_find_search_spot -- or the
+		 * per-spot budget runs out. */
+		if (ap_searched) ap_searched[p_ptr->py * cur_wid + p_ptr->px]++;
 		ap_search_done++;
 		break;
 	case AP_FLEE:     (void)autoplay_flee_from(a->y, a->x); break;
