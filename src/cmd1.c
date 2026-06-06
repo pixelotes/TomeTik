@@ -7452,6 +7452,8 @@ static void autoplay_decide(autoplay_action *a)
 	monster_type *enemy;
 	bool full = autoplay_pack_full();
 	int it;
+	int heal_at  = autoplay_cfg("heal_at", 50);      /* start healing at this %HP   */
+	int heal_big = autoplay_cfg("heal_big_at", 25);  /* big heal / desperate %HP    */
 
 	a->type = AP_NONE;
 	a->item = -1;
@@ -7477,9 +7479,9 @@ static void autoplay_decide(autoplay_action *a)
 	explore_sync_seen();
 
 	/* 1. Heal when hurt and a potion is at hand (cheap cure first; big heal if low). */
-	if (chp * 2 <= mhp)
+	if (chp * 100 <= mhp * heal_at)
 	{
-		it = autoplay_find_heal(chp * 4 <= mhp);
+		it = autoplay_find_heal(chp * 100 <= mhp * heal_big);
 		if (it >= 0)
 		{
 			char nm[80];
@@ -7624,14 +7626,14 @@ static void autoplay_decide(autoplay_action *a)
 		/* nearest_enemy already filtered out foes too dangerous to melee, so a
 		 * returned enemy is one we're willing to fight. We still bail out (flee)
 		 * if we're critically low and out of cures. */
-		bool desperate = (chp * 4 <= mhp) && (autoplay_find_heal(TRUE) < 0);
+		bool desperate = (chp * 100 <= mhp * heal_big) && (autoplay_find_heal(TRUE) < 0);
 		char nm[80];
 		monster_desc(nm, enemy, 0);
 		a->y = enemy->fy; a->x = enemy->fx;
 
 		/* (B2) Haste before a genuinely dangerous fight (foe that hits for a big
 		 * chunk per turn), if we have a Speed potion and aren't already fast. */
-		if (!p_ptr->fast && (autoplay_monster_danger(enemy) * 3 >= chp))
+		if (!p_ptr->fast && (autoplay_monster_danger(enemy) * autoplay_cfg("speed_at", 3) >= chp))
 		{
 			int sp = autoplay_find_speed();
 			if (sp >= 0)
@@ -8155,6 +8157,9 @@ void do_cmd_autoplay(void)
 	autoplay_clear_stuck();
 	ap_loop_n = ap_loop_head = 0; ap_loop_ly = ap_loop_lx = -1;
 	ap_loop_strikes = 0; ap_force_unstick = FALSE;
+	/* (E1) loot-detour radii are tunable from Lua too. */
+	explore_gold_radius = autoplay_cfg("loot_radius", 5);
+	explore_item_radius = autoplay_cfg("item_radius", 5);
 	p_ptr->redraw |= (PR_STATE);
 	msg_print("Autoplay started (press any key to stop).");
 }
