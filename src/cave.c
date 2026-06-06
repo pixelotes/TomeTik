@@ -866,6 +866,80 @@ static byte darker_attrs[16] =
 };
 
 
+/*
+ * TomeTik -- Gervais 2D shaped-wall ("roof") auto-tiling.
+ *
+ * 12 placeholder shape tiles are packed into 32x32.bmp at row 0, columns
+ * 50..61 (attr 0x80, char 0xB2 + shape).  For a dungeon wall grid we draw
+ * the floor on the terrain layer and the neighbour-shaped wall tile on the
+ * overlay layer; the diagonal bevels are colour-keyed (black) so the floor
+ * shows through -- the same idea as iso_wall_shape() in main-gtk2.c.
+ */
+#define GERVAIS_SHAPE_ATTR  0x80
+#define GERVAIS_SHAPE_CHAR  0xB2
+
+/* Shape order MUST match the packed tile order in 32x32.bmp */
+#define WSH_QUAD    0
+#define WSH_NS      1
+#define WSH_WE      2
+#define WSH_SINGLE  3
+#define WSH_NW      4
+#define WSH_NE      5
+#define WSH_SW      6
+#define WSH_SE      7
+#define WSH_TRI_N   8
+#define WSH_TRI_S   9
+#define WSH_TRI_E   10
+#define WSH_TRI_W   11
+
+bool gervais_wall_shape = TRUE;   /* runtime toggle (default on) */
+
+static bool feat_is_shapewall(int feat)
+{
+	return (f_info[feat].flags1 & FF1_WALL) ? TRUE : FALSE;
+}
+
+static bool shapewall_at(int y, int x)
+{
+	int f;
+
+	/* Off-map counts as wall so the map borders stay closed */
+	if ((y < 0) || (x < 0) || (y >= cur_hgt) || (x >= cur_wid)) return TRUE;
+
+	f = cave[y][x].mimic ? cave[y][x].mimic : cave[y][x].feat;
+	return feat_is_shapewall(f);
+}
+
+/* Classify a wall grid from its 4 orthogonal neighbours -> WSH_* */
+static int wall_shape_2d(int y, int x)
+{
+	bool n = shapewall_at(y - 1, x);
+	bool s = shapewall_at(y + 1, x);
+	bool e = shapewall_at(y, x + 1);
+	bool w = shapewall_at(y, x - 1);
+	int cnt = (n ? 1 : 0) + (s ? 1 : 0) + (e ? 1 : 0) + (w ? 1 : 0);
+
+	if (n && s && e && w) return WSH_QUAD;
+	if (cnt == 0) return WSH_SINGLE;
+	if (cnt == 3)
+	{
+		if (!n) return WSH_TRI_N;
+		if (!s) return WSH_TRI_S;
+		if (!e) return WSH_TRI_E;
+		return WSH_TRI_W;            /* !w */
+	}
+	if (n && s) return WSH_NS;
+	if (e && w) return WSH_WE;
+	/* two adjacent neighbours -> outer corner, named by the OPEN quadrant */
+	if (s && e) return WSH_NW;
+	if (s && w) return WSH_NE;
+	if (n && e) return WSH_SW;
+	if (n && w) return WSH_SE;
+	/* single neighbour -> straight stub */
+	if (n || s) return WSH_NS;
+	return WSH_WE;
+}
+
 #ifdef USE_TRANSPARENCY
 #ifdef USE_EGO_GRAPHICS
 void map_info(int y, int x, byte *ap, char *cp, byte *tap, char *tcp,
@@ -1260,6 +1334,30 @@ void map_info(int y, int x, byte *ap, char *cp)
 	/* Save the info */
 	*ap = a;
 	*cp = c;
+
+#ifdef USE_TRANSPARENCY
+	/*
+	 * TomeTik -- Gervais shaped-wall overlay.  Terrain layer = floor,
+	 * overlay layer = neighbour-shaped wall tile (bevels reveal the floor).
+	 * Skipped when the grid carries a monster/object so layers 2/3 work.
+	 */
+	if (gervais_wall_shape && (graphics_mode == GRAPHICS_GERVAIS) &&
+	    (dun_level > 0) && (info & (CAVE_MARK | CAVE_SEEN)) &&
+	    !c_ptr->m_idx && !c_ptr->o_idx && feat_is_shapewall(feat))
+	{
+		int sh = wall_shape_2d(y, x);
+
+		if (sh >= 0)
+		{
+			feature_type *gf = &f_info[FEAT_FLOOR];
+
+			*tap = gf->x_attr;
+			*tcp = gf->x_char;
+			*ap  = GERVAIS_SHAPE_ATTR;
+			*cp  = (char)(GERVAIS_SHAPE_CHAR + sh);
+		}
+	}
+#endif /* USE_TRANSPARENCY */
 
 
 	/**** Layer 2 -- Objects ****/
