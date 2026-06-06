@@ -177,6 +177,9 @@ extern bool use_zoom;
 	 * End TomeTik 0.3
 	 */
 extern byte graphics_mode;
+extern bool gervais_wall_shape;
+extern bool gervais_terrain_edge;
+extern bool gervais_roof_shape;
 extern u16b total_winner;
 extern u16b has_won;
 extern u16b panic_save;

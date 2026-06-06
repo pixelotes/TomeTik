@@ -5083,6 +5083,28 @@ static void change_trans_mode_event_handler(
 
 # endif  /* USE_TRANSPARENCY */
 
+/*
+ * TomeTik -- toggle the Gervais shaped-tile effects on/off:
+ *   0 = shaped dungeon walls (roof bevels)
+ *   1 = terrain edging (grass/water/sand transitions)
+ *   2 = town building roofs
+ * The decisions live in map_info() (cave.c), so a forced redraw re-applies.
+ */
+static void change_shape_tile_event_handler(
+        GtkButton *was_clicked,
+        gpointer user_data)
+{
+	switch ((int)user_data)
+	{
+		case 0: gervais_wall_shape   = !gervais_wall_shape;   break;
+		case 1: gervais_terrain_edge = !gervais_terrain_edge; break;
+		case 2: gervais_roof_shape   = !gervais_roof_shape;   break;
+	}
+
+	/* Hack - force redraw */
+	Term_key_push(KTRL('R'));
+}
+
 #endif /* USE_GRAPHICS */
 
 
@@ -5975,6 +5997,14 @@ static GtkItemFactoryEntry main_menu_items[] =
 	{ "/Options/Graphics/Transparency", NULL,
 	  change_trans_mode_event_handler, 0, "<CheckItem>" },
 # endif  /* USE_TRANSPARENCY */
+	{ "/Options/Graphics/sep4", NULL,
+	  NULL, 0, "<Separator>" },
+	{ "/Options/Graphics/Shaped walls", NULL,
+	  change_shape_tile_event_handler, 0, "<CheckItem>" },
+	{ "/Options/Graphics/Terrain edging", NULL,
+	  change_shape_tile_event_handler, 1, "<CheckItem>" },
+	{ "/Options/Graphics/Building roofs", NULL,
+	  change_shape_tile_event_handler, 2, "<CheckItem>" },
 
 #endif /* USE_GRAPHICS */
 
@@ -6315,6 +6345,17 @@ static void graf_menu_update_handler(
 	        use_transparency);
 
 # endif  /* USE_TRANSPARENCY */
+
+	/* TomeTik -- shaped-tile effect toggles */
+	check_menu_item(
+	        "<Angband>/Options/Graphics/Shaped walls",
+	        gervais_wall_shape);
+	check_menu_item(
+	        "<Angband>/Options/Graphics/Terrain edging",
+	        gervais_terrain_edge);
+	check_menu_item(
+	        "<Angband>/Options/Graphics/Building roofs",
+	        gervais_roof_shape);
 }
 
 #endif /* USE_GRAPHICS */
