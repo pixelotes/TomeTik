@@ -892,7 +892,13 @@ static byte darker_attrs[16] =
 #define WSH_TRI_E   10
 #define WSH_TRI_W   11
 
-bool gervais_wall_shape = TRUE;   /* runtime toggle (default on) */
+/*
+ * TomeTik -- runtime toggles for the Gervais shaped-tile effects.
+ * Exposed in the GTK2 "Options/Graphics" menu (default on).
+ */
+bool gervais_wall_shape   = TRUE; /* dungeon walls -> beveled "roof" tiles  */
+bool gervais_terrain_edge = TRUE; /* terrain transitions (grass/water/sand) */
+bool gervais_roof_shape   = TRUE; /* town building roofs (auto-tiled)       */
 
 static bool feat_is_shapewall(int feat)
 {
