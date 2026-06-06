@@ -961,6 +961,7 @@ static int wall_shape_2d(int y, int x)
 #define GDEDGE_ATTR  0x83   /* grass  <-> dirt          */
 #define CDEDGE_ATTR  0x84   /* cobble <-> dirt          */
 #define GCEDGE_ATTR  0x85   /* grass  <-> cobblestone   */
+#define GFEDGE_ATTR  0x86   /* grass  <-> open floor    */
 
 #define FEAT_COBBLE  200    /* cobblestone road (201 = with outlet) */
 
@@ -969,6 +970,7 @@ static int wall_shape_2d(int y, int x)
 #define TC_WATER   2
 #define TC_GRASS   3
 #define TC_COBBLE  4
+#define TC_FLOOR   5
 
 static int terrain_class(int feat)
 {
@@ -977,6 +979,7 @@ static int terrain_class(int feat)
 		case FEAT_GRASS:
 		case FEAT_FLOWER:     return TC_GRASS;
 		case FEAT_DIRT:       return TC_DIRT;
+		case FEAT_FLOOR:      return TC_FLOOR;
 		case FEAT_SHAL_WATER: return TC_WATER;
 		case FEAT_COBBLE:
 		case 201:             return TC_COBBLE;
@@ -1495,6 +1498,7 @@ void map_info(int y, int x, byte *ap, char *cp)
 			sl = edge_slot_low(y, x, TC_WATER);
 			if (sl >= 0) ea = WGEDGE_ATTR;
 			else if ((sl = edge_slot_low(y, x, TC_COBBLE)) >= 0) ea = GCEDGE_ATTR;
+			else if ((sl = edge_slot_low(y, x, TC_FLOOR)) >= 0) ea = GFEDGE_ATTR;
 			else if ((sl = edge_slot_low(y, x, TC_DIRT)) >= 0) ea = GDEDGE_ATTR;
 		}
 		else if (tc == TC_COBBLE)
