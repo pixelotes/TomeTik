@@ -325,13 +325,21 @@ Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
     arrows/bolts que no podemos disparar), y flasks de oil (no si son fuel de linterna).
     Economía: `autoplay_shop_buy_needs` compra flasks de oil para todos (lanzables) y **munición**
     del lanzador (`AP_WANT_AMMO=40`) si hay arco. *Pendiente v3*: recoger ammo tirado del suelo.
-- **Gestión de religión / piedad (PRIO BAJA)**: el bot hoy ignora al dios. La piedad
-  (`p_ptr->grace`) se drena sola con el tiempo para casi todos los dioses (Manwë/Tulkas −4,
-  Melkor −8, Yavanna −5 cada 300-400 game-turns; Eru sube) — es WAI de ToME, NO un bug.
-  Tarea: que el bot **rece / haga sacrificios para que la piedad no caiga por debajo de 0**
-  (la piedad negativa = enfado del dios, penalizaciones). Mientras se mantenga ≥0 no urge.
-  Subir Sabiduría también reduce el decay.
-- **Fase 1b**: navegación por wilderness (descubrir mazmorras a pie) — recall cubre casi todo.
+- **(E1) Más política a Lua — HECHO**: `autoplay.lua` expone `heal_at`/`heal_big_at` (%HP
+  para curar/heal grande), `speed_at` (beber Speed si el foe mata en N turnos), `loot_radius`/
+  `item_radius`. Retuneable sin recompilar (vía `autoplay_cfg`, fallback a defaults).
+- **(E2) Wilderness a pie — DIFERIDO (mini-proyecto, ROI bajo)**: en `wild_mode` el mapa es
+  `wild_map[][]` (no `cave[][]`) → hace falta un **pathfinder de overworld nuevo** + localizar
+  la entrada (`wild_map[y][x].entrance` >=1000 dungeon, <1000 town, `known`) + replicar el
+  enter (`>` en wild, dungeon.c:3936-3960). El bot **nunca entra en wild_mode solo** (viaja por
+  recall, que el Paso C apunta directo), así que hoy se para limpio en wilderness y está bien.
+  Quitar ese halt sin navegador sólido = deambular/atascarse. Hacerlo bien = sesión propia.
+- **(E3) Gestión de piedad — DIFERIDO (mini-proyecto, ROI bajo)**: ganar piedad = **sacrificar
+  en altar** del dios (`do_cmd_sacrifice`, sobre `FEAT_ALTAR`). Necesita altar-seeking (raros)
+  + sacrificables (Melkor: **cadáveres**, que el bot descarta a propósito) + blindar los
+  `get_check` de auto-sacrificio de HP (con A1 se auto-responden SÍ → se haría daño). ROI bajo:
+  bot melee no usa poderes divinos, decay lento (~4/30 mov), varios dioses ganan al matar.
+  Piedad negativa rara en juego activo. Si interesa: corpse-carrying + altar-seeking god-specific.
 - **Tabla de amenaza real — HECHO**: `autoplay_monster_danger(m)` = daño esperado/turno
   (suma de blows × ~60% acierto + extra por casters/breathers según HP×freq + bump por
   velocidad). `autoplay_too_dangerous` ahora incluye "un solo foe que me mata en
