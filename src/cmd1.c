@@ -4747,6 +4747,15 @@ static byte *ap_searched = NULL;   /* A2: floor cells we've already searched fro
 static int ap_search_done = 0;     /* A2: search turns spent on this level (capped) */
 #define AP_SEARCH_MAX 60           /*     don't sweep forever before scumming */
 static bool ap_detected = FALSE;   /* B1: have we run detection on this level yet? */
+
+/* A: position-loop detection -- break out of oscillating between a few cells. */
+#define AP_LOOP_WIN      16   /* moves we look back over */
+#define AP_LOOP_DISTINCT  5   /* <= this many distinct cells in the window = a loop */
+static int  ap_loop_y[AP_LOOP_WIN], ap_loop_x[AP_LOOP_WIN];
+static int  ap_loop_n = 0, ap_loop_head = 0;     /* ring fill / head */
+static int  ap_loop_ly = -1, ap_loop_lx = -1;    /* last recorded position */
+static int  ap_loop_strikes = 0;                 /* escalation level */
+static bool ap_force_unstick = FALSE;            /* decide should recall to break out */
 static int explore_goal_y = -1, explore_goal_x = -1;
 static long explore_goal_count = -1;  /* celdas vistas cuando fijamos la meta */
 static bool explore_goal_is_loot = FALSE; /* la meta actual es oro / un objeto */
@@ -4790,6 +4799,8 @@ static void explore_sync_seen(void)
 		C_MAKE(ap_searched, n, byte);
 		ap_search_done = 0;
 		ap_detected = FALSE;
+		ap_loop_n = ap_loop_head = 0; ap_loop_ly = ap_loop_lx = -1;
+		ap_loop_strikes = 0; ap_force_unstick = FALSE;
 		explore_seen_stamp = old_turn;
 		explore_seen_count = 0;
 		explore_goal_y = explore_goal_x = -1;
@@ -7468,6 +7479,16 @@ static void autoplay_decide(autoplay_action *a)
 		return;
 	}
 
+	/* 1c1. (A) Persistent movement loop -- recall to town for a clean reset (the
+	 * first strike already tried rerouting locally). The flag clears on the level
+	 * change; if a recall is already pending, just carry on until it fires. */
+	if (ap_force_unstick && (dun_level > 0) && (p_ptr->word_recall == 0))
+	{
+		a->type = AP_RECALL;
+		strcpy(a->advice, "Stuck in a loop -- recall to town to reset.");
+		return;
+	}
+
 	/* 1c2. Overwhelmed by a PACK: if the combined danger/turn of the nearby foes
 	 * is lethal and there is more than one, break away -- blink/teleport if we
 	 * can, else flee on foot -- before they surround and grind us down (the
@@ -7942,6 +7963,62 @@ static void autoplay_perform(autoplay_action *a)
 	}
 }
 
+/* (A) Record the post-move position and, if we've been confined to a tiny set of
+ * cells for a whole window, escalate to break the loop. Only positions that
+ * CHANGED are recorded, so resting / fighting / searching in place don't count
+ * (they don't move us). First strike: give up the current chase, blacklist the
+ * loop cells and clear cached goals so A* re-plans elsewhere. Persisting:
+ * ap_force_unstick -> decide recalls to town for a clean reset. */
+static void autoplay_loop_track(void)
+{
+	int i, j, distinct;
+
+	if ((p_ptr->py == ap_loop_ly) && (p_ptr->px == ap_loop_lx)) return;  /* no move */
+	ap_loop_ly = p_ptr->py; ap_loop_lx = p_ptr->px;
+
+	ap_loop_y[ap_loop_head] = p_ptr->py;
+	ap_loop_x[ap_loop_head] = p_ptr->px;
+	ap_loop_head = (ap_loop_head + 1) % AP_LOOP_WIN;
+	if (ap_loop_n < AP_LOOP_WIN) { ap_loop_n++; return; }   /* window not full yet */
+
+	/* Count distinct cells over the window. */
+	distinct = 0;
+	for (i = 0; i < AP_LOOP_WIN; i++)
+	{
+		bool seen = FALSE;
+		for (j = 0; j < i; j++)
+			if ((ap_loop_y[i] == ap_loop_y[j]) && (ap_loop_x[i] == ap_loop_x[j]))
+			{ seen = TRUE; break; }
+		if (!seen) distinct++;
+	}
+
+	if (distinct > AP_LOOP_DISTINCT)
+	{
+		if (ap_loop_strikes > 0) ap_loop_strikes--;        /* progress: relax */
+		return;
+	}
+
+	/* Confined to a few cells for the whole window -> we're looping. */
+	ap_loop_strikes++;
+
+	if (ap_loop_strikes >= 2)
+	{
+		ap_force_unstick = TRUE;                            /* persistent: bail the level */
+		msg_print("Autoplay: stuck in a loop -- bailing out.");
+	}
+	else
+	{
+		if (ap_chase_idx) { ap_ignore_idx = ap_chase_idx; ap_chase_idx = 0; ap_chase_turns = 0; }
+		for (i = 0; i < AP_LOOP_WIN; i++) explore_block_cell(ap_loop_y[i], ap_loop_x[i]);
+		autoplay_clear_stair();
+		explore_goal_y = explore_goal_x = -1;
+		msg_print("Autoplay: breaking a movement loop.");
+	}
+
+	/* Start a fresh window after acting. */
+	ap_loop_n = ap_loop_head = 0; ap_loop_ly = ap_loop_lx = -1;
+}
+
 /*
  * One auto-play decision. Called from process_player()'s energy loop: decide the
  * single best action and perform it (or stop when there is nothing left to do).
@@ -7979,6 +8056,9 @@ void autoplay_step(void)
 	 * visible (this is how the "torch out -> stuck" freeze surfaces). */
 	energy_use = 0;
 	autoplay_perform(&a);
+
+	/* (A) Track our position to catch oscillation loops and break out of them. */
+	autoplay_loop_track();
 
 	/* Some actions legitimately don't leave energy spent yet still make progress:
 	 *   - AP_REST hands off to the resting subsystem (resting = -1), dispatched
@@ -8037,6 +8117,8 @@ void do_cmd_autoplay(void)
 	ap_chase_turns = 0;
 	autoplay_clear_stair();
 	autoplay_clear_stuck();
+	ap_loop_n = ap_loop_head = 0; ap_loop_ly = ap_loop_lx = -1;
+	ap_loop_strikes = 0; ap_force_unstick = FALSE;
 	p_ptr->redraw |= (PR_STATE);
 	msg_print("Autoplay started (press any key to stop).");
 }
