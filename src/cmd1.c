@@ -4977,6 +4977,16 @@ static bool explore_walkable_friend(int y, int x, void *user)
 	return (explore_walkable_hook(y, x, user));
 }
 
+/* As real_walkable_clear (real terrain, ground truth) but a FRIENDLY-held cell is
+ * passable -- the real-terrain twin of explore_walkable_friend, for pushing past a
+ * friendly NPC blocking a 1-wide corridor that may lead into still-unseen floor. */
+static bool real_walkable_friend(int y, int x, void *user)
+{
+	if (cave[y][x].m_idx && (is_friend(&m_list[cave[y][x].m_idx]) <= 0))
+		return (FALSE);
+	return (travel_walkable_real(y, x, user));
+}
+
 /* Give up on grid (y,x) for the rest of this level's auto-explore: from now on we
  * route around it (and never sit a frontier goal on it, since the BFS no longer
  * reaches it). */
@@ -6487,48 +6497,80 @@ static bool autoplay_step_towards(int gy, int gx, bool do_pickup)
 	return (autoplay_step_towards_hook(gy, gx, do_pickup, explore_walkable_hook));
 }
 
-/* Nearest still-unseen real-floor cell reachable over real terrain (ignoring
- * what we've seen), for delving into the dark when the seen-gated frontier
- * search comes up empty. Returns TRUE and fills (*gy,*gx). */
-static bool autoplay_blind_goal(int *gy, int *gx)
+/* (L3) Unified exploration target for the bot: ONE breadth-first flood over real
+ * terrain (ground truth) returns the nearest reachable cell worth heading to --
+ * either seen LOOT within its detour radius, or an as-yet-unseen floor cell to
+ * DELVE into. This folds the old seen-frontier search (explore_pick_goal) and the
+ * dark-delve fallback (autoplay_blind_goal) into a single distance-ordered pass:
+ * the bot always heads for the closest thing of interest, and darkness is simply
+ * "unseen floor is a goal" -- no seam between a lit frontier and the dark past it.
+ * `hook` is the flood walkability (real_walkable_clear normally; real_walkable_
+ * friend to see whether a target opens up if we push past a friendly). Loot sits
+ * on seen floor and delve on unseen, so a cell is never both. The Ctrl-E
+ * autoexplore keeps its own honest, seen-only explore_pick_goal -- this is the
+ * map-cheating bot's path only. Returns TRUE, fills (*gy,*gx) and *kind. */
+#define AP_XPLORE_NONE  0
+#define AP_XPLORE_LOOT  1
+#define AP_XPLORE_DELVE 2
+static bool autoplay_explore_target(int *gy, int *gx, int *kind,
+                                    astar_walkable_hook hook)
 {
 	static const int dy8[8] = { -1, 1, 0, 0, -1, -1, 1, 1 };
 	static const int dx8[8] = { 0, 0, -1, 1, -1, 1, -1, 1 };
 	int n = cur_hgt * cur_wid, head = 0, tail = 0;
 	int start = p_ptr->py * cur_wid + p_ptr->px;
 	byte *seen;
-	int *queue;
+	int *queue, *dist;
 	bool found = FALSE;
 
 	if (n <= 0) return (FALSE);
 	C_MAKE(seen, n, byte);
 	C_MAKE(queue, n, int);
+	C_MAKE(dist, n, int);
 
 	seen[start] = 1;
+	dist[start] = 0;
 	queue[tail++] = start;
 
 	while (head < tail)
 	{
 		int cur = queue[head++], cy = cur / cur_wid, cx = cur % cur_wid, d;
+		int cd = dist[cur];
+
+		/* Seen loot within its detour radius (cell_has_* already require the
+		 * object be `marked`, i.e. actually seen) -- the closest such cell wins
+		 * because the flood is in distance order. */
+		if (((explore_gold_radius > 0) && (cd <= explore_gold_radius) && cell_has_gold(cy, cx)) ||
+		    (!explore_no_items && (explore_item_radius > 0) && (cd <= explore_item_radius) &&
+		     cell_has_item(cy, cx)) ||
+		    ((explore_item_radius > 0) && (cd <= explore_item_radius * 2) && cell_has_ammo(cy, cx)))
+		{
+			*gy = cy; *gx = cx; *kind = AP_XPLORE_LOOT; found = TRUE; break;
+		}
+
+		/* An unseen real-floor cell we can reach: delve toward it (this is the
+		 * frontier, expressed over real terrain instead of seen-adjacency). */
+		if ((cur != start) && !explore_is_seen(cy, cx))
+		{
+			*gy = cy; *gx = cx; *kind = AP_XPLORE_DELVE; found = TRUE; break;
+		}
+
 		for (d = 0; d < 8; d++)
 		{
 			int ny = cy + dy8[d], nx = cx + dx8[d], nc;
 			if ((ny < 0) || (ny >= cur_hgt) || (nx < 0) || (nx >= cur_wid)) continue;
 			nc = ny * cur_wid + nx;
 			if (seen[nc]) continue;
-			if (!real_walkable_clear(ny, nx, NULL)) continue;   /* real floor, no monster */
-
-			/* A walkable cell we have not yet uncovered: head there. */
-			if (!explore_is_seen(ny, nx)) { *gy = ny; *gx = nx; found = TRUE; break; }
-
+			if (!hook(ny, nx, NULL)) continue;
 			seen[nc] = 1;
+			dist[nc] = cd + 1;
 			queue[tail++] = nc;
 		}
-		if (found) break;
 	}
 
 	C_FREE(seen, n, byte);
 	C_FREE(queue, n, int);
+	C_FREE(dist, n, int);
 	return (found);
 }
 
@@ -7440,7 +7482,7 @@ static bool autoplay_find_search_spot(int *sy, int *sx)
 			 * (0x30) is the genuine hidden-door feat -- note >= FEAT_SECRET would
 			 * also match plain walls/veins (rubble..perm), so we test for equality
 			 * and home onto the actual door. The bot already navigates by ground-
-			 * truth terrain (autoplay_blind_goal), so reading the hidden feat here
+			 * truth terrain (autoplay_explore_target), so reading the hidden feat here
 			 * is consistent: it searches only where a door truly is, and reports
 			 * "none" at once when there isn't one to find (-> scum, no 60-turn sweep). */
 			for (k = 0; k < 8; k++)
@@ -7861,43 +7903,41 @@ static void autoplay_decide(autoplay_action *a)
 		}
 	}
 
-	/* 10. Explore the seen frontier; if that is exhausted, delve toward the
-	 * nearest unseen real-floor cell (pushing into the dark like click-to-move);
-	 * if even that finds nothing, head to / take a down staircase. Whatever's
-	 * left over is reported with diagnostics so the Oracle can explain a stall. */
+	/* 10. (L3) Explore: one real-terrain flood (autoplay_explore_target) heads for
+	 * the nearest thing of interest -- seen loot or unseen floor to delve -- with
+	 * no seam between a lit frontier and the dark beyond it. If a target only opens
+	 * up past a friendly NPC, push past it. If nothing's reachable, head to / take a
+	 * down staircase. Leftovers are reported with diagnostics so the Oracle can
+	 * explain a stall. */
 	{
-		int gy = 0, gx = 0, sy = 0, sx = 0;
+		int gy = 0, gx = 0, sy = 0, sx = 0, tkind = AP_XPLORE_NONE;
 		int here = cave[p_ptr->py][p_ptr->px].feat;
-		bool got, reach = FALSE, blind, gotstair, reachstair = FALSE;
+		bool got, gotstair, reachstair = FALSE;
 
 		explore_no_items = full;
-		got = explore_pick_goal(&gy, &gx);
-		explore_no_items = FALSE;
-		if (got) reach = autoplay_can_reach_hook(gy, gx, explore_walkable_clear);
-		if (got && reach)
+		got = autoplay_explore_target(&gy, &gx, &tkind, real_walkable_clear);
+		if (got)
 		{
-			a->type = AP_EXPLORE; a->y = gy; a->x = gx;
-			strcpy(a->advice, "Keep exploring.");
+			/* The flood already proved reachability over real terrain; step there
+			 * with the real-terrain hook (handles both seen loot and dark floor). */
+			a->type = AP_DELVE; a->y = gy; a->x = gx;
+			strcpy(a->advice, (tkind == AP_XPLORE_LOOT) ? "Grab nearby loot."
+			                                            : "Keep exploring.");
+			explore_no_items = FALSE;
 			return;
 		}
 
-		/* (A3) Blocked from the goal only because a FRIENDLY creature sits in a
-		 * 1-wide corridor with no detour? Push past it (swap). We still avoid
-		 * hostiles -- explore_walkable_friend only opens friendly-held cells. */
-		if (got && !reach && autoplay_can_reach_hook(gy, gx, explore_walkable_friend))
+		/* (A3) A target blocked only by a FRIENDLY creature in a 1-wide corridor?
+		 * Re-flood allowing friendly-held cells; if one opens up, push past (swap).
+		 * Hostiles still block -- we won't blunder into a fight to get by. */
+		if (autoplay_explore_target(&gy, &gx, &tkind, real_walkable_friend))
 		{
 			a->type = AP_PUSHPAST; a->y = gy; a->x = gx;
 			strcpy(a->advice, "Push past a friendly creature blocking the way.");
+			explore_no_items = FALSE;
 			return;
 		}
-
-		blind = autoplay_blind_goal(&gy, &gx);
-		if (blind)
-		{
-			a->type = AP_DELVE; a->y = gy; a->x = gx;
-			strcpy(a->advice, "Delve toward the unexplored.");
-			return;
-		}
+		explore_no_items = FALSE;
 
 		if ((here == FEAT_MORE) || (here == FEAT_WAY_MORE))
 		{
@@ -8005,8 +8045,8 @@ static void autoplay_decide(autoplay_action *a)
 
 		a->type = AP_NONE;
 		strnfmt(a->advice, 80,
-		        "Nothing to do (goal=%d reach=%d stair=%d/%d dl=%d seen=%ld).",
-		        (int)got, (int)reach, (int)gotstair, (int)reachstair,
+		        "Nothing to do (goal=%d kind=%d stair=%d/%d dl=%d seen=%ld).",
+		        (int)got, (int)tkind, (int)gotstair, (int)reachstair,
 		        (int)dun_level, (long)explore_seen_count);
 	}
 }
@@ -8022,7 +8062,7 @@ static void autoplay_perform(autoplay_action *a)
 	case AP_LIGHT:    (void)autoplay_manage_light(); break;
 	case AP_CURE:     autoplay_quaff(a->item); break;
 	case AP_ESCAPE:   autoplay_escape(a->item); break;
-	case AP_PUSHPAST: (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, explore_walkable_friend); break;
+	case AP_PUSHPAST: (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, real_walkable_friend); break;
 	case AP_SHOOT:    { int mi = cave[a->y][a->x].m_idx; if (mi) autoplay_shoot(a->item, &m_list[mi]); break; }
 	case AP_THROW:    { int mi = cave[a->y][a->x].m_idx; if (mi) autoplay_throw_at(a->item, &m_list[mi]); break; }
 	case AP_DEVICE:   autoplay_use_device(a->item, a->y); break;

@@ -257,9 +257,24 @@ se queda permanentemente débil. Detalles:
      trampas). Compra en pueblo: `AP_WANT_REVEAL=3` / knob `want_reveal` (tras los Identify), y
      `autoplay_keep_item` protege el `SV_SCROLL_DETECT_DOOR` de la venta agresiva (si no, yo-yo
      compra→vende). *Nota*: `SV_ROD_MAPPING` solo hace `map_area` (NO revela secretas), por eso
-     no entra en el finder. *L3*: unificar frontera/blind/search en un
-     solo BFS de terreno real (objetivo = {suelo no visto} ∪ {adyacente a FEAT_SECRET} ∪
-     {escaleras}). *L4*: puertas con cerrojo / tunelar (`AP_OPEN`/`AP_DISARM`/`AP_TUNNEL`).
+     no entra en el finder.
+   - **L3 — selección de objetivo unificada (HECHO).** `autoplay_explore_target(gy,gx,kind,hook)`
+     (cmd1.c, reemplaza a `autoplay_blind_goal`): **un solo BFS sobre terreno real** (ground
+     truth) que devuelve la celda de interés más cercana en orden de distancia — **loot visto**
+     (LOOT; `cell_has_*` ya exigen `o_ptr->marked`, sin trampa extra) o **suelo no visto**
+     (DELVE). Funde la vieja cascada frontera-vista (`explore_pick_goal`) + delve-a-oscuras
+     (`autoplay_blind_goal`) + loot en una pasada: sin costura entre frontera iluminada y la
+     oscuridad de detrás, y la oscuridad es solo "suelo no visto = objetivo". El paso 10 de
+     `autoplay_decide` lo llama con `real_walkable_clear` → `AP_DELVE` (el step real-terreno
+     sirve para loot vista y suelo oscuro); si no hay meta, re-flood con **`real_walkable_friend`**
+     (nuevo hook = terreno real + bloquea hostiles, permite amistosos) → `AP_PUSHPAST` (que pasó
+     a usar ese hook, porque la meta puede ser una celda no vista tras el NPC). La búsqueda de
+     puertas secretas (L1/L2) sigue como **fallback** después (no se mete en este BFS porque
+     `FEAT_SECRET` no es transitable). **El autoexplore Ctrl-E NO se toca**: conserva su
+     `explore_pick_goal` honesto (solo frontera vista). `explore_walkable_friend` queda sin uso
+     (lo sustituye `real_walkable_friend`); inofensivo con `-w`.
+   - *Pendiente L4*: puertas con cerrojo / tunelar (`AP_OPEN`/`AP_DISARM`/`AP_TUNNEL`) cuando un
+     paso esté bloqueado por algo forzable (hoy: block+reroute+scum). Bajo ROI.
 6. **Bot perseguía a perpetuidad a evasivos / NPCs (fruit bat, Blubbering idiot, Farmer
    Maggot).** **RESUELTO**: give-up por **turnos totales** (`ap_chase_turns > 15` ⇒ se mete en
    `ap_ignore_idx` y explora; el progreso-based reseteaba con la fluctuación de distancia).
