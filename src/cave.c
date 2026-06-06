@@ -1001,6 +1001,44 @@ static int water_edge_slot(int y, int x)
 	return -1;
 }
 
+/*
+ * TomeTik -- town building roofs.
+ *
+ * Same neighbour-shaping as the dungeon walls (wall_shape_2d), but applied to
+ * the town's permanent walls and drawn with a thatch-roof tile set packed at
+ * row 2, cols 50..61 (attr 0x82, char 0xB2 + shape).  The diagonal bevels are
+ * colour-keyed, and reveal the ground the building sits on (grass/dirt/cobble)
+ * instead of dungeon floor -- the OAngband-style roof look.
+ */
+#define GERVAIS_ROOF_ATTR  0x82
+#define GERVAIS_ROOF_CHAR  0xB2
+
+/* Tile of a non-wall neighbour (the ground a building sits on), or FALSE. */
+static bool ground_neighbor_tile(int y, int x, byte *a, char *c)
+{
+	static const int dy[4] = { -1, 1, 0, 0 };
+	static const int dx[4] = { 0, 0, 1, -1 };
+	int i;
+
+	for (i = 0; i < 4; i++)
+	{
+		int ny = y + dy[i];
+		int nx = x + dx[i];
+		int f;
+
+		if ((ny < 0) || (nx < 0) || (ny >= cur_hgt) || (nx >= cur_wid)) continue;
+
+		f = cave[ny][nx].mimic ? cave[ny][nx].mimic : cave[ny][nx].feat;
+		if (!feat_is_shapewall(f) && (f != FEAT_SHOP))
+		{
+			*a = f_info[f].x_attr;
+			*c = f_info[f].x_char;
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
 #ifdef USE_TRANSPARENCY
 #ifdef USE_EGO_GRAPHICS
 void map_info(int y, int x, byte *ap, char *cp, byte *tap, char *tcp,
@@ -1434,6 +1472,32 @@ void map_info(int y, int x, byte *ap, char *cp)
 		{
 			*tap = *ap = WGEDGE_ATTR;
 			*tcp = *cp = (char)(WGEDGE_CHAR + sl);
+		}
+	}
+
+	/*
+	 * TomeTik -- town building roofs.  Shape the town's permanent walls like
+	 * the dungeon roof, but reveal the ground the building sits on under the
+	 * bevels (terrain layer = a non-wall neighbour's tile).
+	 */
+	if (gervais_roof_shape && (graphics_mode == GRAPHICS_GERVAIS) &&
+	    (dun_level == 0) && (info & (CAVE_MARK | CAVE_SEEN)) &&
+	    !c_ptr->m_idx && !c_ptr->o_idx && feat_is_shapewall(feat))
+	{
+		int sh = wall_shape_2d(y, x);
+
+		if (sh >= 0)
+		{
+			byte ga;
+			char gc;
+
+			if (ground_neighbor_tile(y, x, &ga, &gc))
+			{
+				*tap = ga;
+				*tcp = gc;
+			}
+			*ap = GERVAIS_ROOF_ATTR;
+			*cp = (char)(GERVAIS_ROOF_CHAR + sh);
 		}
 	}
 #endif /* USE_TRANSPARENCY */
