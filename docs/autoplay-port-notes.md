@@ -304,14 +304,14 @@ Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
   `autoplay_use_device` (force_item + do_cmd_use_staff/zap_rod/read_scroll).
   - *Pendiente B*: rods de detección no-aware (hoy solo aware); resistencias temporales
     (Resist/Resistance) antes de peleas elementales; afinar cuándo usar Speed.
-- **(A) Detección de LOOPS de posición (robustez)**: además de la guarda anti-stall (acción
-  sin energía) y el stuck-cell detector (no poder entrar en una celda), falta cazar el caso
-  de **oscilar entre un grupo pequeño de casillas** moviéndose de verdad (p.ej. ir y volver
-  entre 2-3 celdas) durante mucho tiempo sin progreso neto. Idea: ring-buffer de las últimas N
-  posiciones; si se revisita el mismo conjunto reducido > M turnos sin avanzar, **escalar**:
-  cambiar de objetivo → ignorar el monstruo implicado (`ap_ignore_idx`) → en última instancia
-  recall / cambio de piso (scum) para desbloquearse. (El bug de la escalera oscilante fue un
-  caso concreto de esto; esto sería la red genérica.)
+- **(A) Detección de LOOPS de posición — HECHO**: `autoplay_loop_track` (en `autoplay_step`)
+  registra las posiciones que CAMBIAN (descansar/pelear/buscar en sitio no cuentan) en un
+  ring de `AP_LOOP_WIN`=16; si en toda la ventana sólo hay ≤`AP_LOOP_DISTINCT`=5 celdas
+  distintas → loop. **Strike 1**: abandona la persecución actual (`ap_ignore_idx`), bloquea
+  (`explore_block_cell`) las celdas del loop y limpia metas/escalera para re-planificar.
+  **Strike 2** (vuelve a loopear): `ap_force_unstick` → `decide` hace **recall** al pueblo
+  (reset limpio). Los strikes decaen al progresar; todo se resetea por nivel y al arrancar.
+  Red genérica sobre la guarda anti-stall (acción sin energía) y el stuck-cell detector.
 - **(B) Objetos lanzables / a distancia ("Random bullshit go!") — HECHO (v1)**: paso 1d en
   `autoplay_decide`. Si en mazmorra, sin enemigo adyacente, no ciego y con línea de tiro
   (`projectable`), dispara el lanzador (`INVEN_BOW`+munición del carcaj/mochila) o tira un
