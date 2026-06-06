@@ -960,6 +960,7 @@ static int wall_shape_2d(int y, int x)
 #define WGEDGE_ATTR  0x81   /* grass  <-> shallow water */
 #define GDEDGE_ATTR  0x83   /* grass  <-> dirt          */
 #define CDEDGE_ATTR  0x84   /* cobble <-> dirt          */
+#define GCEDGE_ATTR  0x85   /* grass  <-> cobblestone   */
 
 #define FEAT_COBBLE  200    /* cobblestone road (201 = with outlet) */
 
@@ -1493,11 +1494,8 @@ void map_info(int y, int x, byte *ap, char *cp)
 		{
 			sl = edge_slot_low(y, x, TC_WATER);
 			if (sl >= 0) ea = WGEDGE_ATTR;
-			else
-			{
-				sl = edge_slot_low(y, x, TC_DIRT);
-				if (sl >= 0) ea = GDEDGE_ATTR;
-			}
+			else if ((sl = edge_slot_low(y, x, TC_COBBLE)) >= 0) ea = GCEDGE_ATTR;
+			else if ((sl = edge_slot_low(y, x, TC_DIRT)) >= 0) ea = GDEDGE_ATTR;
 		}
 		else if (tc == TC_COBBLE)
 		{
