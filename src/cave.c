@@ -946,6 +946,61 @@ static int wall_shape_2d(int y, int x)
 	return WSH_WE;
 }
 
+/*
+ * TomeTik -- Gervais grass <-> shallow-water edging.
+ *
+ * 12 WaterGrass tiles are packed into 32x32.bmp at row 1, cols 50..61
+ * (attr 0x81, char 0xB2 + slot).  Unlike the walls these are full opaque
+ * tiles (the David Gervais shoreline pieces), so we just substitute the
+ * grass grid's attr/char.  The plain shallow-water tile was remapped to the
+ * matching Gervais water so the blend has no halo.
+ *
+ * Slots: 0 N, 1 S, 2 W, 3 E edge;  4 NW, 5 NE, 6 SW, 7 SE outer corner;
+ *        8..11 inner (concave) corners by the diagonal that holds water.
+ */
+#define WGEDGE_ATTR  0x81
+#define WGEDGE_CHAR  0xB2
+
+static bool water_at(int y, int x)
+{
+	int f;
+
+	if ((y < 0) || (x < 0) || (y >= cur_hgt) || (x >= cur_wid)) return FALSE;
+
+	f = cave[y][x].mimic ? cave[y][x].mimic : cave[y][x].feat;
+	return (f == FEAT_SHAL_WATER);
+}
+
+/*
+ * Pick the WaterGrass slot for a grass grid bordering shallow water, or -1
+ * if it is fully inland.  Outer corners first, then edges, then concave
+ * (inner) corners from the diagonals.
+ */
+static int water_edge_slot(int y, int x)
+{
+	bool n = water_at(y - 1, x);
+	bool s = water_at(y + 1, x);
+	bool e = water_at(y, x + 1);
+	bool w = water_at(y, x - 1);
+
+	if (n && w) return 4;
+	if (n && e) return 5;
+	if (s && w) return 6;
+	if (s && e) return 7;
+	if (n) return 0;
+	if (s) return 1;
+	if (w) return 2;
+	if (e) return 3;
+
+	/* No orthogonal water -> concave corner if a diagonal holds water */
+	if (water_at(y + 1, x + 1)) return 8;   /* SE */
+	if (water_at(y + 1, x - 1)) return 9;   /* SW */
+	if (water_at(y - 1, x + 1)) return 10;  /* NE */
+	if (water_at(y - 1, x - 1)) return 11;  /* NW */
+
+	return -1;
+}
+
 #ifdef USE_TRANSPARENCY
 #ifdef USE_EGO_GRAPHICS
 void map_info(int y, int x, byte *ap, char *cp, byte *tap, char *tcp,
@@ -1361,6 +1416,24 @@ void map_info(int y, int x, byte *ap, char *cp)
 			*tcp = gf->x_char;
 			*ap  = GERVAIS_SHAPE_ATTR;
 			*cp  = (char)(GERVAIS_SHAPE_CHAR + sh);
+		}
+	}
+
+	/*
+	 * TomeTik -- grass/shallow-water edging.  Full opaque tile substitution:
+	 * a grass grid that borders shallow water uses the matching WaterGrass
+	 * shoreline tile (both layers, no compositing needed).
+	 */
+	if (gervais_terrain_edge && (graphics_mode == GRAPHICS_GERVAIS) &&
+	    (info & (CAVE_MARK | CAVE_SEEN)) && !c_ptr->m_idx && !c_ptr->o_idx &&
+	    ((feat == FEAT_GRASS) || (feat == FEAT_FLOWER)))
+	{
+		int sl = water_edge_slot(y, x);
+
+		if (sl >= 0)
+		{
+			*tap = *ap = WGEDGE_ATTR;
+			*tcp = *cp = (char)(WGEDGE_CHAR + sl);
 		}
 	}
 #endif /* USE_TRANSPARENCY */
