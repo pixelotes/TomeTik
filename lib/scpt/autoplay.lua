@@ -31,6 +31,11 @@ autoplay_config_table =
 	                          --   many turns (single-monster "too dangerous")
 	pack_flee_turns   = 4,    -- flee a PACK if its combined damage/turn * this >= HP
 	cluster_range     = 8,    -- tiles around us that count as the same pack
+	-- skill-point spending on level-up (the bot earns 5 points/level):
+	skill_build       = 1,    -- 0 = off (spend them yourself), 1 = auto-detect
+	                          --   from the class, 2 = melee, 3 = archer,
+	                          --   4 = caster, 5 = priest. Melee is the default
+	                          --   when auto-detect can't tell.
 }
 
 function autoplay_config(key)
