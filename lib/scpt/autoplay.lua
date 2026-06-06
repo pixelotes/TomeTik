@@ -11,6 +11,7 @@ autoplay_config_table =
 	want_cure         = 5,    -- cure-wounds potions to keep
 	want_food         = 5,    -- staple food to keep
 	want_id           = 5,    -- Scrolls of Identify to keep
+	want_reveal       = 3,    -- Detect Doors & Stairs scrolls (open secret rooms)
 	want_wor          = 3,    -- Word of Recall scrolls to keep
 	want_oil          = 3,    -- flasks of oil (when wielding a lantern)
 	want_torch        = 2,    -- spare torches (when wielding a torch)

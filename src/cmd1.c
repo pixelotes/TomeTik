@@ -6117,6 +6117,34 @@ static int autoplay_find_detection(int *kind)
 	return (-1);
 }
 
+/* Find a door/way-revealing item: Scroll of Detect Doors & Stairs, Rod of
+ * Detect Door, or Staff of Reveal Ways. detect_doors() converts an adjacent
+ * FEAT_SECRET straight into a real door (spells2.c), so one use opens a
+ * secret-sealed room instantly -- far better than search()'s per-turn dice.
+ * Sets *kind (APDEV_*) and returns the pack slot, or -1. (L2) */
+static int autoplay_find_reveal_doors(int *kind)
+{
+	int i;
+	for (i = 0; i < INVEN_PACK; i++)
+	{
+		object_type *o_ptr = &p_ptr->inventory[i];
+		if (!o_ptr->k_idx) continue;
+
+		if ((o_ptr->tval == TV_SCROLL) && (o_ptr->sval == SV_SCROLL_DETECT_DOOR))
+		{ *kind = APDEV_SCROLL; return (i); }
+
+		/* Rods only if ready and aware (an unaware rod would prompt to aim). */
+		if ((o_ptr->tval == TV_ROD) && (o_ptr->timeout <= 0) && object_aware_p(o_ptr) &&
+		                (o_ptr->sval == SV_ROD_DETECT_DOOR))
+		{ *kind = APDEV_ROD; return (i); }
+
+		if ((o_ptr->tval == TV_STAFF) && (o_ptr->pval > 0) &&
+		                (o_ptr->sval == SV_STAFF_REVEAL_WAYS))
+		{ *kind = APDEV_STAFF; return (i); }
+	}
+	return (-1);
+}
+
 /* A worn item is cursed (so we'd want a Remove Curse scroll). */
 static bool autoplay_wearing_cursed(void)
 {
@@ -6917,6 +6945,7 @@ static int autoplay_find_upgrade(void)
 #define AP_WANT_OIL    3   /* flasks of oil (fuel and/or throwing) */
 #define AP_WANT_TORCH  2   /* spare torches (if torch)       */
 #define AP_WANT_AMMO  40   /* missiles to keep for the launcher    */
+#define AP_WANT_REVEAL 3   /* Detect Doors & Stairs scrolls to keep */
 
 static bool autoplay_shopping = FALSE;     /* mid town-shopping trip */
 static byte autoplay_shop_visited[32];     /* by store index, this trip */
@@ -6986,7 +7015,8 @@ static bool autoplay_keep_item(object_type *o_ptr)
 	{
 	case TV_POTION: return (autoplay_is_cure(o_ptr->sval));
 	case TV_SCROLL: return ((o_ptr->sval == SV_SCROLL_WORD_OF_RECALL) ||
-		                        (o_ptr->sval == SV_SCROLL_IDENTIFY));
+		                        (o_ptr->sval == SV_SCROLL_IDENTIFY) ||
+		                        (o_ptr->sval == SV_SCROLL_DETECT_DOOR));
 	case TV_FOOD:   return (autoplay_is_staple(o_ptr->sval));
 	case TV_FLASK:  return (TRUE);
 	}
@@ -7070,6 +7100,10 @@ static void autoplay_shop_buy_needs(int town, int store)
 	autoplay_buy_one(town, store, TV_SCROLL, SV_SCROLL_IDENTIFY,
 	                 autoplay_cfg("want_id", AP_WANT_ID),
 	                 autoplay_inv_count(TV_SCROLL, SV_SCROLL_IDENTIFY));
+	/* (L2) Detect Doors & Stairs: open secret-sealed rooms without grinding search(). */
+	autoplay_buy_one(town, store, TV_SCROLL, SV_SCROLL_DETECT_DOOR,
+	                 autoplay_cfg("want_reveal", AP_WANT_REVEAL),
+	                 autoplay_inv_count(TV_SCROLL, SV_SCROLL_DETECT_DOOR));
 
 	/* Cure wounds: buy whatever kind the store stocks, toward the combined target. */
 	autoplay_buy_one(town, store, TV_POTION, SV_POTION_CURE_LIGHT, want_cure, autoplay_count_cure());
@@ -7916,13 +7950,26 @@ static void autoplay_decide(autoplay_action *a)
 			{
 				if ((spy == p_ptr->py) && (spx == p_ptr->px))
 				{
-					a->type = AP_SEARCH; a->y = spy; a->x = spx;
-					strcpy(a->advice, "Search for secret doors.");
+					/* (L2) Next to the hidden door: a Detect Doors / Reveal Ways
+					 * device turns the adjacent FEAT_SECRET into a real door
+					 * outright -- instant, vs search()'s per-turn chance. Use one
+					 * if carried; otherwise search by hand (L1). */
+					int rk = 0, rit = autoplay_find_reveal_doors(&rk);
+					if (rit >= 0)
+					{
+						a->type = AP_DEVICE; a->item = rit; a->y = rk;
+						strcpy(a->advice, "Reveal the hidden door with a detection device.");
+					}
+					else
+					{
+						a->type = AP_SEARCH; a->y = spy; a->x = spx;
+						strcpy(a->advice, "Search for the hidden door.");
+					}
 				}
 				else
 				{
 					a->type = AP_GOSTAIR; a->y = spy; a->x = spx;
-					strcpy(a->advice, "Move to a wall to search for secret doors.");
+					strcpy(a->advice, "Move next to the hidden door.");
 				}
 				return;
 			}

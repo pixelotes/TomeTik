@@ -245,9 +245,19 @@ se queda permanentemente débil. Detalles:
      es probabilístico por turno); al revelarse, `FEAT_SECRET` (0x30) → puerta (0x20) sale del
      filtro y la exploración normal sigue. Si no hay puerta secreta alcanzable → 0 spots → al
      scum directo (sin barrido de 60 turnos). `case AP_SEARCH`: `ap_searched[...]++`.
-   - *Pendiente L2*: detección legítima en el dead-end (Scroll Magic Mapping / Detect Doors &
-     Stairs / vara-rod) antes de buscar a mano — revela puertas+escaleras de golpe; reusa
-     `AP_DETECT`/`AP_DEVICE` y se compra en pueblo. *L3*: unificar frontera/blind/search en un
+   - **L2 — detección legítima en el dead-end (HECHO).** Reutiliza la navegación de L1: cuando
+     el bot está plantado en el spot adyacente a la puerta secreta, si lleva un item
+     revela-puertas usa `AP_DEVICE` en vez del `search()` probabilístico; si no, cae a
+     `AP_SEARCH` (L1). `autoplay_find_reveal_doors(&kind)` (cmd1.c, tras
+     `autoplay_find_detection`) busca **Scroll Detect Doors & Stairs** (`SV_SCROLL_DETECT_DOOR`,
+     cmd6.c:3376→`detect_doors`), **Rod Detect Door** (aware+cargado) o **Staff Reveal Ways**.
+     `detect_doors()` (spells2.c:2050) **convierte `FEAT_SECRET`→puerta** en `DEFAULT_RADIUS`;
+     desde adyacente siempre cae en radio → revela al instante y la exploración normal la cruza.
+     **No** toca `ap_detected` (ese flag es de la detección proactiva 1×/nivel de monstruos/
+     trampas). Compra en pueblo: `AP_WANT_REVEAL=3` / knob `want_reveal` (tras los Identify), y
+     `autoplay_keep_item` protege el `SV_SCROLL_DETECT_DOOR` de la venta agresiva (si no, yo-yo
+     compra→vende). *Nota*: `SV_ROD_MAPPING` solo hace `map_area` (NO revela secretas), por eso
+     no entra en el finder. *L3*: unificar frontera/blind/search en un
      solo BFS de terreno real (objetivo = {suelo no visto} ∪ {adyacente a FEAT_SECRET} ∪
      {escaleras}). *L4*: puertas con cerrojo / tunelar (`AP_OPEN`/`AP_DISARM`/`AP_TUNNEL`).
 6. **Bot perseguía a perpetuidad a evasivos / NPCs (fruit bat, Blubbering idiot, Farmer
