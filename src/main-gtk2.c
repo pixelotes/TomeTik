@@ -4790,113 +4790,84 @@ static void load_font(term_data *td, cptr fontname)
 
 
 /*
- * React to OK button press in font selection dialogue
+ * Apply a freshly chosen font to a terminal: load it, then resize the drawing
+ * area / window / backing store and force a redraw (shared by the font dialog).
  */
-static void font_ok_callback(
-        GtkWidget *widget,
-        GtkWidget *font_selector)
+static void apply_font(term_data *td)
 {
-	gchar *fontname;
-	term_data *td;
-
-	td = gtk_object_get_data(GTK_OBJECT(font_selector), "term_data");
-
-	g_assert(td != NULL);
-
-	/* Retrieve font name from player's selection */
-	fontname = gtk_font_selection_dialog_get_font_name(
-	                   GTK_FONT_SELECTION_DIALOG(font_selector));
-
-	/* Leave unless selection was valid */
-	if (fontname == NULL) return;
-
-	/* Load font and update font size info */
-	load_font(td, fontname);
-
-	/* Hack - Hide the window - finally found the trick... */
 	gtk_widget_hide_all(td->window);
 
-	/* Resizes the drawing area */
 	gtk_drawing_area_size(
 	        GTK_DRAWING_AREA(td->drawing_area),
 	        td->cols * td->font_wid,
 	        td->rows * td->font_hgt);
 
-	/* Update the geometry hints for the window */
 	term_data_set_geometry_hints(td);
-
-	/* Reallocate the backing store */
 	term_data_set_backing_store(td);
 
-	/* Hack - Show the window */
 	gtk_widget_show_all(td->window);
 
 #ifdef USE_GRAPHICS
-
-	/* We have to resize tiles when we are in graphics mode */
+	/* Tiles must be re-scaled to the new font/cell size. */
 	resize_request = TRUE;
-
 #endif /* USE_GRAPHICS */
 
-	/* Hack - force redraw */
 	Term_key_push(KTRL('R'));
 }
 
 
 /*
- * Process Options-Font-* menu command
+ * Process Options-Font-<term> menu command: let the player pick a font for that
+ * terminal. GTK2's GtkFontSelectionDialog only deals in Pango fonts, but this
+ * frontend renders with X bitmap fonts via gdk_font_load() (XLFD / the classic
+ * "WxH" aliases). So we present our own small dialog listing the standard
+ * fixed-width X fonts (those gdk_font_load actually accepts) and apply the pick.
+ * (The original GtkFontSelection path was #if 0'd out in the GTK1->2 port, which
+ * is why this menu "did nothing".)
  */
 static void change_font_event_handler(
         GtkWidget *widget,
         gpointer user_data)
 {
-	GtkWidget *font_selector;
+	/* Standard X11 fixed/misc-fixed aliases: gdk_font_load() loads these, and
+	 * the per-window defaults already use them (e.g. "10x20", "8x13"). */
+	static cptr fonts[] =
+	{
+		"5x7", "5x8", "6x9", "6x10", "6x12", "6x13", "7x13", "7x14",
+		"8x13", "8x16", "9x15", "9x18", "10x20", "12x24", NULL
+	};
+	term_data *td = &data[(int)(long)user_data];
+	GtkWidget *dialog, *combo, *label;
+	int i;
 
-	gchar *spacings[] = { "c", "m", NULL };
+	dialog = gtk_dialog_new_with_buttons("Select font", NULL, GTK_DIALOG_MODAL,
+	                                     GTK_STOCK_OK, GTK_RESPONSE_OK,
+	                                     GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL, NULL);
 
-	font_selector = gtk_font_selection_dialog_new("Select font");
-#if 0 // DGDGDGDG
-	gtk_object_set_data(
-	        GTK_OBJECT(font_selector),
-	        "term_data",
-	        user_data);
+	label = gtk_label_new("Font (width x height):");
+	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->vbox), label, FALSE, FALSE, 4);
 
-	/* Filter to show only fixed-width fonts */
-	gtk_font_selection_dialog_set_filter(
-	        GTK_FONT_SELECTION_DIALOG(font_selector),
-	        GTK_FONT_FILTER_BASE,
-	        GTK_FONT_ALL,
-	        NULL,
-	        NULL,
-	        NULL,
-	        NULL,
-	        spacings,
-	        NULL);
+	combo = gtk_combo_box_new_text();
+	for (i = 0; fonts[i]; i++) gtk_combo_box_append_text(GTK_COMBO_BOX(combo), fonts[i]);
+	gtk_combo_box_set_active(GTK_COMBO_BOX(combo), 0);
+	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->vbox), combo, FALSE, FALSE, 4);
 
-	gtk_signal_connect(
-	        GTK_OBJECT(GTK_FONT_SELECTION_DIALOG(font_selector)->ok_button),
-	        "clicked",
-	        font_ok_callback,
-	        (gpointer)font_selector);
+	gtk_widget_show_all(dialog);
 
-	/*
-	 * Ensure that the dialog box is destroyed when the user clicks
-	 * a button.
-	 */
-	gtk_signal_connect_object(
-	        GTK_OBJECT(GTK_FONT_SELECTION_DIALOG(font_selector)->ok_button),
-	        "clicked",
-	        GTK_SIGNAL_FUNC(gtk_widget_destroy),
-	        (gpointer)font_selector);
+	if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK)
+	{
+		gchar *sel = gtk_combo_box_get_active_text(GTK_COMBO_BOX(combo));
+		if (sel)
+		{
+			GdkFont *before = td->font;
+			load_font(td, sel);
+			if (td->font != before) apply_font(td);   /* only if it actually loaded */
+			else plog_fmt("Could not load font '%s'.", sel);
+			g_free(sel);
+		}
+	}
 
-	gtk_signal_connect_object(
-	        GTK_OBJECT(GTK_FONT_SELECTION_DIALOG(font_selector)->cancel_button),
-	        "clicked",
-	        GTK_SIGNAL_FUNC(gtk_widget_destroy),
-	        (gpointer)font_selector);
-
-	gtk_widget_show(GTK_WIDGET(font_selector));
-#endif
+	gtk_widget_destroy(dialog);
 }
 
 
