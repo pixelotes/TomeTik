@@ -3619,21 +3619,12 @@ static void process_command(void)
 #endif /* ALLOW_WIZARD */
 
 
-#ifdef ALLOW_BORG
-
-		/* Special "borg" commands */
+		/* Auto-play (TomeTik "borg") -- Ctrl+Z */
 	case KTRL('Z'):
 		{
-			/* Enter borg mode */
-			if (enter_borg_mode())
-			{
-				if (!p_ptr->wild_mode) do_cmd_borg();
-			}
-
+			do_cmd_autoplay();
 			break;
 		}
-
-#endif /* ALLOW_BORG */
 
 
 		/*** Inventory Commands ***/
@@ -4486,22 +4477,15 @@ static void process_command(void)
 			break;
 		}
 
-		/* Auto-play (TomeTik) */
-	case KTRL('V'):
-		{
-			do_cmd_autoplay();
-			break;
-		}
-
-		/* Oracle: what would auto-play do now? (TomeTik) */
-	case KTRL('N'):
+		/* Oracle: what would auto-play do now? (TomeTik) -- Ctrl+O */
+	case KTRL('O'):
 		{
 			do_cmd_oracle();
 			break;
 		}
 
-		/* Show previous message */
-	case KTRL('O'):
+		/* Show previous message -- Ctrl+N (autoplay->Ctrl+Z, oracle->Ctrl+O) */
+	case KTRL('N'):
 		{
 			do_cmd_message_one();
 			break;
