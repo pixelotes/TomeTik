@@ -342,9 +342,15 @@ Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
     `cluster_danger * pack_flee_turns (def 4) >= HP` → **escape (Phase Door/Teleport) o huir
     a pie**; si acorralado, cae a ranged/melee. Mata-packs de jackals/arañas resuelto. Knobs
     en `autoplay.lua`: `danger_turns`, `pack_flee_turns`, `cluster_range`.
-  - *Pendiente*: mitigación por AC/resistencias en el cálculo (hoy AC-agnóstico); breeders
-    (`MULTIPLY`) merecen un extra.
-- Afinar: umbrales de resupply/compra.
+  - **Afinado (C) — HECHO**: melee escala por el **acierto real vs nuestro AC**
+    (`autoplay_blow_hit_pct`, espejo de `check_hit`: `power+lvl*3` vs `3/4·AC`, suelo 5%);
+    el daño de **breaths** se reduce por nuestras **resistencias** a lo que respira (cada
+    elemento resistido ~ −2/3 de su parte); **breeders** (`RF4_MULTIPLY`) +50% (su amenaza
+    compone). Así un bot bien armado pelea más y uno frágil huye más.
+  - *Pendiente*: power por-efecto exacto (hoy HURT=60 / resto=15 aproximado); resist de
+    hechizos no-elementales.
+- Afinar: umbrales de resupply/compra; **gates `plev` de la ruta** (data en `autoplay.lua`,
+  con partidas reales).
 - Completitud de quest por **muerte del guardián** (`r_info[FINAL_GUARDIAN].max_num==0`) en vez
   de "tocó fondo"; coger el `FINAL_ARTIFACT`/`FINAL_OBJECT` concreto antes de salir.
 - Gates `plev` de la ruta = estimaciones; afinar con partidas reales (el bot melee-only es frágil).
