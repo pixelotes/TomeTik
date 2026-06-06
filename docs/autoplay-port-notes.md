@@ -91,6 +91,42 @@ Funciones nuevas que reusan los helpers `static` locales (`price_item`, `store_w
 - Rama de **varios objetos** (`do_ask`): antes del `get_item`, `if (do_ask && (exploring ||
   autoplaying)) { this_o_idx = floor_o_idx; do_ask = FALSE; }`.
 
+### `src/skills.c` — gasto automático de skill points (level-up)
+Función pública nueva **`autoplay_spend_skills()`** (tras `do_cmd_skill`), equivalente
+*headless* del editor de skills. El bot gana 5 puntos/nivel (`xtra2.c`) y sin gastarlos
+se queda permanentemente débil. Detalles:
+- **Replica el modelo de commit de `do_cmd_skill`**: la verdad vive en `invest[]`;
+  `recalc_skills_theory(invest,base_val,base_mod,bonus)` materializa `value` (incl.
+  propagación padre↔hijo); `recalc_skills(FALSE)` cierra (HP/maná/hechizos). **No** llama a
+  `increase_skill()` directamente: esa función lanza un `msg_box` modal al chocar el cap
+  (cuelgue headless). En su lugar pre-chequea el cap con la **misma** condición
+  (`(value+mod)/SKILL_STEP >= lev+overage+1`, `overage` de `get_module_info`) y solo entonces
+  `skill_points--; invest[sk]++`.
+- **Arquetipo auto-detectado** por el mejor `s_info[i].mod` de la clase (melee/archer/caster/
+  priest); **melee por defecto** en empates. Listas de prioridad **ponderadas** (helpers
+  `ap_*`): cada punto va a la skill más atrasada respecto a su peso (`invest*1000/weight`) →
+  reparto proporcional ~40/30/20, y el cap nivel+`overage` derrama el sobrante hacia abajo.
+  Slots dinámicos: maestría del arma equipada (`get_weaponmastery_skill`, fallback al mejor mod)
+  y del arco (`get_archery_skill`); top-2 escuelas para caster. **Veto** a `SKILL_ANTIMAGIC`
+  (rompe sus propios objetos/teleport) y `SKILL_SORCERY` (penaliza HP/melee): nunca en las listas.
+  `SKILL_DEVICE` (Magic-Device=56) universal de supervivencia en todos los builds.
+- OJO índices: `SKILL_DEVICE` es **56** (no 38). No existe `SKILL_SAVE` (39=`SKILL_ALCHEMY`).
+
+### `src/externs.h`
+- `extern void autoplay_spend_skills(void);` (junto a `do_cmd_skill`).
+- `extern int get_weaponmastery_skill(void);` / `extern int get_archery_skill(void);` (de
+  `xtra1.c`, antes sin prototipo — usadas dentro de su .c por declaración implícita K&R).
+- `extern int autoplay_cfg(cptr key, int def);` (ahora público, ver abajo).
+
+### `src/cmd1.c` — enganche + cfg público
+- `autoplay_cfg` deja de ser `static` (lo lee `autoplay_spend_skills` para el knob `skill_build`).
+- En `autoplay_step()`, antes de `autoplay_decide`: `if (p_ptr->skill_points > 0)
+  autoplay_spend_skills();` — no consume turno; captura level-ups en vivo y puntos de birth/pociones.
+
+### `lib/scpt/autoplay.lua`
+- Knob nuevo `skill_build` (0=off / 1=auto / 2=melee / 3=archer / 4=caster / 5=priest).
+  Default 1. Retuneable sin recompilar (vía `autoplay_cfg`).
+
 ### `src/main-gtk2.c` — menú
 - En `main_menu_items[]`, tras la entrada de Auto-explore:
   `{ "/Action/Movement/Autoplay (^V)", NULL, action_event_handler, KTRL('V'), NULL },`

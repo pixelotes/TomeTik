@@ -598,6 +598,284 @@ void do_cmd_skill()
 }
 
 
+/* ====================================================================== */
+/*  Autoplay: spend skill points automatically on level-up                */
+/*                                                                        */
+/*  Headless equivalent of do_cmd_skill(): the bot earns 5 skill points   */
+/*  per level (xtra2.c) which, left unspent, leave it permanently weak.   */
+/*  We auto-detect an archetype from the class's per-point skill `mod`     */
+/*  (melee is the default) and distribute points by weight, respecting    */
+/*  the same per-level cap as the interactive screen. Tunable from        */
+/*  lib/scpt/autoplay.lua via the `skill_build` knob.                     */
+/* ====================================================================== */
+
+/* Build archetypes. Order matters: matches the skill_build Lua knob
+ * (2=melee, 3=archer, 4=caster, 5=priest -> enum value = knob - 2). */
+#define AP_BUILD_MELEE   0
+#define AP_BUILD_ARCHER  1
+#define AP_BUILD_CASTER  2
+#define AP_BUILD_PRIEST  3
+
+/* A weighted target: spend roughly in proportion to `weight`. */
+typedef struct ap_skill_want ap_skill_want;
+struct ap_skill_want { s16b skill; byte weight; };
+
+/* Highest per-class `mod` among a group of skills (0 if the class has none). */
+static u16b ap_group_max_mod(const s16b *idx, int n)
+{
+	u16b m = 0;
+	int i;
+	for (i = 0; i < n; i++)
+		if (s_info[idx[i]].mod > m) m = s_info[idx[i]].mod;
+	return m;
+}
+
+/* The weapon-mastery skill matching the wielded weapon (SKILL_SWORD/AXE/
+ * HAFTED/POLEARM). Falls back to the class's best-mod weapon mastery, or
+ * barehand combat when truly unarmed / wielding a mixed set. */
+static s16b ap_weapon_skill(void)
+{
+	static const s16b wlist[4] = { SKILL_SWORD, SKILL_AXE, SKILL_HAFTED, SKILL_POLEARM };
+	s16b s = get_weaponmastery_skill();   /* >0 = that skill, -1 mixed, 0 none */
+	s16b best;
+	u16b bm;
+	int i;
+
+	if (s > 0) return s;
+
+	best = SKILL_HAND;
+	bm = s_info[SKILL_HAND].mod;
+	for (i = 0; i < 4; i++)
+		if (s_info[wlist[i]].mod > bm) { bm = s_info[wlist[i]].mod; best = wlist[i]; }
+	return best;
+}
+
+/* Likewise for the wielded launcher (sling/bow/crossbow/boomerang). */
+static s16b ap_bow_skill(void)
+{
+	static const s16b blist[4] = { SKILL_SLING, SKILL_BOW, SKILL_XBOW, SKILL_BOOMERANG };
+	s16b s = get_archery_skill();
+	s16b best = SKILL_BOW;
+	u16b bm = 0;
+	int i;
+
+	if (s > 0) return s;
+
+	for (i = 0; i < 4; i++)
+		if (s_info[blist[i]].mod > bm) { bm = s_info[blist[i]].mod; best = blist[i]; }
+	return best;
+}
+
+/* The two highest-mod spellcasting schools this class has (excludes Mana and
+ * Spell-power, which get their own weighted slots, and the penalised/forbidden
+ * Sorcery & Antimagic). Returns 0 in a slot when the class has no such school. */
+static void ap_top2_schools(s16b *first, s16b *second)
+{
+	static const s16b schools[] =
+	{
+		SKILL_FIRE, SKILL_AIR, SKILL_WATER, SKILL_NATURE, SKILL_EARTH,
+		SKILL_CONVEYANCE, SKILL_DIVINATION, SKILL_TEMPORAL, SKILL_META,
+		SKILL_MIND, SKILL_UDUN, SKILL_DAEMON, SKILL_NECROMANCY,
+		SKILL_RUNECRAFT, SKILL_THAUMATURGY, SKILL_GEOMANCY, SKILL_SYMBIOTIC,
+	};
+	int n = sizeof(schools) / sizeof(schools[0]);
+	s16b s1 = 0, s2 = 0;
+	u16b m1 = 0, m2 = 0;
+	int i;
+
+	for (i = 0; i < n; i++)
+	{
+		u16b m = s_info[schools[i]].mod;
+		if (m > m1) { s2 = s1; m2 = m1; s1 = schools[i]; m1 = m; }
+		else if (m > m2) { s2 = schools[i]; m2 = m; }
+	}
+	*first = s1;
+	*second = s2;
+}
+
+/* Pick a build from the class's per-point efficiencies. Melee is the default;
+ * we only switch when another path's best mod strictly beats melee's. */
+static int ap_detect_build(void)
+{
+	static const s16b melee_g[] =
+		{ SKILL_MASTERY, SKILL_SWORD, SKILL_AXE, SKILL_HAFTED, SKILL_POLEARM, SKILL_HAND };
+	static const s16b arch_g[] =
+		{ SKILL_ARCHERY, SKILL_SLING, SKILL_BOW, SKILL_XBOW, SKILL_BOOMERANG };
+	static const s16b cast_g[] =
+		{ SKILL_MANA, SKILL_FIRE, SKILL_AIR, SKILL_WATER, SKILL_NATURE, SKILL_EARTH,
+		  SKILL_CONVEYANCE, SKILL_DIVINATION, SKILL_TEMPORAL, SKILL_META, SKILL_MIND,
+		  SKILL_UDUN, SKILL_DAEMON, SKILL_NECROMANCY, SKILL_RUNECRAFT,
+		  SKILL_THAUMATURGY, SKILL_GEOMANCY, SKILL_SPELL };
+	static const s16b holy_g[] =
+		{ SKILL_PRAY, SKILL_SPIRITUALITY, SKILL_MINDCRAFT, SKILL_MUSIC };
+
+	u16b mm = ap_group_max_mod(melee_g, sizeof(melee_g) / sizeof(melee_g[0]));
+	u16b am = ap_group_max_mod(arch_g,  sizeof(arch_g)  / sizeof(arch_g[0]));
+	u16b cm = ap_group_max_mod(cast_g,  sizeof(cast_g)  / sizeof(cast_g[0]));
+	u16b hm = ap_group_max_mod(holy_g,  sizeof(holy_g)  / sizeof(holy_g[0]));
+
+	int build = AP_BUILD_MELEE;
+	u16b best = mm;
+
+	if (cm > best) { best = cm; build = AP_BUILD_CASTER; }
+	if (hm > best) { best = hm; build = AP_BUILD_PRIEST; }
+	if (am > best) { best = am; build = AP_BUILD_ARCHER; }
+	return build;
+}
+
+/* Fill the weighted want-list for a build, resolving the dynamic slots
+ * (which weapon/bow mastery, which schools). Heavier weights are listed
+ * first so the very first point lands on the build's keystone skill.
+ * Returns the number of entries. Never lists Antimagic or Sorcery. */
+static int ap_build_wants(int build, ap_skill_want *w)
+{
+	int n = 0;
+
+	switch (build)
+	{
+	case AP_BUILD_ARCHER:
+		w[n].skill = SKILL_ARCHERY;     w[n++].weight = 5;
+		w[n].skill = ap_bow_skill();    w[n++].weight = 4;
+		w[n].skill = SKILL_DEVICE;      w[n++].weight = 3;
+		w[n].skill = SKILL_MASTERY;     w[n++].weight = 2;  /* melee fallback */
+		w[n].skill = ap_weapon_skill(); w[n++].weight = 1;
+		break;
+
+	case AP_BUILD_CASTER:
+	{
+		s16b s1, s2;
+		ap_top2_schools(&s1, &s2);
+		if (s1) { w[n].skill = s1; w[n++].weight = 5; }
+		w[n].skill = SKILL_MANA;        w[n++].weight = 4;
+		if (s2) { w[n].skill = s2; w[n++].weight = 3; }
+		w[n].skill = SKILL_SPELL;       w[n++].weight = 2;  /* spell-power */
+		w[n].skill = SKILL_DEVICE;      w[n++].weight = 2;
+		break;
+	}
+
+	case AP_BUILD_PRIEST:
+		w[n].skill = SKILL_PRAY;        w[n++].weight = 5;
+		w[n].skill = SKILL_SPIRITUALITY;w[n++].weight = 3;
+		w[n].skill = SKILL_MASTERY;     w[n++].weight = 2;  /* blunt melee backup */
+		w[n].skill = ap_weapon_skill(); w[n++].weight = 2;
+		w[n].skill = SKILL_DEVICE;      w[n++].weight = 1;
+		break;
+
+	default: /* AP_BUILD_MELEE -- the default */
+		w[n].skill = SKILL_MASTERY;     w[n++].weight = 5;
+		w[n].skill = ap_weapon_skill(); w[n++].weight = 4;
+		w[n].skill = SKILL_DEVICE;      w[n++].weight = 3;  /* wands = survival */
+		w[n].skill = SKILL_STEALTH;     w[n++].weight = 1;
+		break;
+	}
+
+	return n;
+}
+
+/*
+ * Spend all unspent skill points for the autoplay bot. No-op (and silent) when
+ * there are none, or when disabled via the Lua `skill_build` knob (0 = off).
+ * Mirrors do_cmd_skill()'s commit model: investment lives in `invest[]`,
+ * recalc_skills_theory() materialises values (incl. parent/child propagation),
+ * recalc_skills(FALSE) finalises HP/mana/spell bookkeeping.
+ */
+void autoplay_spend_skills(void)
+{
+	static const char *bname[4] = { "melee", "archer", "caster", "priest" };
+	ap_skill_want want[16];
+	s16b *invest;
+	s32b *base_val, *base_mod, *bonus;
+	s32b overage = 4;
+	int build, build_cfg, nwants, i, spent = 0, guard;
+
+	if (p_ptr->skill_points <= 0) return;
+
+	/* 0 = off (leave skills to the human), 1 = auto-detect, 2..5 = forced. */
+	build_cfg = autoplay_cfg("skill_build", 1);
+	if (build_cfg == 0) return;
+	if (build_cfg >= 2 && build_cfg <= 5) build = build_cfg - 2;
+	else build = ap_detect_build();
+
+	/* Snapshot, exactly like do_cmd_skill(). */
+	recalc_skills(TRUE);
+	C_MAKE(invest, MAX_SKILLS, s16b);
+	C_MAKE(base_val, MAX_SKILLS, s32b);
+	C_MAKE(base_mod, MAX_SKILLS, s32b);
+	C_MAKE(bonus, MAX_SKILLS, s32b);
+	for (i = 0; i < max_s_idx; i++)
+	{
+		base_val[i] = s_info[i].value;
+		base_mod[i] = s_info[i].mod;
+		bonus[i] = 0;
+		invest[i] = 0;
+	}
+
+	nwants = ap_build_wants(build, want);
+
+	/* Per-level skill cap (skill <= level + overage), from the module config. */
+	call_lua("get_module_info", "(s)", "d", "max_skill_overage", &overage);
+
+	/* Each pass spends one point on the want furthest *behind* its weight
+	 * share -> a proportional spread (keystone ~weight5, device ~weight3, ...)
+	 * rather than dumping everything into one skill. The per-level cap then
+	 * spills overflow down the list as the top skills top out. */
+	guard = (int)p_ptr->skill_points + 8;
+	while (p_ptr->skill_points > 0 && guard-- > 0)
+	{
+		int pick = -1;
+		long best_metric = 0;
+		bool first = TRUE;
+
+		/* Refresh values (and propagation) before the cap checks, as the UI does. */
+		recalc_skills_theory(invest, base_val, base_mod, bonus);
+
+		for (i = 0; i < nwants; i++)
+		{
+			s16b sk = want[i].skill;
+			long metric;
+
+			if (sk <= 0 || want[i].weight == 0) continue;
+			if (!s_info[sk].mod) continue;                /* class can't raise it */
+			if (s_info[sk].value >= SKILL_MAX) continue;  /* already maxed */
+
+			/* Same gate as increase_skill(): never exceed level + overage. */
+			if (((s_info[sk].value + s_info[sk].mod) / SKILL_STEP)
+			    >= (p_ptr->lev + overage + 1)) continue;
+
+			/* Lower invest/weight = more behind its share -> pick it. */
+			metric = ((long)invest[sk] * 1000L) / want[i].weight;
+			if (first || metric < best_metric)
+			{
+				best_metric = metric;
+				pick = i;
+				first = FALSE;
+			}
+		}
+
+		if (pick < 0) break;   /* everything capped / unraisable this level */
+
+		/* Spend one point. We pre-checked the cap, so unlike increase_skill()
+		 * this never pops the "cannot raise" modal -- safe while headless. */
+		p_ptr->skill_points--;
+		invest[want[pick].skill]++;
+		spent++;
+	}
+
+	/* Materialise and commit. */
+	recalc_skills_theory(invest, base_val, base_mod, bonus);
+	recalc_skills(FALSE);
+
+	C_FREE(invest, MAX_SKILLS, s16b);
+	C_FREE(base_val, MAX_SKILLS, s32b);
+	C_FREE(base_mod, MAX_SKILLS, s32b);
+	C_FREE(bonus, MAX_SKILLS, s32b);
+
+	if (spent > 0)
+		cmsg_format(TERM_L_GREEN, "Autoplay: spent %d skill point%s (%s build).",
+		            spent, (spent == 1) ? "" : "s", bname[build & 3]);
+}
+
+
 
 /*
  * List of melee skills
