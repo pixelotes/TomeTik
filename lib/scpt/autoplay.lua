@@ -20,6 +20,12 @@ autoplay_config_table =
 	avoid_paralyze    = 1,    -- 1 = don't melee paralysers without Free Action
 	                          --     (floating eyes etc. -- a melee death trap)
 	want_ammo         = 40,   -- missiles to keep for the launcher
+	-- survival thresholds:
+	heal_at           = 50,   -- start drinking cures at this %HP
+	heal_big_at       = 25,   -- use a big heal / count as "desperate" at this %HP
+	speed_at          = 3,    -- quaff Speed vs a foe that could kill in this many turns
+	loot_radius       = 5,    -- detour this far for seen gold
+	item_radius       = 5,    -- detour this far for a seen item
 	-- threat model (real danger = expected damage/turn):
 	danger_turns      = 2,    -- avoid meleeing a foe that could kill us in this
 	                          --   many turns (single-monster "too dangerous")
