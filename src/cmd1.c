@@ -5614,8 +5614,9 @@ static bool autoplay_lua_ok(void)
 }
 
 /* Integer config knob from Lua autoplay_config(key); returns `def` if Lua is
- * absent or hands back a negative value ("no override, use the C default"). */
-static int autoplay_cfg(cptr key, int def)
+ * absent or hands back a negative value ("no override, use the C default").
+ * Public so skills.c (autoplay_spend_skills) can read the skill_build knob. */
+int autoplay_cfg(cptr key, int def)
 {
 	s32b v = def;
 	if (!autoplay_lua_ok()) return (def);
@@ -8065,6 +8066,11 @@ void autoplay_step(void)
 		msg_print("Autoplay stopped.");
 		return;
 	}
+
+	/* Spend any skill points earned on level-up before deciding what to do.
+	 * Costs no game turn, so it's safe ahead of the energy-gated action and
+	 * keeps the character from staying permanently under-skilled. */
+	if (p_ptr->skill_points > 0) autoplay_spend_skills();
 
 	autoplay_decide(&a);
 
