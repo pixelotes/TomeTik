@@ -5671,31 +5671,67 @@ static bool autoplay_low_value_foe(monster_type *m)
 
 /* ---- threat model: roughly how much damage a foe deals us per turn ---- */
 
-/* Expected damage/turn this monster can do to us: melee blows (average roll,
- * crude ~60% land factor), a chunk for casters/breathers scaled by their HP and
- * spell frequency, and a bump for being faster than us. Approximate but enough
- * to compare foes and sum a pack's threat. Always >= 1. */
+/* Chance (0..100) a monster blow of this `power` and `level` lands against our
+ * armour -- mirrors melee1.c check_hit: i = power + level*3 competes against
+ * 3/4 of our AC, with a 5% always-hit floor (and 5% always-miss). */
+static int autoplay_blow_hit_pct(int power, int level)
+{
+	int i = power + (level * 3);
+	int ac = p_ptr->ac + p_ptr->to_a;
+	int band;
+
+	if (i <= 0) return (5);
+	band = ((i - ((ac * 3) / 4)) * 100) / i;   /* % of the 90% band that connects */
+	if (band < 0) band = 0;
+	if (band > 100) band = 100;
+	return (5 + (band * 90) / 100);            /* 5% floor + scaled band */
+}
+
+/* Expected damage/turn this monster can do to us: melee blows (average roll
+ * scaled by the real hit chance vs our AC), casters/breathers scaled by their HP
+ * and spell frequency (reduced by our resistances to what they breathe), a bump
+ * for being faster than us, and extra for breeders (their threat compounds).
+ * Approximate but enough to compare foes and sum a pack's threat. Always >= 1. */
 static int autoplay_monster_danger(monster_type *m)
 {
 	monster_race *r_ptr = &r_info[m->r_idx];
 	int b, dmg = 0;
 
-	/* Melee: sum the average damage of each blow. */
+	/* Melee: per-blow average damage times how often it actually lands on us. */
 	for (b = 0; b < 4; b++)
 	{
+		int avg, pw, hit;
 		if (!r_ptr->blow[b].method) continue;
-		dmg += (r_ptr->blow[b].d_dice * (r_ptr->blow[b].d_side + 1)) / 2;
+		avg = (r_ptr->blow[b].d_dice * (r_ptr->blow[b].d_side + 1)) / 2;
+		pw  = (r_ptr->blow[b].effect == RBE_HURT) ? 60 : 15;  /* HURT blows hit harder */
+		hit = autoplay_blow_hit_pct(pw, r_ptr->level);
+		dmg += (avg * hit) / 100;
 	}
-	dmg = (dmg * 3) / 5;        /* not every swing lands (crude, AC-agnostic) */
 
-	/* Casters / breathers: breaths scale with current HP; approximate the extra
-	 * damage/turn as a fraction of its HP times how often it acts with magic. */
+	/* Casters / breathers: breaths scale with HP; reduce by resistances to the
+	 * elements it actually breathes (each resisted element ~ -2/3 of its share). */
 	if (r_ptr->freq_inate || r_ptr->freq_spell)
-		dmg += ((int)(m->maxhp / 6) * (r_ptr->freq_inate + r_ptr->freq_spell)) / 100;
+	{
+		int spell = ((int)(m->maxhp / 6) * (r_ptr->freq_inate + r_ptr->freq_spell)) / 100;
+		int nb = 0, nr = 0;
+
+		if (r_ptr->flags4 & RF4_BR_ACID) { nb++; if (p_ptr->resist_acid) nr++; }
+		if (r_ptr->flags4 & RF4_BR_ELEC) { nb++; if (p_ptr->resist_elec) nr++; }
+		if (r_ptr->flags4 & RF4_BR_FIRE) { nb++; if (p_ptr->resist_fire || p_ptr->immune_fire) nr++; }
+		if (r_ptr->flags4 & RF4_BR_COLD) { nb++; if (p_ptr->resist_cold) nr++; }
+		if (r_ptr->flags4 & RF4_BR_POIS) { nb++; if (p_ptr->resist_pois) nr++; }
+		if ((nb > 0) && (nr > 0)) spell = (spell * ((nb * 3) - (nr * 2))) / (nb * 3);
+
+		dmg += spell;
+	}
 
 	/* Faster than us -> it gets extra turns to hit us. */
 	if (m->mspeed > 110)
 		dmg += (dmg * (m->mspeed - 110)) / 20;
+
+	/* Breeders multiply: the threat compounds, so weight them heavier. */
+	if (r_ptr->flags4 & RF4_MULTIPLY)
+		dmg += dmg / 2;
 
 	return ((dmg < 1) ? 1 : dmg);
 }
