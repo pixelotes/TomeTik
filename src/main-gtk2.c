@@ -6003,8 +6003,6 @@ static GtkItemFactoryEntry main_menu_items[] =
 	  change_shape_tile_event_handler, 0, "<CheckItem>" },
 	{ "/Options/Graphics/Terrain edging", NULL,
 	  change_shape_tile_event_handler, 1, "<CheckItem>" },
-	{ "/Options/Graphics/Building roofs", NULL,
-	  change_shape_tile_event_handler, 2, "<CheckItem>" },
 
 #endif /* USE_GRAPHICS */
 
@@ -6353,9 +6351,6 @@ static void graf_menu_update_handler(
 	check_menu_item(
 	        "<Angband>/Options/Graphics/Terrain edging",
 	        gervais_terrain_edge);
-	check_menu_item(
-	        "<Angband>/Options/Graphics/Building roofs",
-	        gervais_roof_shape);
 }
 
 #endif /* USE_GRAPHICS */

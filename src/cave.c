@@ -898,7 +898,7 @@ static byte darker_attrs[16] =
  */
 bool gervais_wall_shape   = TRUE; /* dungeon walls -> beveled "roof" tiles  */
 bool gervais_terrain_edge = TRUE; /* terrain transitions (grass/water/sand) */
-bool gervais_roof_shape   = TRUE; /* town building roofs (auto-tiled)       */
+bool gervais_roof_shape   = FALSE; /* town building roofs -- off, sin entrada de menu */
 
 static bool feat_is_shapewall(int feat)
 {
