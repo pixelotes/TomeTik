@@ -459,6 +459,39 @@ Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
     slot (basta para romper el re-pick inmediato); se resetea al arrancar autoplay.
   - **Fuera de alcance**: el endgame real (Anillo/Sauron/Morgoth) va por quests/plots
     (`q_*.c`), no por `FINAL_GUARDIAN` — fase aparte.
+- **(F1) Ritmo de buceo — HECHO.** El bot moría a plev 5-7 por bucear más rápido de lo
+  que subía: nada regulaba el descenso. Ahora en `autoplay_decide` el bloque de bajar
+  escaleras se gatea con `dive_ok = (plev >= dun_level+1 + dive_margin)` (knob Lua, def 3).
+  Si no está listo, NO baja: cae al scummer de dead-end, que regenera el nivel ACTUAL
+  (sube y baja escalera) = grind con monstruos frescos a esta profundidad hasta cerrar
+  el gap. Mensajes del Oráculo distintos ("Grinding this depth (not deep-ready yet)").
+  Descender a tope de HP ya lo garantizaba el orden (paso 9 AP_REST va antes).
+- **(F2) Cautela táctica — HECHO.** Tres piezas en cmd1.c:
+  - **Kiting** (paso 2, antes del melee): foe ADYACENTE, estrictamente más lento
+    (`mspeed < pspeed`), sin spells (`freq_spell|freq_inate == 0`) y con ranged
+    disponible (`autoplay_has_ranged_attack`: lanzador+munición o arrojable) →
+    `AP_FLEE` un paso; el paso 1d dispara al turno siguiente desde el hueco. Un foe
+    más lento no recupera la distancia: golpes cero, tiros gratis. Knob `kite` (0/1).
+  - **Chokepoints** (1c2, tier nuevo): pack que haría daño pero aún no letal
+    (`cd * pack_choke_turns >= HP`, def 8) y estamos en suelo abierto → `AP_FALLBACK`
+    al pasillo/puerta más cercano (`autoplay_find_chokepoint`: BFS radio 8 sobre suelo
+    sin monstruos, celda con ≤2 vecinos transitables y sin contacto hostil) y pelear
+    ahí de uno en uno. En el tier letal, **nunca huir DESDE un chokepoint** (huir al
+    abierto es lo que te rodea).
+  - **Escalera = escape** (1c2, tier letal): escalera bajo los pies → tomarla
+    (AP_ASCEND/AP_DESCEND, salida garantizada, el nivel se regenera); si no, scroll de
+    escape; si no, dash a escalera conocida a ≤`stair_dash` (def 8) si nada adyacente;
+    si no, flee a pie. Orden nuevo del ladder de pánico.
+  - Helpers nuevos: `autoplay_has_ranged_attack`, `autoplay_passable_neighbors`,
+    `autoplay_on_chokepoint`, `autoplay_cell_in_contact`, `autoplay_find_chokepoint`;
+    acción `AP_FALLBACK` (step con `explore_walkable_clear`). Knobs Lua nuevos:
+    `dive_margin`, `pack_choke_turns`, `stair_dash`, `kite`, `boss_retry_levels`.
+- *Pendiente del plan de inteligencia (2026-06-11)*: F3 packs preventivos por
+  avistamiento + velocidad relativa en la huida; F4 amenaza v2 (casters no-breath,
+  invocadores, blow power por efecto); F5 economía (loot por valor, mochila llena →
+  vender/triaje, compras v2: slots de armadura vacíos, Phase Door, munición a granel);
+  F6 pulir ignore de morralla (siempre-huidizos, triviales por plev); F7 telemetría
+  (post-mortem de muertes + últimas decisiones del Oráculo).
 - Afinar: umbrales de resupply/compra; **gates `plev` de la ruta** (data en `autoplay.lua`,
   con partidas reales).
 - Gates `plev` de la ruta = estimaciones; afinar con partidas reales (el bot melee-only es frágil).

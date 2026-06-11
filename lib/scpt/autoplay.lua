@@ -31,7 +31,16 @@ autoplay_config_table =
 	danger_turns      = 2,    -- avoid meleeing a foe that could kill us in this
 	                          --   many turns (single-monster "too dangerous")
 	pack_flee_turns   = 4,    -- flee a PACK if its combined damage/turn * this >= HP
+	pack_choke_turns  = 8,    -- milder: fall back to a corridor/doorway if the
+	                          --   pack's damage/turn * this >= HP (pre-emptive)
 	cluster_range     = 8,    -- tiles around us that count as the same pack
+	stair_dash        = 8,    -- dash to a known stair this close to escape a pack
+	kite              = 1,    -- 1 = step away from slower melee foes and shoot
+	-- depth pacing (F1): don't take stairs DOWN unless plev >= next_depth + this.
+	-- Underleveled = the dead-end scummer regenerates the CURRENT depth to grind.
+	dive_margin       = 3,
+	boss_retry_levels = 5,    -- after fleeing a FINAL_GUARDIAN level, retry the
+	                          --   dungeon once this many plevs stronger
 	-- skill-point spending on level-up (the bot earns 5 points/level):
 	skill_build       = 1,    -- 0 = off (spend them yourself), 1 = auto-detect
 	                          --   from the class, 2 = melee, 3 = archer,

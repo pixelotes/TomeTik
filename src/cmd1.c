@@ -7468,6 +7468,7 @@ static bool autoplay_needs_resupply(void)
 #define AP_DEVICE   23  /* use staff/rod/scroll (item; kind in .y)  */
 #define AP_DETECT   24  /* use a detection device (item; kind .y)   */
 #define AP_HUNT     25  /* head for the dungeon's guardian at (y,x) */
+#define AP_FALLBACK 26  /* retreat to the choke point at (y,x)      */
 
 typedef struct autoplay_action autoplay_action;
 struct autoplay_action
@@ -7591,6 +7592,104 @@ static bool autoplay_find_search_spot(int *sy, int *sx)
 	return (bestd >= 0);
 }
 
+/* (F2) Can we attack at range right now (launcher with ammo, or something
+ * worth throwing)? Read-only; used to decide kiting and fallback tactics. */
+static bool autoplay_has_ranged_attack(void)
+{
+	if (autoplay_have_launcher() && (autoplay_find_ammo() >= 0)) return (TRUE);
+	return (autoplay_find_throwable() >= 0);
+}
+
+/* (F2) A "choke point" is a walkable cell with at most 2 walkable neighbours --
+ * a corridor or doorway. Fighting a pack from one means they reach us one or
+ * two at a time instead of fanning out around us in the open. */
+static int autoplay_passable_neighbors(int y, int x)
+{
+	int d, n = 0;
+
+	for (d = 1; d <= 9; d++)
+	{
+		int ny, nx;
+		if (d == 5) continue;
+		ny = y + ddy[d];
+		nx = x + ddx[d];
+		if (!in_bounds2(ny, nx)) continue;
+		if (cave_floor_bold(ny, nx)) n++;
+	}
+	return (n);
+}
+
+static bool autoplay_on_chokepoint(void)
+{
+	return (autoplay_passable_neighbors(p_ptr->py, p_ptr->px) <= 2);
+}
+
+/* Is (y,x) in melee contact with a visible hostile? (Don't retreat INTO one.) */
+static bool autoplay_cell_in_contact(int y, int x)
+{
+	int d;
+
+	for (d = 1; d <= 9; d++)
+	{
+		int ny, nx, m;
+		if (d == 5) continue;
+		ny = y + ddy[d];
+		nx = x + ddx[d];
+		if (!in_bounds2(ny, nx)) continue;
+		m = cave[ny][nx].m_idx;
+		if (m && m_list[m].ml && (m_list[m].status == MSTATUS_ENEMY)) return (TRUE);
+	}
+	return (FALSE);
+}
+
+/* (F2) Nearest reachable choke point within a few steps: BFS over monster-free
+ * floor (so the route can't lead through the pack), skipping cells already in
+ * contact with a hostile. Fills (*cy,*cx) and returns TRUE if one exists. */
+#define AP_CHOKE_RADIUS 8
+static bool autoplay_find_chokepoint(int *cy, int *cx)
+{
+	static const int SIDE = AP_CHOKE_RADIUS * 2 + 1;
+	byte seen[17][17];
+	int qy[17 * 17], qx[17 * 17], qd[17 * 17];
+	int head = 0, tail = 0, d;
+
+	memset(seen, 0, sizeof(seen));
+	qy[tail] = p_ptr->py; qx[tail] = p_ptr->px; qd[tail] = 0; tail++;
+	seen[AP_CHOKE_RADIUS][AP_CHOKE_RADIUS] = 1;
+
+	while (head < tail)
+	{
+		int y = qy[head], x = qx[head], dist = qd[head];
+		head++;
+
+		if ((dist > 0) && (autoplay_passable_neighbors(y, x) <= 2) &&
+		                !autoplay_cell_in_contact(y, x))
+		{
+			*cy = y; *cx = x;
+			return (TRUE);
+		}
+		if (dist >= AP_CHOKE_RADIUS) continue;
+
+		for (d = 1; d <= 9; d++)
+		{
+			int ny, nx, ry, rx;
+			if (d == 5) continue;
+			ny = y + ddy[d];
+			nx = x + ddx[d];
+			ry = ny - p_ptr->py + AP_CHOKE_RADIUS;
+			rx = nx - p_ptr->px + AP_CHOKE_RADIUS;
+			if ((ry < 0) || (ry >= SIDE) || (rx < 0) || (rx >= SIDE)) continue;
+			if (seen[ry][rx]) continue;
+			if (!in_bounds2(ny, nx)) continue;
+			if (!cave_floor_bold(ny, nx)) continue;
+			if (cave[ny][nx].m_idx) continue;
+			seen[ry][rx] = 1;
+			qy[tail] = ny; qx[tail] = nx; qd[tail] = dist + 1; tail++;
+		}
+	}
+	return (FALSE);
+}
+
 /* Read-only: is a fleeing step (away from (ty,tx), onto empty known floor)
  * available right now? */
 static bool autoplay_can_flee(int ty, int tx)
@@ -7703,10 +7802,12 @@ static void autoplay_decide(autoplay_action *a)
 	}
 
 	/* 1c2. Overwhelmed by a PACK: if the combined danger/turn of the nearby foes
-	 * is lethal and there is more than one, break away -- blink/teleport if we
-	 * can, else flee on foot -- before they surround and grind us down (the
-	 * jackal / spider-pack killer). If we can't get away, fall through and
-	 * fight/shoot what we can. */
+	 * is lethal and there is more than one, break away before they surround and
+	 * grind us down (the jackal / spider-pack killer). Escape ladder: stairs we
+	 * are standing on (guaranteed exit, the level regenerates) > blink/teleport
+	 * scroll > a dash to a close known stair > flee on foot -- but never flee
+	 * OUT of a choke point: there they reach us one at a time, fleeing into the
+	 * open is what gets us surrounded. If nothing works, stand and fight. */
 	if (dun_level > 0)
 	{
 		int foes = 0;
@@ -7716,6 +7817,20 @@ static void autoplay_decide(autoplay_action *a)
 		if ((foes >= 2) && near &&
 		                (cd * autoplay_cfg("pack_flee_turns", 4) >= p_ptr->chp))
 		{
+			int feet = cave[p_ptr->py][p_ptr->px].feat;
+
+			if ((feet == FEAT_LESS) || (feet == FEAT_WAY_LESS))
+			{
+				a->type = AP_ASCEND;
+				strnfmt(a->advice, 80, "A pack of %d -- escape up the stairs!", foes);
+				return;
+			}
+			if ((feet == FEAT_MORE) || (feet == FEAT_WAY_MORE))
+			{
+				a->type = AP_DESCEND;
+				strnfmt(a->advice, 80, "A pack of %d -- escape down the stairs!", foes);
+				return;
+			}
 			if (!p_ptr->blind && !p_ptr->confused)
 			{
 				int s = autoplay_find_escape();
@@ -7726,13 +7841,43 @@ static void autoplay_decide(autoplay_action *a)
 					return;
 				}
 			}
-			if (autoplay_can_flee(near->fy, near->fx))
+			/* (F2) A known stair within dash range and nothing biting us yet:
+			 * run for it instead of trading blows on open floor. */
+			if (!autoplay_adjacent_enemy())
+			{
+				int sy = 0, sx = 0;
+				if (autoplay_pick_stair(FALSE, &sy, &sx) &&
+				                (distance(p_ptr->py, p_ptr->px, sy, sx) <=
+				                 autoplay_cfg("stair_dash", 8)))
+				{
+					a->type = AP_GOSTAIR; a->y = sy; a->x = sx;
+					strnfmt(a->advice, 80, "A pack of %d -- run for the stairs!", foes);
+					return;
+				}
+			}
+			if (!autoplay_on_chokepoint() && autoplay_can_flee(near->fy, near->fx))
 			{
 				a->type = AP_FLEE; a->y = near->fy; a->x = near->fx;
 				strnfmt(a->advice, 80, "A pack of %d -- flee!", foes);
 				return;
 			}
-			/* Cornered: nothing better -- fall through to ranged / melee. */
+			/* Cornered or holding a choke point: fall through to ranged/melee. */
+		}
+
+		/* (F2) Milder tier: the pack would hurt but isn't lethal yet, and we're
+		 * on open floor -- fall back to a corridor/doorway BEFORE they fan out
+		 * around us, and meet them where they come one at a time. */
+		else if ((foes >= 2) && near && !autoplay_on_chokepoint() &&
+		                !autoplay_adjacent_enemy() &&
+		                (cd * autoplay_cfg("pack_choke_turns", 8) >= p_ptr->chp))
+		{
+			int cy = 0, cx = 0;
+			if (autoplay_find_chokepoint(&cy, &cx))
+			{
+				a->type = AP_FALLBACK; a->y = cy; a->x = cx;
+				strnfmt(a->advice, 80, "A pack of %d -- fall back to a choke point.", foes);
+				return;
+			}
 		}
 	}
 
@@ -7805,6 +7950,21 @@ static void autoplay_decide(autoplay_action *a)
 		char nm[80];
 		monster_desc(nm, enemy, 0);
 		a->y = enemy->fy; a->x = enemy->fx;
+
+		/* (F2) Kite: the foe is adjacent, strictly SLOWER than us, can't cast,
+		 * and we can shoot/throw. Step away now -- the ranged step (1d) fires
+		 * from the reopened gap next turn, and a slower foe can never close the
+		 * distance again: we trade zero blows for free shots. */
+		if ((ed <= 1) && (enemy->mspeed < p_ptr->pspeed) &&
+		                !r_info[enemy->r_idx].freq_spell &&
+		                !r_info[enemy->r_idx].freq_inate &&
+		                autoplay_cfg("kite", 1) && autoplay_has_ranged_attack() &&
+		                autoplay_can_flee(enemy->fy, enemy->fx))
+		{
+			a->type = AP_FLEE;
+			strnfmt(a->advice, 80, "Kite %s -- step back and shoot.", nm);
+			return;
+		}
 
 		/* (B2) Haste before a genuinely dangerous fight (foe that hits for a big
 		 * chunk per turn), if we have a Speed potion and aren't already fast. */
@@ -8016,7 +8176,14 @@ static void autoplay_decide(autoplay_action *a)
 	{
 		int gy = 0, gx = 0, sy = 0, sx = 0, tkind = AP_XPLORE_NONE;
 		int here = cave[p_ptr->py][p_ptr->px].feat;
-		bool got, gotstair, reachstair = FALSE;
+		bool got, gotstair = FALSE, reachstair = FALSE;
+
+		/* (F1) Depth pacing: are we strong enough for the NEXT depth? Outdiving
+		 * the character level was the classic bot-killer (dead by plev 5-7).
+		 * When not ready we simply don't take stairs down -- the dead-end
+		 * scummer below keeps regenerating THIS depth, and the respawned
+		 * monsters are the grind that closes the gap. */
+		bool dive_ok = (p_ptr->lev >= (dun_level + 1) + autoplay_cfg("dive_margin", 3));
 
 		explore_no_items = full;
 		got = autoplay_explore_target(&gy, &gx, &tkind, real_walkable_clear);
@@ -8074,19 +8241,22 @@ static void autoplay_decide(autoplay_action *a)
 			}
 		}
 
-		if ((here == FEAT_MORE) || (here == FEAT_WAY_MORE))
+		if (dive_ok)
 		{
-			a->type = AP_DESCEND;
-			strcpy(a->advice, "Descend the staircase.");
-			return;
-		}
-		gotstair = autoplay_pick_stair(TRUE, &sy, &sx);   /* nearest reachable, locked */
-		reachstair = gotstair;                            /* pick_stair already filters */
-		if (gotstair)
-		{
-			a->type = AP_GOSTAIR; a->y = sy; a->x = sx;
-			strcpy(a->advice, "Head to the down staircase.");
-			return;
+			if ((here == FEAT_MORE) || (here == FEAT_WAY_MORE))
+			{
+				a->type = AP_DESCEND;
+				strcpy(a->advice, "Descend the staircase.");
+				return;
+			}
+			gotstair = autoplay_pick_stair(TRUE, &sy, &sx);   /* nearest reachable, locked */
+			reachstair = gotstair;                            /* pick_stair already filters */
+			if (gotstair)
+			{
+				a->type = AP_GOSTAIR; a->y = sy; a->x = sx;
+				strcpy(a->advice, "Head to the down staircase.");
+				return;
+			}
 		}
 
 		/* 11b. Route says move on? If this level is exhausted and the strategic
@@ -8156,13 +8326,17 @@ static void autoplay_decide(autoplay_action *a)
 		if ((here == FEAT_LESS) || (here == FEAT_WAY_LESS))
 		{
 			a->type = AP_ASCEND;
-			strcpy(a->advice, "Dead end: take the stairs up to regenerate the level.");
+			strcpy(a->advice, dive_ok
+			       ? "Dead end: take the stairs up to regenerate the level."
+			       : "Grinding this depth (not deep-ready yet): regenerate the level.");
 			return;
 		}
 		if (autoplay_pick_stair(FALSE, &sy, &sx))   /* nearest reachable up stair, locked */
 		{
 			a->type = AP_GOSTAIR; a->y = sy; a->x = sx;
-			strcpy(a->advice, "Dead end: head to a staircase to regenerate the level.");
+			strcpy(a->advice, dive_ok
+			       ? "Dead end: head to a staircase to regenerate the level."
+			       : "Grinding this depth (not deep-ready yet): head to the stairs.");
 			return;
 		}
 		if (dun_level > 0)
@@ -8217,6 +8391,7 @@ static void autoplay_perform(autoplay_action *a)
 	case AP_EXPLORE:  (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, explore_walkable_clear); break;
 	case AP_DELVE:    (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, real_walkable_clear); break;
 	case AP_HUNT:     (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, travel_walkable_real); break;
+	case AP_FALLBACK: (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, explore_walkable_clear); break;
 	case AP_GOSTAIR:  (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, explore_walkable_clear); break;
 	case AP_DESCEND:  autoplay_descend(); break;
 	case AP_ASCEND:   autoplay_ascend(); break;
