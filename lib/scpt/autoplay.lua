@@ -34,7 +34,9 @@ autoplay_config_table =
 	pack_choke_turns  = 8,    -- milder: fall back to a corridor/doorway if the
 	                          --   pack's damage/turn * this >= HP (pre-emptive)
 	cluster_range     = 8,    -- tiles around us that count as the same pack
+	pack_sight        = 12,   -- wider radius for SIGHTING a pack (pre-emptive tier)
 	stair_dash        = 8,    -- dash to a known stair this close to escape a pack
+	want_phase        = 5,    -- Phase Door scrolls to keep (the cheap panic button)
 	kite              = 1,    -- 1 = step away from slower melee foes and shoot
 	-- depth pacing (F1): don't take stairs DOWN unless plev >= next_depth + this.
 	-- Underleveled = the dead-end scummer regenerates the CURRENT depth to grind.

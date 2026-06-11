@@ -5750,13 +5750,14 @@ static int autoplay_monster_danger(monster_type *m)
 	return ((dmg < 1) ? 1 : dmg);
 }
 
-/* Sum of danger/turn of the visible hostiles near us (within cluster_range
- * tiles), the count in *foes, and the nearest of them in *nearest. The
- * pack-threat metric: one jackal is nothing, ten are lethal. */
-static int autoplay_cluster_danger(int *foes, monster_type **nearest)
+/* Sum of danger/turn of the visible hostiles near us (within `range` tiles),
+ * the count in *foes, and the nearest of them in *nearest. The pack-threat
+ * metric: one jackal is nothing, ten are lethal. (F3) The radius is now a
+ * parameter: the lethal tier scans close (cluster_range), the pre-emptive
+ * sighting tier scans wide (pack_sight). */
+static int autoplay_cluster_danger(int range, int *foes, monster_type **nearest)
 {
 	int i, total = 0, n = 0, bd = 0;
-	int range = autoplay_cfg("cluster_range", 8);
 	monster_type *best = NULL;
 
 	for (i = 1; i < m_max; i++)
@@ -7145,7 +7146,9 @@ static bool autoplay_keep_item(object_type *o_ptr)
 	case TV_POTION: return (autoplay_is_cure(o_ptr->sval));
 	case TV_SCROLL: return ((o_ptr->sval == SV_SCROLL_WORD_OF_RECALL) ||
 		                        (o_ptr->sval == SV_SCROLL_IDENTIFY) ||
-		                        (o_ptr->sval == SV_SCROLL_DETECT_DOOR));
+		                        (o_ptr->sval == SV_SCROLL_DETECT_DOOR) ||
+		                        (o_ptr->sval == SV_SCROLL_PHASE_DOOR) ||
+		                        (o_ptr->sval == SV_SCROLL_TELEPORT));
 	case TV_FOOD:   return (autoplay_is_staple(o_ptr->sval));
 	case TV_FLASK:  return (TRUE);
 	}
@@ -7233,6 +7236,11 @@ static void autoplay_shop_buy_needs(int town, int store)
 	autoplay_buy_one(town, store, TV_SCROLL, SV_SCROLL_DETECT_DOOR,
 	                 autoplay_cfg("want_reveal", AP_WANT_REVEAL),
 	                 autoplay_inv_count(TV_SCROLL, SV_SCROLL_DETECT_DOOR));
+	/* (F3) Phase Door: the cheap panic button -- the pack-escape ladder and the
+	 * desperate-fight bail-out both read one before resorting to feet. */
+	autoplay_buy_one(town, store, TV_SCROLL, SV_SCROLL_PHASE_DOOR,
+	                 autoplay_cfg("want_phase", 5),
+	                 autoplay_inv_count(TV_SCROLL, SV_SCROLL_PHASE_DOOR));
 
 	/* Cure wounds: buy whatever kind the store stocks, toward the combined target. */
 	autoplay_buy_one(town, store, TV_POTION, SV_POTION_CURE_LIGHT, want_cure, autoplay_count_cure());
@@ -7812,7 +7820,7 @@ static void autoplay_decide(autoplay_action *a)
 	{
 		int foes = 0;
 		monster_type *near = NULL;
-		int cd = autoplay_cluster_danger(&foes, &near);
+		int cd = autoplay_cluster_danger(autoplay_cfg("cluster_range", 8), &foes, &near);
 
 		if ((foes >= 2) && near &&
 		                (cd * autoplay_cfg("pack_flee_turns", 4) >= p_ptr->chp))
@@ -7855,28 +7863,55 @@ static void autoplay_decide(autoplay_action *a)
 					return;
 				}
 			}
-			if (!autoplay_on_chokepoint() && autoplay_can_flee(near->fy, near->fx))
+			if (!autoplay_on_chokepoint())
 			{
-				a->type = AP_FLEE; a->y = near->fy; a->x = near->fx;
-				strnfmt(a->advice, 80, "A pack of %d -- flee!", foes);
-				return;
+				/* (F3) Outrun check: fleeing on foot from a FASTER pack just
+				 * hands out free hits while we tire -- hold a choke point
+				 * instead and make them come one at a time. */
+				if ((near->mspeed <= p_ptr->pspeed) &&
+				                autoplay_can_flee(near->fy, near->fx))
+				{
+					a->type = AP_FLEE; a->y = near->fy; a->x = near->fx;
+					strnfmt(a->advice, 80, "A pack of %d -- flee!", foes);
+					return;
+				}
+				if (!autoplay_adjacent_enemy())
+				{
+					int cy = 0, cx = 0;
+					if (autoplay_find_chokepoint(&cy, &cx))
+					{
+						a->type = AP_FALLBACK; a->y = cy; a->x = cx;
+						strnfmt(a->advice, 80,
+						        "A pack of %d too fast to outrun -- hold a choke point.", foes);
+						return;
+					}
+				}
 			}
 			/* Cornered or holding a choke point: fall through to ranged/melee. */
 		}
 
-		/* (F2) Milder tier: the pack would hurt but isn't lethal yet, and we're
-		 * on open floor -- fall back to a corridor/doorway BEFORE they fan out
-		 * around us, and meet them where they come one at a time. */
-		else if ((foes >= 2) && near && !autoplay_on_chokepoint() &&
-		                !autoplay_adjacent_enemy() &&
-		                (cd * autoplay_cfg("pack_choke_turns", 8) >= p_ptr->chp))
+		/* (F2/F3) Pre-emptive tier: scan WIDER than the melee cluster and fall
+		 * back to a corridor/doorway when a pack that would hurt is SIGHTED --
+		 * not when it's already biting. Meeting them at a choke point beats
+		 * being fanned out around on open floor. */
+		else if (!autoplay_on_chokepoint() && !autoplay_adjacent_enemy())
 		{
-			int cy = 0, cx = 0;
-			if (autoplay_find_chokepoint(&cy, &cx))
+			int sfoes = 0;
+			monster_type *snear = NULL;
+			int scd = autoplay_cluster_danger(autoplay_cfg("pack_sight", 12),
+			                                  &sfoes, &snear);
+
+			if ((sfoes >= 2) && snear &&
+			                (scd * autoplay_cfg("pack_choke_turns", 8) >= p_ptr->chp))
 			{
-				a->type = AP_FALLBACK; a->y = cy; a->x = cx;
-				strnfmt(a->advice, 80, "A pack of %d -- fall back to a choke point.", foes);
-				return;
+				int cy = 0, cx = 0;
+				if (autoplay_find_chokepoint(&cy, &cx))
+				{
+					a->type = AP_FALLBACK; a->y = cy; a->x = cx;
+					strnfmt(a->advice, 80,
+					        "A pack of %d sighted -- fall back to a choke point.", sfoes);
+					return;
+				}
 			}
 		}
 	}
@@ -7979,7 +8014,11 @@ static void autoplay_decide(autoplay_action *a)
 			}
 		}
 
-		if (desperate && autoplay_can_flee(enemy->fy, enemy->fx))
+		/* (F3) Only flee on foot from a foe we can actually outrun: running from
+		 * something faster hands it free attacks -- the escape scroll below (or
+		 * standing our ground) beats that. */
+		if (desperate && (enemy->mspeed <= p_ptr->pspeed) &&
+		                autoplay_can_flee(enemy->fy, enemy->fx))
 		{
 			a->type = AP_FLEE;
 			strnfmt(a->advice, 80, "Flee from %s.", nm);

@@ -486,10 +486,22 @@ Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
     `autoplay_on_chokepoint`, `autoplay_cell_in_contact`, `autoplay_find_chokepoint`;
     acción `AP_FALLBACK` (step con `explore_walkable_clear`). Knobs Lua nuevos:
     `dive_margin`, `pack_choke_turns`, `stair_dash`, `kite`, `boss_retry_levels`.
-- *Pendiente del plan de inteligencia (2026-06-11)*: F3 packs preventivos por
-  avistamiento + velocidad relativa en la huida; F4 amenaza v2 (casters no-breath,
+- **(F3) Packs preventivos + huida por velocidad — HECHO.** Tres piezas:
+  - `autoplay_cluster_danger` toma ahora el **radio como parámetro**: el tier letal
+    escanea corto (`cluster_range`, 8) y el preventivo ancho (`pack_sight`, 12) —
+    el fallback a chokepoint salta al AVISTAR el pack, no cuando ya muerde.
+  - **Huida consciente de velocidad**: huir a pie solo de lo que podemos dejar atrás
+    (`mspeed <= pspeed`); de un pack más rápido → mantener/buscar chokepoint
+    ("too fast to outrun -- hold a choke point"); en combate singular desesperado,
+    el flee a pie también se gatea por velocidad (el escape scroll va después y
+    el kiting de F2 ya exigía foe estrictamente más lento).
+  - **Phase Door en la economía**: `autoplay_shop_buy_needs` compra
+    `SV_SCROLL_PHASE_DOOR` hasta `want_phase` (knob, def 5) y `autoplay_keep_item`
+    protege Phase Door + Teleport de la venta agresiva (antes un Teleport hallado
+    en mazmorra se vendía).
+- *Pendiente del plan de inteligencia (2026-06-11)*: F4 amenaza v2 (casters no-breath,
   invocadores, blow power por efecto); F5 economía (loot por valor, mochila llena →
-  vender/triaje, compras v2: slots de armadura vacíos, Phase Door, munición a granel);
+  vender/triaje, compras v2: slots de armadura vacíos, munición a granel);
   F6 pulir ignore de morralla (siempre-huidizos, triviales por plev); F7 telemetría
   (post-mortem de muertes + últimas decisiones del Oráculo).
 - Afinar: umbrales de resupply/compra; **gates `plev` de la ruta** (data en `autoplay.lua`,
