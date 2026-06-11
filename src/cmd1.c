@@ -5701,11 +5701,59 @@ static int autoplay_blow_hit_pct(int power, int level)
 	return (5 + (band * 90) / 100);            /* 5% floor + scaled band */
 }
 
+/* (F4) Per-effect blow "power" -- the same values melee1.c's check_hit feeds
+ * its to-hit roll, so the estimate matches the real game instead of a flat
+ * HURT-vs-rest split. (Power drives the HIT chance, not the damage.) */
+static int autoplay_blow_power(int effect)
+{
+	switch (effect)
+	{
+	case RBE_HURT: case RBE_SHATTER:
+		return (60);
+	case RBE_UN_BONUS:
+		return (20);
+	case RBE_UN_POWER:
+		return (15);
+	case RBE_ELEC: case RBE_FIRE: case RBE_COLD:
+	case RBE_CONFUSE: case RBE_TERRIFY:
+		return (10);
+	case RBE_POISON: case RBE_EAT_GOLD: case RBE_EAT_ITEM:
+	case RBE_EAT_FOOD: case RBE_EAT_LITE: case RBE_EXP_10:
+	case RBE_EXP_20: case RBE_EXP_40: case RBE_EXP_80:
+	case RBE_DISEASE: case RBE_TIME:
+		return (5);
+	case RBE_BLIND: case RBE_PARALYZE: case RBE_LOSE_ALL:
+		return (2);
+	default:
+		return (0);    /* ACID, stat drains, ... -- level-driven to-hit only */
+	}
+}
+
+/* (F4) Attack magic that is NOT a breath: its damage comes from the caster's
+ * level, not its hit points. */
+#define AP_RF4_ATTACK (RF4_ROCKET | RF4_ARROW_1 | RF4_ARROW_2 | RF4_ARROW_3 | \
+                       RF4_ARROW_4 | RF4_BA_NUKE)
+#define AP_RF5_ATTACK (RF5_BA_ACID | RF5_BA_ELEC | RF5_BA_FIRE | RF5_BA_COLD | \
+                       RF5_BA_POIS | RF5_BA_NETH | RF5_BA_WATE | RF5_BA_MANA | \
+                       RF5_BA_DARK | RF5_BO_ACID | RF5_BO_ELEC | RF5_BO_FIRE | \
+                       RF5_BO_COLD | RF5_BO_POIS | RF5_BO_NETH | RF5_BO_WATE | \
+                       RF5_BO_MANA | RF5_BO_PLAS | RF5_BO_ICEE | RF5_MISSILE | \
+                       RF5_CAUSE_1 | RF5_CAUSE_2 | RF5_CAUSE_3 | RF5_CAUSE_4 | \
+                       RF5_MIND_BLAST | RF5_BRAIN_SMASH)
+/* (F4) Summon spells: a summoner is a deferred pack, not a lone monster. */
+#define AP_RF4_SUMMON (RF4_S_ANIMAL)
+#define AP_RF6_SUMMON (RF6_S_ANIMALS | RF6_S_BUG | RF6_S_RNG | RF6_S_THUNDERLORD | \
+                       RF6_S_KIN | RF6_S_HI_DEMON | RF6_S_MONSTER | RF6_S_MONSTERS | \
+                       RF6_S_ANT | RF6_S_SPIDER | RF6_S_HOUND | RF6_S_HYDRA | \
+                       RF6_S_ANGEL | RF6_S_DEMON | RF6_S_UNDEAD | RF6_S_DRAGON | \
+                       RF6_S_HI_UNDEAD | RF6_S_HI_DRAGON | RF6_S_WRAITH | RF6_S_UNIQUE)
+
 /* Expected damage/turn this monster can do to us: melee blows (average roll
- * scaled by the real hit chance vs our AC), casters/breathers scaled by their HP
- * and spell frequency (reduced by our resistances to what they breathe), a bump
- * for being faster than us, and extra for breeders (their threat compounds).
- * Approximate but enough to compare foes and sum a pack's threat. Always >= 1. */
+ * scaled by the real hit chance vs our AC), breaths scaled by the monster's HP,
+ * attack magic by the caster's level (both reduced by spell frequency), a bump
+ * for being faster than us, and extra for summoners and breeders (their threat
+ * compounds). Approximate but enough to compare foes and sum a pack's threat.
+ * Always >= 1. */
 static int autoplay_monster_danger(monster_type *m)
 {
 	monster_race *r_ptr = &r_info[m->r_idx];
@@ -5717,7 +5765,7 @@ static int autoplay_monster_danger(monster_type *m)
 		int avg, pw, hit;
 		if (!r_ptr->blow[b].method) continue;
 		avg = (r_ptr->blow[b].d_dice * (r_ptr->blow[b].d_side + 1)) / 2;
-		pw  = (r_ptr->blow[b].effect == RBE_HURT) ? 60 : 15;  /* HURT blows hit harder */
+		pw  = autoplay_blow_power(r_ptr->blow[b].effect);
 		hit = autoplay_blow_hit_pct(pw, r_ptr->level);
 		dmg += (avg * hit) / 100;
 	}
@@ -5736,12 +5784,29 @@ static int autoplay_monster_danger(monster_type *m)
 		if (r_ptr->flags4 & RF4_BR_POIS) { nb++; if (p_ptr->resist_pois) nr++; }
 		if ((nb > 0) && (nr > 0)) spell = (spell * ((nb * 3) - (nr * 2))) / (nb * 3);
 
+		/* (F4) Non-breath attack magic (bolts/balls/causes/arrows) scales with
+		 * the caster's LEVEL, not its hit points: a frail sorcerer's mana bolt
+		 * hits as hard as a fat one's. Estimate ~level*3 per cast and keep the
+		 * worse of the two models. */
+		if ((r_ptr->flags5 & AP_RF5_ATTACK) || (r_ptr->flags4 & AP_RF4_ATTACK))
+		{
+			int mag = (r_ptr->level * 3 *
+			           (r_ptr->freq_inate + r_ptr->freq_spell)) / 100;
+			if (mag > spell) spell = mag;
+		}
+
 		dmg += spell;
 	}
 
 	/* Faster than us -> it gets extra turns to hit us. */
 	if (m->mspeed > 110)
 		dmg += (dmg * (m->mspeed - 110)) / 20;
+
+	/* (F4) A summoner converts its turns into MORE monsters -- a deferred pack.
+	 * Its real threat sits far above its personal damage: weight it so the bot
+	 * kills it first when strong and routes around it when weak. */
+	if ((r_ptr->flags6 & AP_RF6_SUMMON) || (r_ptr->flags4 & AP_RF4_SUMMON))
+		dmg += (dmg / 2) + r_ptr->level;
 
 	/* Breeders multiply: the threat compounds, so weight them heavier. */
 	if (r_ptr->flags4 & RF4_MULTIPLY)

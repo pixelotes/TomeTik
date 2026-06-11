@@ -499,11 +499,22 @@ Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
     `SV_SCROLL_PHASE_DOOR` hasta `want_phase` (knob, def 5) y `autoplay_keep_item`
     protege Phase Door + Teleport de la venta agresiva (antes un Teleport hallado
     en mazmorra se vendía).
-- *Pendiente del plan de inteligencia (2026-06-11)*: F4 amenaza v2 (casters no-breath,
-  invocadores, blow power por efecto); F5 economía (loot por valor, mochila llena →
-  vender/triaje, compras v2: slots de armadura vacíos, munición a granel);
-  F6 pulir ignore de morralla (siempre-huidizos, triviales por plev); F7 telemetría
-  (post-mortem de muertes + últimas decisiones del Oráculo).
+- **(F4) Amenaza v2 — HECHO.** `autoplay_monster_danger` afinado en tres frentes:
+  - **Casters no-breath** (bolts/balls/causes/arrows/rocket): su daño escala con el
+    NIVEL del caster, no con sus HP (el modelo viejo `maxhp/6` infravaloraba al
+    hechicero frágil). Máscaras `AP_RF4_ATTACK`/`AP_RF5_ATTACK`; estima `nivel*3`
+    por cast × frecuencia y se queda con el peor de los dos modelos.
+  - **Invocadores** = pack diferido: máscaras `AP_RF4_SUMMON`/`AP_RF6_SUMMON`
+    (todos los RF6_S_*); `dmg += dmg/2 + nivel`. El bot los mata primero cuando
+    puede y los esquiva cuando no.
+  - **Blow power por efecto real**: `autoplay_blow_power(effect)` replica la tabla
+    de `check_hit` de melee1.c (HURT/SHATTER 60, UN_BONUS 20, UN_POWER 15,
+    elementales/CONF/TERRIFY 10, drains/EXP 5, BLIND/PARALYZE 2, resto 0) en vez
+    del plano HURT=60/resto=15 — el acierto estimado coincide con el del juego.
+- *Pendiente del plan de inteligencia (2026-06-11)*: F5 economía (loot por valor,
+  mochila llena → vender/triaje, compras v2: slots de armadura vacíos, munición a
+  granel); F6 pulir ignore de morralla (siempre-huidizos, triviales por plev);
+  F7 telemetría (post-mortem de muertes + últimas decisiones del Oráculo).
 - Afinar: umbrales de resupply/compra; **gates `plev` de la ruta** (data en `autoplay.lua`,
   con partidas reales).
 - Gates `plev` de la ruta = estimaciones; afinar con partidas reales (el bot melee-only es frágil).
