@@ -6642,6 +6642,85 @@ static bool autoplay_pack_full(void)
 	return (p_ptr->inventory[INVEN_PACK - 1].k_idx != 0);
 }
 
+/* ---- the dungeon's final guardian as a concrete objective ----
+ *
+ * Quest dungeons keep their FINAL_GUARDIAN (d_info) on the bottom level,
+ * holding the FINAL_ARTIFACT / FINAL_OBJECT (generate.c places both at level
+ * generation). The route already counts the dungeon as finished only when the
+ * boss is dead (autoplay_dungeon_done), so once we stand on that bottom level
+ * the level's real goal is the guardian itself -- exploring and then scumming
+ * for stairs would never end the dungeon. */
+
+/* (BOSS) A guardian we bailed out on: postpone its dungeon until we are this
+ * much stronger, so the route moves on instead of recalling us straight back
+ * into the same lost fight. One slot is enough -- it only needs to break the
+ * immediate re-pick loop. */
+static int ap_boss_postpone_dn = -1;
+static int ap_boss_postpone_lev = 0;
+
+/* Are we standing on the bottom level of a dungeon whose guardian is alive? */
+static bool autoplay_boss_level(void)
+{
+	int g;
+
+	if (dun_level <= 0) return (FALSE);
+	if (dun_level != d_info[dungeon_type].maxdepth) return (FALSE);
+	g = d_info[dungeon_type].final_guardian;
+	if ((g <= 0) || (g >= max_r_idx)) return (FALSE);
+	return (r_info[g].max_num != 0);
+}
+
+/* Is monster m that guardian (only meaningful on the boss level)? */
+static bool autoplay_is_objective_guardian(monster_type *m)
+{
+	return (autoplay_boss_level() &&
+	        (m->r_idx == d_info[dungeon_type].final_guardian));
+}
+
+/* The guardian's m_list entry if it is on this level, else NULL. The generator
+ * always places it on the maxdepth level, but placement can fail (no empty
+ * spot after 10000 tries -- very rare); the caller then scums as before. */
+static monster_type *autoplay_find_guardian(void)
+{
+	int i, g;
+
+	if (!autoplay_boss_level()) return (NULL);
+	g = d_info[dungeon_type].final_guardian;
+	for (i = 1; i < m_max; i++)
+	{
+		if (m_list[i].r_idx == g) return (&m_list[i]);
+	}
+	return (NULL);
+}
+
+/* (BOSS) The slain guardian's final artifact / object lying on the floor of
+ * this level, or NULL. The drop is the point of the quest: fetch it even when
+ * it fell outside the ordinary loot-detour radius (e.g. the boss died across
+ * the level), or the "cleared" recall would abandon it for good. */
+static object_type *autoplay_find_boss_drop(void)
+{
+	int i, g, fa, fo;
+
+	if ((dun_level <= 0) || (dun_level != d_info[dungeon_type].maxdepth)) return (NULL);
+	g = d_info[dungeon_type].final_guardian;
+	if ((g <= 0) || (g >= max_r_idx)) return (NULL);
+	if (r_info[g].max_num != 0) return (NULL);          /* boss still alive */
+
+	fa = d_info[dungeon_type].final_artifact;
+	fo = d_info[dungeon_type].final_object;
+
+	for (i = 1; i < o_max; i++)
+	{
+		object_type *o_ptr = &o_list[i];
+
+		if (!o_ptr->k_idx) continue;
+		if (o_ptr->held_m_idx) continue;                /* on the floor only */
+		if ((fa && (o_ptr->name1 == fa)) || (fo && (o_ptr->k_idx == fo)))
+			return (o_ptr);
+	}
+	return (NULL);
+}
+
 /* Is monster m too dangerous to melee right now (out-of-depth / much higher
  * native level than us)? When so, auto-play tries to flee/avoid rather than
  * trade blows -- a crude stand-in for the borg's per-monster danger model;
@@ -6662,6 +6741,12 @@ static bool autoplay_too_dangerous(monster_type *m)
 			if (avoid == 0) return (FALSE);
 		}
 	}
+
+	/* (BOSS) The dungeon's final guardian on its bottom level IS the objective:
+	 * the route already sized it up (autoplay_guardian_ok) before sending us
+	 * here, so don't veto the fight -- the desperate/flee logic still bails us
+	 * out mid-fight if it goes wrong. */
+	if (autoplay_is_objective_guardian(m)) return (FALSE);
 
 	/* A foe that can PARALYSE us while we lack Free Action: meleeing it is the
 	 * classic way the bot dies (floating eyes -- you bump it, it gazes, you're
@@ -6791,6 +6876,8 @@ static void autoplay_objective(int *dungeon, int *depth, char *name)
 			if (autoplay_dungeon_done((int)dn, (int)tgt)) continue;  /* cleared / boss dead */
 			if (p_ptr->lev < plev) continue;                /* too weak: retry later */
 			if (!autoplay_guardian_ok(d_info[dn].final_guardian)) continue;  /* boss too tough yet */
+			if ((dn == ap_boss_postpone_dn) && (p_ptr->lev < ap_boss_postpone_lev))
+				continue;                               /* failed attempt: retry stronger */
 			best = (int)dn; best_depth = (int)tgt; best_ridx = i;
 			break;
 		}
@@ -7380,6 +7467,7 @@ static bool autoplay_needs_resupply(void)
 #define AP_THROW    22  /* throw an item (item) at foe (y,x)        */
 #define AP_DEVICE   23  /* use staff/rod/scroll (item; kind in .y)  */
 #define AP_DETECT   24  /* use a detection device (item; kind .y)   */
+#define AP_HUNT     25  /* head for the dungeon's guardian at (y,x) */
 
 typedef struct autoplay_action autoplay_action;
 struct autoplay_action
@@ -7598,6 +7686,17 @@ static void autoplay_decide(autoplay_action *a)
 	 * change; if a recall is already pending, just carry on until it fires. */
 	if (ap_force_unstick && (dun_level > 0) && (p_ptr->word_recall == 0))
 	{
+		/* (BOSS) Bailing out of a guardian's level counts as a failed attempt:
+		 * postpone this dungeon until we're stronger, or autoplay_objective
+		 * would aim the very next recall straight back into the lost fight. */
+		if (autoplay_boss_level())
+		{
+			ap_boss_postpone_dn = dungeon_type;
+			ap_boss_postpone_lev = p_ptr->lev + autoplay_cfg("boss_retry_levels", 5);
+			msg_format("Autoplay: giving up on %s for now -- will retry at level %d.",
+			           r_name + r_info[d_info[dungeon_type].final_guardian].name,
+			           ap_boss_postpone_lev);
+		}
 		a->type = AP_RECALL;
 		strcpy(a->advice, "Stuck in a loop -- recall to town to reset.");
 		return;
@@ -7774,7 +7873,12 @@ static void autoplay_decide(autoplay_action *a)
 			if (eidx == ap_chase_idx) ap_chase_turns++;
 			else { ap_chase_idx = eidx; ap_chase_turns = 1; }
 
-			if (ap_chase_turns <= autoplay_cfg("chase_turns", 15))
+			/* (BOSS) The guardian is exempt from the give-up cap: a boss fight
+			 * legitimately outlasts chase_turns, and ignoring our one objective
+			 * would strand the run. The loop tracker still breaks a truly stuck
+			 * chase (and postpones the dungeon). */
+			if ((ap_chase_turns <= autoplay_cfg("chase_turns", 15)) ||
+			                autoplay_is_objective_guardian(enemy))
 			{
 				a->type = AP_FIGHT;
 				strnfmt(a->advice, 80, "Fight %s.", nm);
@@ -7939,6 +8043,37 @@ static void autoplay_decide(autoplay_action *a)
 		}
 		explore_no_items = FALSE;
 
+		/* 10b. (BOSS) Bottom level of a quest dungeon, nothing left to explore:
+		 * the level's real goal is the FINAL_GUARDIAN. Walk to it over real
+		 * terrain (the hunt map-cheats exactly like the L3 explorer; stepping
+		 * into it attacks, and once it's in view the combat logic above owns
+		 * the fight). Unreachable (sealed off): fall through to the secret-door
+		 * sweep / scum, which regenerates the level, guardian included. */
+		{
+			monster_type *boss = autoplay_find_guardian();
+			if (boss && autoplay_can_reach_hook(boss->fy, boss->fx, travel_walkable_real))
+			{
+				a->type = AP_HUNT; a->y = boss->fy; a->x = boss->fx;
+				strnfmt(a->advice, 80, "Hunt %s -- the dungeon's guardian.",
+				        r_name + r_info[boss->r_idx].name);
+				return;
+			}
+
+			/* Boss dead: make sure its quest drop is in the bag BEFORE the
+			 * "cleared" recall below -- no detour radius for the point of the
+			 * quest. (Pack full: leave it, like any other loot.) */
+			if (!full && !boss)
+			{
+				object_type *drop = autoplay_find_boss_drop();
+				if (drop && autoplay_can_reach_hook(drop->iy, drop->ix, real_walkable_clear))
+				{
+					a->type = AP_DELVE; a->y = drop->iy; a->x = drop->ix;
+					strcpy(a->advice, "Fetch the guardian's drop.");
+					return;
+				}
+			}
+		}
+
 		if ((here == FEAT_MORE) || (here == FEAT_WAY_MORE))
 		{
 			a->type = AP_DESCEND;
@@ -8081,6 +8216,7 @@ static void autoplay_perform(autoplay_action *a)
 	case AP_FIGHT:    (void)autoplay_step_towards(a->y, a->x, a->pickup); break;
 	case AP_EXPLORE:  (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, explore_walkable_clear); break;
 	case AP_DELVE:    (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, real_walkable_clear); break;
+	case AP_HUNT:     (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, travel_walkable_real); break;
 	case AP_GOSTAIR:  (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, explore_walkable_clear); break;
 	case AP_DESCEND:  autoplay_descend(); break;
 	case AP_ASCEND:   autoplay_ascend(); break;
@@ -8253,6 +8389,7 @@ void do_cmd_autoplay(void)
 	autoplay_clear_stuck();
 	ap_loop_n = ap_loop_head = 0; ap_loop_ly = ap_loop_lx = -1;
 	ap_loop_strikes = 0; ap_force_unstick = FALSE;
+	ap_boss_postpone_dn = -1; ap_boss_postpone_lev = 0;   /* fresh run: retry bosses */
 	/* (E1) loot-detour radii are tunable from Lua too. */
 	explore_gold_radius = autoplay_cfg("loot_radius", 5);
 	explore_item_radius = autoplay_cfg("item_radius", 5);

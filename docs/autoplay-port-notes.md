@@ -337,8 +337,10 @@ se queda permanentemente débil. Detalles:
     `AP_RECALL` al pueblo (o `AP_WAIT` si recall ya pendiente) en vez de hacer scum
     eterno. Si el objetivo sigue siendo este dungeon → cae al scum (regenera para
     hallar bajada).
-- **Completitud**: se aproxima por `max_dlv[dungeon] >= depth` (tocó fondo ≈ hecho).
-  NO comprueba que el `FINAL_GUARDIAN` esté muerto (mejora futura: `r_info[guard].max_num==0`).
+- **Completitud**: `autoplay_dungeon_done(dn,tgt)` — con `FINAL_GUARDIAN` la mazmorra
+  está hecha solo con el **guardián muerto** (`r_info[g].max_num==0`); sin guardián
+  (la espina PRINCIPAL), por profundidad (`max_dlv >= tgt`). `autoplay_guardian_ok(g)`
+  salta de la ruta un boss fuera de liga (nivel > plev+5, o paralizador sin Free Action).
 - **OJO porting**: `autoplay.lua` es nuevo (sin conflicto). `call_lua` soporta múltiples
   retornos (`ret="ddd"`, cada arg `s32b*`). En LP64+L64 `s32b==int`. Probar con
   `autoplay_lua_ok()` antes (peta si falta la global).
@@ -431,8 +433,32 @@ Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
     compone). Así un bot bien armado pelea más y uno frágil huye más.
   - *Pendiente*: power por-efecto exacto (hoy HURT=60 / resto=15 aproximado); resist de
     hechizos no-elementales.
+- **(BOSS) Cazar al FINAL_GUARDIAN y recoger su botín — HECHO**. El objetivo del bot ya no
+  es "tocar fondo" sino **completar la mazmorra**: matar al guardián y embolsarse el
+  `FINAL_ARTIFACT`/`FINAL_OBJECT`. Sin spoilers externos: `d_info.txt` ES el spoiler
+  (`FINAL_GUARDIAN_x`/`FINAL_OBJECT_x`), y `generate.c` coloca al guardián en el nivel
+  `maxdepth` **con el botín en su inventario** (cae al suelo al morir). Piezas (cmd1.c):
+  - Helpers: `autoplay_boss_level()` (¿fondo de mazmorra con guardián vivo?),
+    `autoplay_is_objective_guardian(m)`, `autoplay_find_guardian()` (escaneo de `m_list`,
+    map-cheat coherente con el explorador L3), `autoplay_find_boss_drop()` (escaneo de
+    `o_list` por `name1==final_artifact` / `k_idx==final_object` en el suelo).
+  - **Paso 10b (HUNT)** en `autoplay_decide`, tras agotar explore y antes de las escaleras:
+    en el boss level con todo explorado → `AP_HUNT` hacia el guardián (re-target cada
+    turno, hook `travel_walkable_real`: bump = ataque; probe `autoplay_can_reach_hook`
+    antes — si inalcanzable, cae al sweep de secretas / scum, que regenera nivel y boss).
+    Boss muerto → "Fetch the guardian's drop": `AP_DELVE` al botín **sin radio de detour**
+    (si no, el recall de "Cleared" lo abandonaría); se salta con mochila llena.
+  - **Exenciones de combate**: `autoplay_too_dangerous` devuelve FALSE para el
+    guardián-objetivo (la ruta ya lo calibró con `guardian_ok`; Lua `autoplay_avoid`
+    conserva la última palabra); el give-up de `chase_turns` (15) no aplica al boss
+    (una pelea de boss dura más; el loop-tracker sigue cubriendo el atasco real).
+  - **Retirada con memoria**: si el loop-tracker fuerza el bail (`ap_force_unstick` →
+    recall) en un boss level, se apunta `ap_boss_postpone_dn/lev` (= plev +
+    `boss_retry_levels`, knob Lua, def 5) y `autoplay_objective` salta esa mazmorra
+    hasta ser más fuerte — sin esto la ruta re-elegía el mismo boss en bucle. Un solo
+    slot (basta para romper el re-pick inmediato); se resetea al arrancar autoplay.
+  - **Fuera de alcance**: el endgame real (Anillo/Sauron/Morgoth) va por quests/plots
+    (`q_*.c`), no por `FINAL_GUARDIAN` — fase aparte.
 - Afinar: umbrales de resupply/compra; **gates `plev` de la ruta** (data en `autoplay.lua`,
   con partidas reales).
-- Completitud de quest por **muerte del guardián** (`r_info[FINAL_GUARDIAN].max_num==0`) en vez
-  de "tocó fondo"; coger el `FINAL_ARTIFACT`/`FINAL_OBJECT` concreto antes de salir.
 - Gates `plev` de la ruta = estimaciones; afinar con partidas reales (el bot melee-only es frágil).
