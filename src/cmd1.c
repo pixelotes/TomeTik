@@ -5370,6 +5370,79 @@ void click_act_step(void)
  * player over walkable known grids returns the closest such grid (and proves it
  * is reachable in one pass). Returns TRUE and fills (*gy,*gx) if one exists.
  */
+/* (F5) Best loot value on (y,x) split by kind, mirroring cell_has_*'s rules
+ * (marked only, no corpses/skeletons/burnt lights/worthless). Gold reports the
+ * pile size, items their sale value; *has_ammo flags recoverable missiles. */
+static void autoplay_cell_loot_value(int y, int x, s32b *gold_v, s32b *item_v,
+                                     bool *has_ammo)
+{
+	s16b this_o_idx, next_o_idx;
+
+	*gold_v = *item_v = 0;
+	*has_ammo = FALSE;
+
+	for (this_o_idx = cave[y][x].o_idx; this_o_idx; this_o_idx = next_o_idx)
+	{
+		object_type *o_ptr = &o_list[this_o_idx];
+		s32b v;
+
+		next_o_idx = o_ptr->next_o_idx;
+		if (!o_ptr->marked) continue;
+		if (o_ptr->tval == TV_GOLD)
+		{
+			if (o_ptr->pval > *gold_v) *gold_v = o_ptr->pval;
+			continue;
+		}
+		if ((o_ptr->tval == TV_CORPSE) || (o_ptr->tval == TV_SKELETON)) continue;
+		if ((o_ptr->tval == TV_LITE) &&
+		                ((o_ptr->sval == SV_LITE_TORCH) || (o_ptr->sval == SV_LITE_LANTERN)) &&
+		                (o_ptr->timeout <= 0)) continue;
+		v = object_value(o_ptr);
+		if (v <= 0) continue;
+		if ((o_ptr->tval == TV_SHOT) || (o_ptr->tval == TV_ARROW) ||
+		                (o_ptr->tval == TV_BOLT)) *has_ammo = TRUE;
+		if (v > *item_v) *item_v = v;
+	}
+}
+
+/* (F5) Detour radius the loot on (y,x) justifies for the BOT: junk below
+ * junk_value earns none ("fideua-grade"), ordinary finds the base radius,
+ * good/rich ones 2x/3x. Gold is always worth it (no slot, no weight) and our
+ * own fired ammo keeps its long recovery radius even with a full pack.
+ * (Ctrl-E auto-explore keeps its simple fixed radii -- this is bot policy.) */
+/* Value tiers, cached from Lua once per autoplay run (do_cmd_autoplay): this
+ * runs inside the per-turn BFS, one call_lua per cell would crawl. */
+static int ap_junk_value = 15;
+static int ap_good_value = 50;
+static int ap_rich_value = 200;
+
+static int autoplay_loot_radius_for(int y, int x)
+{
+	s32b gold_v = 0, item_v = 0;
+	bool has_ammo = FALSE;
+	int r = 0, jr;
+
+	autoplay_cell_loot_value(y, x, &gold_v, &item_v, &has_ammo);
+
+	if (gold_v > 0)
+		r = explore_gold_radius *
+		    ((gold_v >= ap_rich_value) ? 3 : (gold_v >= ap_good_value) ? 2 : 1);
+
+	if (!explore_no_items && (item_v >= ap_junk_value))
+	{
+		jr = explore_item_radius *
+		     ((item_v >= ap_rich_value) ? 3 : (item_v >= ap_good_value) ? 2 : 1);
+		if (jr > r) r = jr;
+	}
+
+	if (has_ammo)
+	{
+		jr = explore_item_radius * 2;
+		if (jr > r) r = jr;
+	}
+	return (r);
+}
+
 static int explore_cell_interest(int y, int x, int dist)
 {
 	static const int dy8[8] = { -1, 1, 0, 0, -1, -1, 1, 1 };
@@ -5663,6 +5736,8 @@ static int  ap_stuck_y = -1, ap_stuck_x = -1, ap_stuck_count = 0;
 static void autoplay_clear_stuck(void) { ap_stuck_y = ap_stuck_x = -1; ap_stuck_count = 0; }
 
 static bool autoplay_too_dangerous(monster_type *m);   /* fwd: threat verdict */
+static int autoplay_monster_danger(monster_type *m);   /* fwd: damage/turn model */
+static int ap_trash_levels = 10;   /* (F6) cached "trash_levels" knob, see below */
 
 /* A foe not worth chasing: an erratic bouncer (fruit bats etc. -- RAND_25/50,
  * impossible to corner) or something that simply can't hurt us (no melee blows
@@ -5680,6 +5755,17 @@ static bool autoplay_low_value_foe(monster_type *m)
 		if (r_ptr->blow[b].method) { has_blow = TRUE; break; }
 
 	if (!has_blow && !r_ptr->freq_inate && !r_ptr->freq_spell) return (TRUE);
+
+	/* (F6) Trivial trash ("fideua-grade"): far below our level AND incapable of
+	 * denting us -- not worth turns, ammo, or a detour even when it stands its
+	 * ground. (Still swatted if it wanders adjacent, like the other low-value
+	 * cases; XP from something this far down is negligible, so no grinding
+	 * value is lost. ap_trash_levels is cached from Lua at autoplay start:
+	 * this runs per monster per turn.) */
+	if (((r_ptr->level + ap_trash_levels) <= p_ptr->lev) &&
+	                (autoplay_monster_danger(m) * 25 < p_ptr->mhp))
+		return (TRUE);
+
 	return (FALSE);
 }
 
@@ -6603,13 +6689,11 @@ static bool autoplay_explore_target(int *gy, int *gx, int *kind,
 		int cur = queue[head++], cy = cur / cur_wid, cx = cur % cur_wid, d;
 		int cd = dist[cur];
 
-		/* Seen loot within its detour radius (cell_has_* already require the
-		 * object be `marked`, i.e. actually seen) -- the closest such cell wins
-		 * because the flood is in distance order. */
-		if (((explore_gold_radius > 0) && (cd <= explore_gold_radius) && cell_has_gold(cy, cx)) ||
-		    (!explore_no_items && (explore_item_radius > 0) && (cd <= explore_item_radius) &&
-		     cell_has_item(cy, cx)) ||
-		    ((explore_item_radius > 0) && (cd <= explore_item_radius * 2) && cell_has_ammo(cy, cx)))
+		/* Seen loot within its VALUE-scaled detour radius ((F5): junk earns no
+		 * detour, rich finds up to 3x) -- the closest such cell wins because
+		 * the flood is in distance order. Never our own cell: standing-on loot
+		 * is the step code's business, and a zero-length leg would stall. */
+		if ((cur != start) && (cd <= autoplay_loot_radius_for(cy, cx)))
 		{
 			*gy = cy; *gx = cx; *kind = AP_XPLORE_LOOT; found = TRUE; break;
 		}
@@ -7285,6 +7369,52 @@ static bool autoplay_buy_best_gear(int town, int store)
 	return (FALSE);
 }
 
+/* (F5) Fill an EMPTY armour slot with the cheapest piece this shop stocks.
+ * Early survival is bought by the slot, not the price tag: five cheap pieces
+ * (helm, shield, gloves, boots, cloak) beat one fancy upgrade. Cheapest-first
+ * so one trip dresses as many slots as the purse allows. One buy per call. */
+static bool autoplay_buy_armor_fill(int town, int store)
+{
+	store_type *st = &town_info[town].store[store];
+	int i, best = -1, reserve = autoplay_cfg("min_gold", 100);
+	s32b best_price = 0;
+	char nm[80];
+
+	for (i = 0; i < st->stock_num; i++)
+	{
+		object_type *o_ptr = &st->stock[i];
+		int slot = wield_slot(o_ptr);
+		s32b price;
+
+		switch (slot)
+		{
+		case INVEN_BODY: case INVEN_OUTER: case INVEN_ARM:
+		case INVEN_HEAD: case INVEN_HANDS: case INVEN_FEET:
+			break;
+		default:
+			continue;
+		}
+		if (p_ptr->inventory[slot].k_idx) continue;          /* slot already dressed */
+		if (!autoplay_slot_autoequippable(slot)) continue;
+		if (cursed_p(o_ptr)) continue;
+
+		price = store_bot_price(town, store, i);
+		if ((price <= 0) || (p_ptr->au - price < reserve)) continue;
+
+		if ((best < 0) || (price < best_price)) { best = i; best_price = price; }
+	}
+
+	if (best < 0) return (FALSE);
+
+	object_desc(nm, &st->stock[best], TRUE, 1);
+	if (store_bot_buy(town, store, best, 1) > 0)
+	{
+		msg_format("Autoplay: bought %s for an empty slot.", nm);
+		return (TRUE);
+	}
+	return (FALSE);
+}
+
 static void autoplay_shop_buy_needs(int town, int store)
 {
 	object_type *lite = &p_ptr->inventory[INVEN_LITE];
@@ -7340,9 +7470,13 @@ static void autoplay_shop_buy_needs(int town, int store)
 			                 autoplay_inv_count(p_ptr->tval_ammo, -1));
 	}
 
-	/* With consumables covered, spend surplus gold on the best gear upgrades this
-	 * shop has (weapons/armour/etc.), keeping a reserve. Loop to grab several;
-	 * the post-shopping equip pass then wields them. */
+	/* (F5) Dress empty armour slots first (cheapest pieces, most AC per coin),
+	 * THEN spend what's left on the best single upgrades this shop has. The
+	 * post-shopping equip pass wields everything. */
+	{
+		int guard = 0;
+		while ((guard++ < 6) && autoplay_buy_armor_fill(town, store)) ;
+	}
 	{
 		int guard = 0;
 		while ((guard++ < 8) && autoplay_buy_best_gear(town, store)) ;
@@ -7542,6 +7676,7 @@ static bool autoplay_needs_resupply(void)
 #define AP_DETECT   24  /* use a detection device (item; kind .y)   */
 #define AP_HUNT     25  /* head for the dungeon's guardian at (y,x) */
 #define AP_FALLBACK 26  /* retreat to the choke point at (y,x)      */
+#define AP_DROPJUNK 27  /* drop pack item (item) to free a slot     */
 
 typedef struct autoplay_action autoplay_action;
 struct autoplay_action
@@ -8254,6 +8389,34 @@ static void autoplay_decide(autoplay_action *a)
 			}
 		}
 
+		/* 7d. (F5) Pack full: drop the cheapest piece of junk to free a slot --
+		 * hauling fideua-grade trash costs us every valuable find we pass, and
+		 * the junk gate in the loot pass keeps us from re-targeting it. Only
+		 * what's left after this still justifies the sell trip (step 8). */
+		if (full)
+		{
+			int j, worst = -1;
+			s32b wval = ap_junk_value;
+
+			for (j = 0; j < INVEN_PACK; j++)
+			{
+				object_type *o_ptr = &p_ptr->inventory[j];
+				s32b v;
+				if (!o_ptr->k_idx) continue;
+				if (autoplay_keep_item(o_ptr)) continue;
+				v = object_value(o_ptr);
+				if (v < wval) { wval = v; worst = j; }
+			}
+			if (worst >= 0)
+			{
+				char nm[80];
+				object_desc(nm, &p_ptr->inventory[worst], TRUE, 3);
+				a->type = AP_DROPJUNK; a->item = worst;
+				strnfmt(a->advice, 80, "Drop %s -- junk crowding a full pack.", nm);
+				return;
+			}
+		}
+
 		/* 8. Out of supplies: recall back to town (no progress lost). */
 		if ((dun_level > 0) && (p_ptr->word_recall == 0) && autoplay_needs_resupply())
 		{
@@ -8496,6 +8659,10 @@ static void autoplay_perform(autoplay_action *a)
 	case AP_DELVE:    (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, real_walkable_clear); break;
 	case AP_HUNT:     (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, travel_walkable_real); break;
 	case AP_FALLBACK: (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, explore_walkable_clear); break;
+	case AP_DROPJUNK:
+		energy_use = 50;
+		inven_drop(a->item, p_ptr->inventory[a->item].number, p_ptr->py, p_ptr->px, FALSE);
+		break;
 	case AP_GOSTAIR:  (void)autoplay_step_towards_hook(a->y, a->x, a->pickup, explore_walkable_clear); break;
 	case AP_DESCEND:  autoplay_descend(); break;
 	case AP_ASCEND:   autoplay_ascend(); break;
@@ -8672,6 +8839,12 @@ void do_cmd_autoplay(void)
 	/* (E1) loot-detour radii are tunable from Lua too. */
 	explore_gold_radius = autoplay_cfg("loot_radius", 5);
 	explore_item_radius = autoplay_cfg("item_radius", 5);
+	/* (F5) loot value tiers, cached for the per-cell BFS check. */
+	ap_junk_value = autoplay_cfg("junk_value", 15);
+	ap_good_value = autoplay_cfg("good_value", 50);
+	ap_rich_value = autoplay_cfg("rich_value", 200);
+	/* (F6) trash threshold, cached for the per-monster scans. */
+	ap_trash_levels = autoplay_cfg("trash_levels", 10);
 	p_ptr->redraw |= (PR_STATE);
 	msg_print("Autoplay started (press any key to stop).");
 }

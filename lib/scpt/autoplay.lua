@@ -27,6 +27,13 @@ autoplay_config_table =
 	speed_at          = 3,    -- quaff Speed vs a foe that could kill in this many turns
 	loot_radius       = 5,    -- detour this far for seen gold
 	item_radius       = 5,    -- detour this far for a seen item
+	-- (F5) loot value tiers: junk below junk_value earns NO detour (and gets
+	-- dropped from a full pack); good/rich finds stretch the radius 2x/3x.
+	junk_value        = 15,
+	good_value        = 50,
+	rich_value        = 200,
+	-- (F6) ignore hostiles this many levels below us that can't really hurt us.
+	trash_levels      = 10,
 	-- threat model (real danger = expected damage/turn):
 	danger_turns      = 2,    -- avoid meleeing a foe that could kill us in this
 	                          --   many turns (single-monster "too dangerous")

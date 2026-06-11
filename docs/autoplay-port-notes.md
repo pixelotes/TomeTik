@@ -511,10 +511,33 @@ Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
     de `check_hit` de melee1.c (HURT/SHATTER 60, UN_BONUS 20, UN_POWER 15,
     elementales/CONF/TERRIFY 10, drains/EXP 5, BLIND/PARALYZE 2, resto 0) en vez
     del plano HURT=60/resto=15 — el acierto estimado coincide con el del juego.
-- *Pendiente del plan de inteligencia (2026-06-11)*: F5 economía (loot por valor,
-  mochila llena → vender/triaje, compras v2: slots de armadura vacíos, munición a
-  granel); F6 pulir ignore de morralla (siempre-huidizos, triviales por plev);
-  F7 telemetría (post-mortem de muertes + últimas decisiones del Oráculo).
+- **(F5) Economía — HECHO.** Tres piezas:
+  - **Loot por valor**: `autoplay_cell_loot_value` (espejo de las reglas de
+    `cell_has_*`) + `autoplay_loot_radius_for` — el radio de desvío del BOT escala
+    con el valor: morralla < `junk_value` (15) = radio 0 (ni se desvía), normal =
+    radio base, ≥ `good_value` (50) = 2x, ≥ `rich_value` (200) = 3x. Oro siempre
+    interesa (sin slot ni peso); munición propia conserva su 2x con mochila llena.
+    El check del BFS de `autoplay_explore_target` usa esto (y excluye la celda
+    propia: una pierna de longitud 0 estancaba). **Los knobs se cachean** en
+    estáticos al arrancar autoplay (`ap_junk/good/rich_value`): una call_lua por
+    celda del flood sería un crawl. Ctrl-E conserva sus radios fijos.
+  - **Mochila llena → soltar morralla**: paso 7d (`AP_DROPJUNK`, gated `!enemy`):
+    suelta el stack no-keep más barato (< `junk_value`); el gate de valor del loot
+    evita re-apuntarlo. Lo que quede tras esto sí justifica el viaje de venta
+    (`autoplay_needs_resupply` ya disparaba con pack lleno — eso ya existía).
+  - **Compras v2**: `autoplay_buy_armor_fill` viste los **slots de armadura
+    VACÍOS** (body/cloak/shield/head/hands/feet) con la pieza más barata de la
+    tienda ANTES del pase de mejor-upgrade (`buy_best_gear` ya cubría slots
+    vacíos pero por mayor ganancia → un arma cara podía comerse el oro de 5
+    piezas de AC). Cheapest-first, respeta `min_gold`.
+- **(F6) Morralla trivial — HECHO.** `autoplay_low_value_foe` añade el caso
+  "fideuá": hostil ≥ `trash_levels` (10, cacheado en `ap_trash_levels`) niveles
+  por debajo Y con `danger*25 < mhp` → ignorado (ni perseguir, ni munición, ni
+  desvío; se le pega si se pone adyacente, como el resto de low-value). XP de
+  algo tan bajo es despreciable, no afecta al grind de F1.
+- *Pendiente del plan de inteligencia (2026-06-11)*: F7 telemetría (post-mortem de
+  muertes + últimas decisiones del Oráculo). Ideas v2: triaje de mochila contra el
+  valor del loot objetivo; munición a granel ya cubierta (want_ammo).
 - Afinar: umbrales de resupply/compra; **gates `plev` de la ruta** (data en `autoplay.lua`,
   con partidas reales).
 - Gates `plev` de la ruta = estimaciones; afinar con partidas reales (el bot melee-only es frágil).
