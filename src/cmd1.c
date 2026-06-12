@@ -6649,6 +6649,26 @@ static bool autoplay_step_towards(int gy, int gx, bool do_pickup)
 	return (autoplay_step_towards_hook(gy, gx, do_pickup, explore_walkable_hook));
 }
 
+/* Does (y,x) have any neighbour grid we have never MEMORIZED (no CAVE_MARK)?
+ * Seeing a floor cell from afar doesn't light the wall beyond it, so dead-end
+ * corridors were left with their end wall undrawn -- the map looked
+ * half-explored. Walking onto such a cell puts the unmarked grid in torch
+ * range and note_spot() fills it in. */
+static bool autoplay_unmarked_beside(int y, int x)
+{
+	static const int dy8[8] = { -1, 1, 0, 0, -1, -1, 1, 1 };
+	static const int dx8[8] = { 0, 0, -1, 1, -1, 1, -1, 1 };
+	int d;
+
+	for (d = 0; d < 8; d++)
+	{
+		int ny = y + dy8[d], nx = x + dx8[d];
+		if ((ny < 0) || (ny >= cur_hgt) || (nx < 0) || (nx >= cur_wid)) continue;
+		if (!(cave[ny][nx].info & CAVE_MARK)) return (TRUE);
+	}
+	return (FALSE);
+}
+
 /* (L3) Unified exploration target for the bot: ONE breadth-first flood over real
  * terrain (ground truth) returns the nearest reachable cell worth heading to --
  * either seen LOOT within its detour radius, or an as-yet-unseen floor cell to
@@ -6698,9 +6718,13 @@ static bool autoplay_explore_target(int *gy, int *gx, int *kind,
 			*gy = cy; *gx = cx; *kind = AP_XPLORE_LOOT; found = TRUE; break;
 		}
 
-		/* An unseen real-floor cell we can reach: delve toward it (this is the
-		 * frontier, expressed over real terrain instead of seen-adjacency). */
-		if ((cur != start) && !explore_is_seen(cy, cx))
+		/* An unseen real-floor cell we can reach (the frontier, expressed over
+		 * real terrain) -- or a seen one with an UNMARKED grid beside it (the
+		 * undrawn dead-end wall): delve toward it. The second case walks the
+		 * last stretch of a corridor so the map gets fully drawn instead of
+		 * stopping as soon as the floor was glimpsed from afar. */
+		if ((cur != start) &&
+		                (!explore_is_seen(cy, cx) || autoplay_unmarked_beside(cy, cx)))
 		{
 			*gy = cy; *gx = cx; *kind = AP_XPLORE_DELVE; found = TRUE; break;
 		}
@@ -7898,6 +7922,27 @@ static bool autoplay_find_chokepoint(int *cy, int *cx)
 	return (FALSE);
 }
 
+/* Boxed in: every adjacent grid is wall or occupied -- there is no step to
+ * take at all. (Friendly occupants count as blocked too: a swap never opens
+ * an escape, it just trades places inside the ring.) */
+static bool autoplay_boxed_in(void)
+{
+	int d;
+
+	for (d = 1; d <= 9; d++)
+	{
+		int ny, nx;
+		if (d == 5) continue;
+		ny = p_ptr->py + ddy[d];
+		nx = p_ptr->px + ddx[d];
+		if (!in_bounds2(ny, nx)) continue;
+		if (!cave_floor_bold(ny, nx)) continue;
+		if (cave[ny][nx].m_idx) continue;
+		return (FALSE);                       /* a free step exists */
+	}
+	return (TRUE);
+}
+
 /* Read-only: is a fleeing step (away from (ty,tx), onto empty known floor)
  * available right now? */
 static bool autoplay_can_flee(int ty, int tx)
@@ -8108,6 +8153,47 @@ static void autoplay_decide(autoplay_action *a)
 						        "A pack of %d too fast to outrun -- hold a choke point.", foes);
 						return;
 					}
+				}
+			}
+
+			/* BOXED IN by the ring (hyenas / worm masses): every neighbour is
+			 * wall or body. The old answer was "do nothing" -- once each ringer
+			 * was individually vetoed as too dangerous, no enemy was returned
+			 * and the bot froze while being clawed to death. Schedule the
+			 * extraction NOW, then carve an exit through the WEAKEST adjacent
+			 * hostile: no danger veto means anything inside a wall of teeth.
+			 * (The escape scroll was already tried above in this ladder.) */
+			if (autoplay_boxed_in())
+			{
+				monster_type *weak = NULL;
+				int d;
+
+				if (p_ptr->word_recall == 0)
+				{
+					a->type = AP_RECALL;
+					strcpy(a->advice, "Boxed in -- schedule a recall out!");
+					return;
+				}
+
+				for (d = 1; d <= 9; d++)
+				{
+					int ny, nx, mi;
+					if (d == 5) continue;
+					ny = p_ptr->py + ddy[d];
+					nx = p_ptr->px + ddx[d];
+					if (!in_bounds2(ny, nx)) continue;
+					mi = cave[ny][nx].m_idx;
+					if (!mi) continue;
+					if (m_list[mi].status != MSTATUS_ENEMY) continue;
+					if (!weak || (m_list[mi].hp < weak->hp)) weak = &m_list[mi];
+				}
+				if (weak)
+				{
+					char nm[80];
+					monster_desc(nm, weak, 0);
+					a->type = AP_FIGHT; a->y = weak->fy; a->x = weak->fx;
+					strnfmt(a->advice, 80, "Boxed in -- carve an exit through %s!", nm);
+					return;
 				}
 			}
 			/* Cornered or holding a choke point: fall through to ranged/melee. */
