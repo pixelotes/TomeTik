@@ -535,6 +535,29 @@ Cada uno cherry-pickeado a main/iso-tiles/2.3.5/2.3.11:
   por debajo Y con `danger*25 < mhp` → ignorado (ni perseguir, ni munición, ni
   desvío; se le pega si se pone adyacente, como el resto de low-value). XP de
   algo tan bajo es despreciable, no afecta al grind de F1.
+- **(Menwan) WoR como escape de emergencia — HECHO.** Menwan murió en L11 a plev 8
+  con un WoR y 4 Phase Doors sin leer. Paso 1c1b en `autoplay_decide` (antes de la
+  lógica de packs, solo si `word_recall == 0`): leer Word of Recall cuando (a)
+  crítico (`heal_big_at`) y sin curas — la pelea está perdida, programar la
+  extracción y que el ladder aguante los 15-35 turnos — o (b) el nivel queda grande
+  (`plev < dun_level - too_deep_slack`, knob def 0; p.ej. tras un trapdoor, que
+  esquiva el gate de buceo porque no usa escaleras). Además, en desesperado con el
+  enemigo PEGADO (`ed <= 1`) el escape scroll va ANTES que el flee a pie (huir
+  con contacto regalaba un zarpazo por paso).
+- **(Cerco/dead-ends) — HECHO.** Dos fixes de feedback de juego real:
+  - **Dead-ends sin dibujar**: ver el suelo de lejos no ilumina la pared de detrás
+    → los finales de pasillo quedaban como agujero negro en el mapa (parecía a
+    medio explorar). El objetivo de delve de `autoplay_explore_target` incluye
+    ahora suelo visto con algún grid vecino sin `CAVE_MARK`
+    (`autoplay_unmarked_beside`): el bot recorre el último tramo y `note_spot`
+    rellena la pared.
+  - **Cerco de packs (hienas/worm masses)**: rodeado sin casilla libre y con cada
+    miembro del anillo vetado por `too_dangerous`, el bot se quedaba QUIETO
+    recibiendo zarpazos (sin objetivo de melee y sin movimiento). Cola nueva del
+    tier letal: `autoplay_boxed_in()` (todos los vecinos muro/cuerpo) → programar
+    recall si no hubo escape scroll (ya probado antes en el ladder) → **abrirse
+    paso peleando contra el hostil adyacente MÁS DÉBIL**, ignorando el veto de
+    peligro (dentro del anillo no significa nada).
 - *Pendiente del plan de inteligencia (2026-06-11)*: F7 telemetría (post-mortem de
   muertes + últimas decisiones del Oráculo). Ideas v2: triaje de mochila contra el
   valor del loot objetivo; munición a granel ya cubierta (want_ammo).
