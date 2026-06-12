@@ -7,3 +7,4 @@ src/lua/*.o
 src/tolua
 *.bak
 .DS_Store
+.art/

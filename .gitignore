@@ -29,3 +29,5 @@ lib/user/iso_coverage.txt
 # Varios
 *.bak
 .DS_Store
+ToME-SX/
+.art/
