@@ -1690,11 +1690,16 @@ static void roff_top(int r_idx, int ego)
 	 * Start TomeTik 0.3
 	 */
 	if (use_zoom) Term_addstr( -1, TERM_WHITE, ":");
+	/* The optional char is the graphic tile (x_char/x_attr). In graphics mode its
+	 * attr carries the high bit (0x80) and the char is a tile index, so printing
+	 * it in a TEXT window (the recall sub-window) renders as garbage. Skip it then
+	 * -- just close the line -- like OmnibandTk does. Only show it when it is a
+	 * real, alternative ASCII character (no graphics / a remapped glyph). */
+	else if (a2 & 0x80) Term_addstr( -1, TERM_WHITE, ":");
 	else
 	{
 	Term_addstr( -1, TERM_WHITE, "/('");
 	Term_addch(a2, c2);
-	if (use_bigtile && (a2 & 0x80)) Term_addch(255, 255);
 	Term_addstr( -1, TERM_WHITE, "'):");
 	}
 	/*
