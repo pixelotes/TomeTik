@@ -8009,6 +8009,29 @@ static void autoplay_decide(autoplay_action *a)
 		return;
 	}
 
+	/* 1c1b. Emergency extraction: schedule the recall NOW and let the escape
+	 * ladder keep us alive the 15-35 turns until it yanks us out. Triggers:
+	 * (a) critically hurt with no cures left -- this fight is already lost; or
+	 * (b) the floor plainly outclasses us (a trapdoor fall can drop us well
+	 * past the dive gate): raw depth above our character level. Reading the
+	 * scroll costs one turn; autoplay_start_recall uses a carried WoR first.
+	 * (Menwan the Soldier died on L11 at plev 8 with a WoR in the pack.) */
+	if ((dun_level > 0) && (p_ptr->word_recall == 0))
+	{
+		if ((chp * 100 <= mhp * heal_big) && (autoplay_find_heal(TRUE) < 0))
+		{
+			a->type = AP_RECALL;
+			strcpy(a->advice, "Critical and out of cures -- read Word of Recall!");
+			return;
+		}
+		if (p_ptr->lev < dun_level - autoplay_cfg("too_deep_slack", 0))
+		{
+			a->type = AP_RECALL;
+			strcpy(a->advice, "This depth outclasses us -- recall out.");
+			return;
+		}
+	}
+
 	/* 1c2. Overwhelmed by a PACK: if the combined danger/turn of the nearby foes
 	 * is lethal and there is more than one, break away before they surround and
 	 * grind us down (the jackal / spider-pack killer). Escape ladder: stairs we
@@ -8214,8 +8237,24 @@ static void autoplay_decide(autoplay_action *a)
 			}
 		}
 
+		/* Desperate with the foe IN CONTACT: a Phase Door breaks the clinch
+		 * instantly -- stepping away on foot just hands out a free claw (Menwan
+		 * died with 4 of these unread). Reading needs eyes, so not blind or
+		 * confused (those got a cure shot at step 1b). Phase Door is preferred
+		 * over Teleport in autoplay_find_escape. */
+		if (desperate && (ed <= 1) && !p_ptr->blind && !p_ptr->confused)
+		{
+			int s = autoplay_find_escape();
+			if (s >= 0)
+			{
+				a->type = AP_ESCAPE; a->item = s;
+				strnfmt(a->advice, 80, "Read a scroll to escape %s.", nm);
+				return;
+			}
+		}
+
 		/* (F3) Only flee on foot from a foe we can actually outrun: running from
-		 * something faster hands it free attacks -- the escape scroll below (or
+		 * something faster hands it free attacks -- the escape scroll (or
 		 * standing our ground) beats that. */
 		if (desperate && (enemy->mspeed <= p_ptr->pspeed) &&
 		                autoplay_can_flee(enemy->fy, enemy->fx))
@@ -8225,9 +8264,7 @@ static void autoplay_decide(autoplay_action *a)
 			return;
 		}
 
-		/* Desperate and cornered (can't step away): blink / teleport out. Reading
-		 * needs eyes, so only when not blind/confused (which got a cure shot at
-		 * step 1b). Phase Door is preferred over Teleport in autoplay_find_escape. */
+		/* Desperate and cornered (can't step away, foe at range): blink out. */
 		if (desperate && !p_ptr->blind && !p_ptr->confused)
 		{
 			int s = autoplay_find_escape();

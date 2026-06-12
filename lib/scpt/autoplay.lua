@@ -48,6 +48,9 @@ autoplay_config_table =
 	-- depth pacing (F1): don't take stairs DOWN unless plev >= next_depth + this.
 	-- Underleveled = the dead-end scummer regenerates the CURRENT depth to grind.
 	dive_margin       = 3,
+	-- emergency recall when plev < depth - this (e.g. after a trapdoor fall);
+	-- 0 = bail as soon as the raw depth exceeds the character level.
+	too_deep_slack    = 0,
 	boss_retry_levels = 5,    -- after fleeing a FINAL_GUARDIAN level, retry the
 	                          --   dungeon once this many plevs stronger
 	-- skill-point spending on level-up (the bot earns 5 points/level):
